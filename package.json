@@ -1,0 +1,26 @@
+{
+  "name": "gpx-stabilizer",
+  "version": "0.0.1",
+  "description": "A nodejs GPX track stabilizer",
+  "main": "index.js",
+  "scripts": {
+    "test": "jest"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zordius/gpx-stabilizer.git"
+  },
+  "keywords": [
+    "gpx",
+    "stabilize"
+  ],
+  "author": "Zordius Chen",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/zordius/gpx-stabilizer/issues"
+  },
+  "homepage": "https://github.com/zordius/gpx-stabilizer#readme",
+  "dependencies": {
+    "gps-util": "^1.0.1"
+  }
+}
