@@ -104,20 +104,46 @@ const speedFilter = (trackpoints, speed, time, points) => {
   return result
 }
 
+const timeSlots = (trackpoints, time) => {
+  const result = []
+  let prev = trackpoints[0]
+  let start = prev.second
+
+  trackpoints.forEach(trackpoint => {
+    if (trackpoint.second - prev.second > time) {
+      const duration = trackpoint.second - start
+      if (duration > time) {
+        result.push({
+          start,
+          duration,
+          end: trackpoint.second
+        })
+      }
+      start = trackpoint.second
+    }
+    prev = trackpoint
+  })
+
+  return result
+}
+
 const firstPassCalc = (trackpoints) => {
   addSeconds(trackpoints)
   console.warn('Generate rough average...')
   const avgTracksR = movingWindowAvg(trackpoints, thresholds.roughWindow)
   console.warn('Generate fine average...')
   const avgTracksF = movingWindowAvg(trackpoints, thresholds.fineWindow)
-  console.warn('Generate speed filter...')
+  console.warn('Generate speed filterd...')
   const movingTrack = speedFilter(avgTracksF, thresholds.speed, thresholds.time, thresholds.points)
+  console.warn('Generate moving time slots...')
+  const movingTime = timeSlots(movingTrack, thresholds.time)
 
   return {
     trackpoints,
     avgTracksR,
     avgTracksF,
-    movingTrack
+    movingTrack,
+    movingTime
   }
 }
 
@@ -132,7 +158,7 @@ const generateGPX = key => meta => {
 const saveGpx = (meta) => {
   writeFileSync(`${file}.avg1.gpx`, meta.avgTracksRGPX)
   writeFileSync(`${file}.avg2.gpx`, meta.avgTracksFGPX)
-  writeFileSync(`${file}.final.gpx`, meta.movingTrackGPX)
+  writeFileSync(`${file}.speed.gpx`, meta.movingTrackGPX)
 }
 
 gpxParseFile(file)
