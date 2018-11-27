@@ -6,7 +6,7 @@ const gpsUtil = require('gps-util')
 const gpxParseFile = promisify(gpsUtil.gpxParseFile)
 const toGPX = promisify(gpsUtil.toGPX)
 
-const [ node, myname, file ] = process.argv
+const [ , myname, file ] = process.argv
 
 // Usage
 if (!file) {
