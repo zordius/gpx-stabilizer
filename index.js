@@ -17,10 +17,11 @@ Usage: ${myname} gpxfile
 }
 
 const thresholds = {
-  speed: 0.08,     // less then 8 cm in one second
+  speed: 1,        // minimal moving speed m/s
+  time: 10,        // minimal time leap second
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
-  roughWindow: 6,  // window size in seconds
+  roughWindow: 2,  // window size in seconds
   fineWindow: 30   // window size in seconds
 }
 
@@ -34,11 +35,21 @@ const addSeconds = trackpoints => trackpoints.forEach(trackpoint => addSecond(tr
 
 const addSpeed = (prev, trackpoint) => {
   const dis = gpsUtil.getDistance(prev.lng, prev.lat, trackpoint.lng, trackpoint.lat)
-  tracpoint.diff = dis
+  trackpoint.diff = dis
   if (trackpoint.speed === undefined) {
     const time = trackpoint.second - prev.second
     trackpoint.speed = time === 0 ? 0 : dis / time
   }
+}
+
+const getAvgPoint = points => {
+  const avg = gpsUtil.getMidPoint(points)
+
+  avg.ele = averageKey(points, 'ele')
+  avg.second = averageKey(points, 'second')
+  avg.time = new Date(avg.second * 1000)
+
+  return avg
 }
 
 const movingWindowAvg = (trackpoints, windowSize) => {
@@ -48,18 +59,42 @@ const movingWindowAvg = (trackpoints, windowSize) => {
   trackpoints.forEach((trackpoint) => {
     while (movingWindow.length && trackpoint.second - movingWindow[0].second > windowSize) {
       movingWindow.shift()
+      if (movingWindow.length % 2) {
+        const avg = getAvgPoint(movingWindow)
+        result.push(avg)
+      }
     }
-
     movingWindow.push(trackpoint)
-
-    const avg = gpsUtil.getMidPoint(movingWindow)
-    avg.ele = averageKey(movingWindow, 'ele')
-    avg.second = averageKey(movingWindow, 'second')
-    avg.time = new Date(avg.second * 1000)
-
+    const avg = getAvgPoint(movingWindow)
     result.push(avg)
   })
 
+  return result
+}
+
+const speedFilter = (trackpoints, speed, time) => {
+  const result = []
+  let prev = trackpoints[0]
+  let stopPoints = []
+  let isStop = false
+  trackpoints.forEach(trackpoint => {
+    addSpeed(prev, trackpoint)
+    if (trackpoint.speed > speed && trackpoint.second - prev.second < time) {
+      if (isStop) {
+        const stopPoint = getAvgPoint(stopPoints)
+        result.push(stopPoint)
+        isStop = false
+      }
+      result.push(trackpoint)
+    } else {
+      if (!isStop) {
+        stopPoints = []
+        isStop = true
+      }
+      stopPoints.push(trackpoint)
+    }
+    prev = trackpoint
+  })
   return result
 }
 
@@ -69,11 +104,14 @@ const firstPassCalc = (trackpoints) => {
   const avgTracksR = movingWindowAvg(trackpoints, thresholds.roughWindow)
   console.warn('Generate fine average...')
   const avgTracksF = movingWindowAvg(trackpoints, thresholds.fineWindow)
+  console.warn('Generate speed filter...')
+  const movingTrack = speedFilter(avgTracksF, thresholds.speed, thresholds.time)
 
   return {
     trackpoints,
     avgTracksR,
-    avgTracksF
+    avgTracksF,
+    movingTrack
   }
 }
 
@@ -88,20 +126,12 @@ const generateGPX = key => meta => {
 const saveGpx = (meta) => {
   writeFileSync(`${file}.avg1.gpx`, meta.avgTracksRGPX)
   writeFileSync(`${file}.avg2.gpx`, meta.avgTracksFGPX)
+  writeFileSync(`${file}.final.gpx`, meta.movingTrackGPX)
 }
-
-  /*
-    avgPoint.avg = avg
-    avgPoint.avgdiff = gpsUtil.getDistance(avg.lng, avg.lat, avgPoint.lng, avgPoint.lat)
-    if (avgPoint.avgdiff > thresholds.dis || Math.abs(avgPoint.ele - avg.ele) > thresholds.ele) {
-      avgPoint.invalid = true
-    }
-    prev = trackpoint
-  })
-  */
 
 gpxParseFile(file)
 .then(firstPassCalc)
 .then(generateGPX('avgTracksR'))
 .then(generateGPX('avgTracksF'))
+.then(generateGPX('movingTrack'))
 .then(saveGpx)
