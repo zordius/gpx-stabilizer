@@ -19,6 +19,7 @@ Usage: ${myname} gpxfile
 const thresholds = {
   speed: 1,        // minimal moving speed m/s
   time: 10,        // minimal time leap second
+  points: 8,       // minimal points in a moving time slot
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
   roughWindow: 2,  // window size in seconds
@@ -72,26 +73,31 @@ const movingWindowAvg = (trackpoints, windowSize) => {
   return result
 }
 
-const speedFilter = (trackpoints, speed, time) => {
+const speedFilter = (trackpoints, speed, time, points) => {
   const result = []
   let prev = trackpoints[0]
-  let stopPoints = []
   let isStop = false
+  let startPoints = 0
+
   trackpoints.forEach(trackpoint => {
     addSpeed(prev, trackpoint)
     if (trackpoint.speed > speed && trackpoint.second - prev.second < time) {
       if (isStop) {
-        const stopPoint = getAvgPoint(stopPoints)
-        result.push(stopPoint)
         isStop = false
+        startPoints = 0
       }
+      startPoints += 1
       result.push(trackpoint)
     } else {
       if (!isStop) {
-        stopPoints = []
+        if (startPoints < points) {
+          let I
+          for (I = 0;I < startPoints;I++) {
+            result.pop()
+          }
+        }
         isStop = true
       }
-      stopPoints.push(trackpoint)
     }
     prev = trackpoint
   })
@@ -105,7 +111,7 @@ const firstPassCalc = (trackpoints) => {
   console.warn('Generate fine average...')
   const avgTracksF = movingWindowAvg(trackpoints, thresholds.fineWindow)
   console.warn('Generate speed filter...')
-  const movingTrack = speedFilter(avgTracksF, thresholds.speed, thresholds.time)
+  const movingTrack = speedFilter(avgTracksF, thresholds.speed, thresholds.time, thresholds.points)
 
   return {
     trackpoints,
