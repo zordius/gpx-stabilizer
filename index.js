@@ -23,6 +23,7 @@ const thresholds = {
   duration: 15,    // minimal moving duration seconds
   dropdur: 40,     // minimal seconds to detect distance
   moveUp: 5,       // minimal ele change as moving up
+  moveUpDis: 100,  // minimal move up distance
   dropdis: 10,     // drop distance m
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
@@ -109,20 +110,21 @@ const timeSlots = (trackpoints, thresholds) => {
   trackpoints.forEach(trackpoint => {
     if (trackpoint.second - prev.second >= thresholds.leap) {
       const duration = prev.second - startPoint.second
+      const distance = gpsUtil.getDistance(startPoint.lng, startPoint.lat, prev.lng, prev.lat)
       let valid = duration > thresholds.duration
       if (duration < thresholds.dropdur) {
-        const dis = gpsUtil.getDistance(startPoint.lng, startPoint.lat, prev.lng, prev.lat)
-        if (dis < thresholds.dis) {
+        if (distance < thresholds.dis) {
           valid = false
         }
       }
       if (valid) {
         result.push({
           startPoint,
+          distance,
           endPoint: prev,
           minPoint,
           maxPoint,
-          moveUp: prev.ele - startPoint.ele > thresholds.moveUp,
+          moveUp: prev.ele - startPoint.ele > thresholds.moveUp && distance > thresholds.moveUpDis,
           start: startPoint.second,
           duration,
           end: prev.second
