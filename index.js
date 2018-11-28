@@ -2,6 +2,7 @@
 const { promisify } = require('util')
 const { writeFileSync } = require('fs')
 const gpsUtil = require('gps-util')
+const Victor = require('victor')
 
 const [ , myname, file ] = process.argv
 
@@ -41,9 +42,17 @@ const addSeconds = trackpoints => trackpoints.forEach(trackpoint => addSecond(tr
 
 const addSpeed = (prev, trackpoint) => {
   const dis = gpsUtil.getDistance(prev.lng, prev.lat, trackpoint.lng, trackpoint.lat)
+  const time = trackpoint.second - prev.second
+
   trackpoint.diff = dis
+  trackpoint.eleDiff = trackpoint.ele - prev.ele
+  trackpoint.eleSpeed = time === 0 ? 0 : trackpoint.eleDiff / time
+  trackpoint.victor = new Victor(trackpoint.lng - prev.lng, trackpoint.lat - prev.lat)
+  trackpoint.angle = trackpoint.victor.angleDeg()
+  trackpoint.angDiff = trackpoint.angle - prev.angle
+  trackpoint.angSpeed = time === 0 ? 0 : trackpoint.angDiff / time
+
   if (trackpoint.speed === undefined) {
-    const time = trackpoint.second - prev.second
     trackpoint.speed = time === 0 ? 0 : dis / time
   }
 }
