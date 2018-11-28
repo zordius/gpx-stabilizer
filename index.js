@@ -22,6 +22,7 @@ const thresholds = {
   leap: 10,        // minimal no signal leap second
   duration: 15,    // minimal moving duration seconds
   dropdur: 40,     // minimal seconds to detect distance
+  moveUp: 5,       // minimal ele change as moving up
   dropdis: 10,     // drop distance m
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
@@ -102,11 +103,13 @@ const timeSlots = (trackpoints, thresholds) => {
   const result = []
   let prev = trackpoints[0]
   let startPoint = prev
+  let minPoint = prev
+  let maxPoint = prev
 
   trackpoints.forEach(trackpoint => {
     if (trackpoint.second - prev.second >= thresholds.leap) {
       const duration = prev.second - startPoint.second
-      const valid = duration > thresholds.duration
+      let valid = duration > thresholds.duration
       if (duration < thresholds.dropdur) {
         const dis = gpsUtil.getDistance(startPoint.lng, startPoint.lat, prev.lng, prev.lat)
         if (dis < thresholds.dis) {
@@ -115,6 +118,11 @@ const timeSlots = (trackpoints, thresholds) => {
       }
       if (valid) {
         result.push({
+          startPoint,
+          endPoint: prev,
+          minPoint,
+          maxPoint,
+          moveUp: prev.ele - startPoint.ele > thresholds.moveUp,
           start: startPoint.second,
           duration,
           end: prev.second
@@ -122,24 +130,31 @@ const timeSlots = (trackpoints, thresholds) => {
       }
       startPoint = trackpoint
     }
+    if (minPoint.ele > prev.ele) {
+      minPoint = prev
+    }
+    if (maxPoint.ele < prev.ele) {
+      maxPoint = prev
+    }
     prev = trackpoint
   })
 
   return result
 }
 
-const timeFilter = (trackpoints, movingTime) => {
-  let timeslot = movingTime.shift()
+const timeFilter = (trackpoints, movingTime, logicKey) => {
+  let timeIndex = 0
 
   return trackpoints.filter(trackpoint => {
+    const timeslot = movingTime[timeIndex]
     if (!timeslot) {
       return false
     }
     if (timeslot.start <= trackpoint.second) {
       if (timeslot.end >= trackpoint.second) {
-        return true
+        return logicKey ? timeslot[logicKey] : true
       } else {
-        timeslot = movingTime.shift()
+        timeIndex++
       }
     }
   })
@@ -157,6 +172,8 @@ const firstPassCalc = (trackpoints) => {
   const movingTime = timeSlots(avgTracksFT, thresholds)
   console.warn('Generate move filtered...')
   const movingTrack = timeFilter(trackpoints, movingTime)
+  console.warn('Generate moveUp filtered...')
+  const moveUpTrack = timeFilter(avgTracksF, movingTime, 'moveUp')
 
   return {
     trackpoints,
@@ -164,6 +181,7 @@ const firstPassCalc = (trackpoints) => {
     avgTracksF,
     avgTracksFT,
     movingTrack,
+    moveUpTrack,
     movingTime
   }
 }
@@ -181,6 +199,7 @@ const saveGpx = (meta) => {
   writeFileSync(`${file}.avg2.gpx`, meta.avgTracksFGPX)
   writeFileSync(`${file}.avg3.gpx`, meta.avgTracksFTGPX)
   writeFileSync(`${file}.mov1.gpx`, meta.movingTrackGPX)
+  writeFileSync(`${file}.mov2.gpx`, meta.moveUpTrackGPX)
   console.warn('All GPX saved!')
 }
 
@@ -190,4 +209,5 @@ gpxParseFile(file)
 .then(generateGPX('avgTracksF'))
 .then(generateGPX('avgTracksFT'))
 .then(generateGPX('movingTrack'))
+.then(generateGPX('moveUpTrack'))
 .then(saveGpx)
