@@ -104,19 +104,20 @@ const timeSlots = (trackpoints, thresholds) => {
   let startPoint = prev
 
   trackpoints.forEach(trackpoint => {
-    if (trackpoint.second - prev.second > thresholds.leap) {
-      const duration = trackpoint.second - startPoint.second
+    if (trackpoint.second - prev.second >= thresholds.leap) {
+      const duration = prev.second - startPoint.second
       const valid = duration > thresholds.duration
-console.log(duration, new Date(trackpoint.second * 1000))
       if (duration < thresholds.dropdur) {
-        const dis = gpsUtil.getDistance(startPoint.lng, startPoint.lat, trackpoint.lng, trackpoint.lat)
-        console.log('Drop?!', dis, startPoint, trackpoint)
+        const dis = gpsUtil.getDistance(startPoint.lng, startPoint.lat, prev.lng, prev.lat)
+        if (dis < thresholds.dis) {
+          valid = false
+        }
       }
       if (valid) {
         result.push({
           start: startPoint.second,
           duration,
-          end: trackpoint.second
+          end: prev.second
         })
       }
       startPoint = trackpoint
