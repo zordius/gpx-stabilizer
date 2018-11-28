@@ -18,13 +18,14 @@ Usage: ${myname} gpxfile
 }
 
 const thresholds = {
-  minspeed: 1,     // minimal moving speed m/s
+  minspeed: 0.8,   // minimal moving speed m/s
   maxspeed: 80,    // maximal moving speed m/s
   leap: 10,        // minimal no signal leap second
   duration: 15,    // minimal moving duration seconds
   dropdur: 40,     // minimal seconds to detect distance
   moveUp: 5,       // minimal ele change as moving up
-  moveUpDis: 100,  // minimal move up distance
+  moveUpDis: 200,  // minimal move up distance
+  moveUpAng: 10,   // minimal move up angle change
   dropdis: 10,     // drop distance m
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
@@ -95,7 +96,7 @@ const boundingRadius = (trackpoints) => {
   }, 0)
 }
 
-const speedFilter = (trackpoints, thresholds) => {
+const speedFilter = (trackpoints) => {
   const result = []
   let prev = trackpoints[0]
 
@@ -109,7 +110,7 @@ const speedFilter = (trackpoints, thresholds) => {
   return result
 }
 
-const timeSlots = (trackpoints, thresholds) => {
+const timeSlots = (trackpoints) => {
   const result = []
   let prev = trackpoints[0]
   let startPoint = prev
@@ -171,6 +172,27 @@ const timeFilter = (trackpoints, movingTime, logicKey) => {
   })
 }
 
+const hybridTrack = (firstTrack, secondTrack) => {
+  const result = []
+  let prev = firstTrack[0]
+  let index = 0
+  firstTrack.forEach(trackpoint => {
+    if (trackpoint.second - prev.second > thresholds.leap) {
+      while (secondTrack[index].second < prev.second) {
+        index++
+      }
+      while (secondTrack[index].second < trackpoint.second) {
+        result.push(secondTrack[index])
+        index++
+      }
+    }
+    result.push(trackpoint)
+    prev = trackpoint
+  })
+
+  return result
+}
+
 const firstPassCalc = (trackpoints) => {
   addSeconds(trackpoints)
   console.warn('Generate rough average...')
@@ -178,13 +200,15 @@ const firstPassCalc = (trackpoints) => {
   console.warn('Generate fine average...')
   const avgTracksF = movingWindowAvg(trackpoints, thresholds.fineWindow)
   console.warn('Generate speed filtered...')
-  const avgTracksFT = speedFilter(avgTracksF, thresholds)
+  const avgTracksFT = speedFilter(avgTracksF)
   console.warn('Generate moving time slots...')
-  const movingTime = timeSlots(avgTracksFT, thresholds)
+  const movingTime = timeSlots(avgTracksFT)
   console.warn('Generate move filtered...')
   const movingTrack = timeFilter(trackpoints, movingTime)
   console.warn('Generate moveUp filtered...')
   const moveUpTrack = timeFilter(avgTracksF, movingTime, 'moveUp')
+  console.warn('Generate moveHybrid...')
+  const moveHybridTrack = hybridTrack(moveUpTrack, avgTracksR)
 
   return {
     trackpoints,
@@ -193,6 +217,7 @@ const firstPassCalc = (trackpoints) => {
     avgTracksFT,
     movingTrack,
     moveUpTrack,
+    moveHybridTrack,
     movingTime
   }
 }
@@ -214,6 +239,7 @@ const saveGpx = (meta) => {
   writeFileSync(`${file}.avg3.gpx`, meta.avgTracksFTGPX)
   writeFileSync(`${file}.mov1.gpx`, meta.movingTrackGPX)
   writeFileSync(`${file}.mov2.gpx`, meta.moveUpTrackGPX)
+  writeFileSync(`${file}.mov3.gpx`, meta.moveHybridTrackGPX)
   console.warn('All GPX saved!')
 }
 
@@ -224,4 +250,5 @@ gpxParseFile(file)
 .then(generateGPX('avgTracksFT'))
 .then(generateGPX('movingTrack'))
 .then(generateGPX('moveUpTrack'))
+.then(generateGPX('moveHybridTrack'))
 .then(saveGpx)
