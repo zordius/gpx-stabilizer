@@ -17,9 +17,13 @@ Usage: ${myname} gpxfile
 }
 
 const thresholds = {
-  speed: 1,        // minimal moving speed m/s
-  time: 10,        // minimal time leap second
-  points: 15,      // minimal points in a moving time slot
+  minspeed: 1,     // minimal moving speed m/s
+  maxspeed: 80,    // maximal moving speed m/s
+  leap: 10,        // minimal moving leap second
+  duration: 15,    // minimal moving duration seconds
+  points: 20,      // minimal points in a moving time slot
+  droppoints: 40,  // minimal points to detect distance
+  dropdis: 10,     // drop distance m
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
   roughWindow: 2,  // window size in seconds
@@ -74,31 +78,33 @@ const movingWindowAvg = (trackpoints, windowSize) => {
 }
 
 const boundingRadius = (trackpoints) => {
-  const mid = getMidPoint(trackpoints)
+  const mid = gpsUtil.getMidPoint(trackpoints)
   return trackpoints.reduce((ret, trackpoint) => {
-    const dis = getDistance(trackpoint.lng, trackpoint.lat, mid,lng, mid.lat)
+    const dis = gpsUtil.getDistance(trackpoint.lng, trackpoint.lat, mid.lng, mid.lat)
     return Math.max(ret, dis)
   }, 0)
 }
 
-const speedFilter = (trackpoints, speed, time, points) => {
+const speedFilter = (trackpoints, thresholds) => {
   const result = []
   let prev = trackpoints[0]
-  let isStop = false
   let startPoints = 0
+  let isStop = true
 
   trackpoints.forEach(trackpoint => {
     addSpeed(prev, trackpoint)
-    if (trackpoint.speed > speed && trackpoint.second - prev.second < time) {
-      if (isStop) {
-        isStop = false
-        startPoints = 0
+    if (trackpoint.speed > thresholds.minspeed && trackpoint.second - prev.second < thresholds.leap) {
+      if (trackpoint.speed < thresholds.maxspeed) {
+        if (isStop) {
+          isStop = false
+          startPoints = 0
+        }
+        startPoints += 1
+        result.push(trackpoint)
       }
-      startPoints += 1
-      result.push(trackpoint)
     } else {
       if (!isStop) {
-        if (startPoints < points) {
+        if (startPoints < thresholds.points) {
           let I
           for (I = 0;I < startPoints;I++) {
             result.pop()
@@ -112,15 +118,15 @@ const speedFilter = (trackpoints, speed, time, points) => {
   return result
 }
 
-const timeSlots = (trackpoints, time) => {
+const timeSlots = (trackpoints, thresholds) => {
   const result = []
   let prev = trackpoints[0]
   let start = prev.second
 
   trackpoints.forEach(trackpoint => {
-    if (trackpoint.second - prev.second > time) {
+    if (trackpoint.second - prev.second > thresholds.leap) {
       const duration = trackpoint.second - start
-      if (duration > time) {
+      if (duration > thresholds.duration) {
         result.push({
           start,
           duration,
@@ -159,9 +165,9 @@ const firstPassCalc = (trackpoints) => {
   console.warn('Generate fine average...')
   const avgTracksF = movingWindowAvg(trackpoints, thresholds.fineWindow)
   console.warn('Generate speed filtered...')
-  const avgTracksFT = speedFilter(avgTracksF, thresholds.speed, thresholds.time, thresholds.points)
+  const avgTracksFT = speedFilter(avgTracksF, thresholds)
   console.warn('Generate moving time slots...')
-  const movingTime = timeSlots(avgTracksFT, thresholds.time)
+  const movingTime = timeSlots(avgTracksFT, thresholds)
   console.warn('Generate move filtered...')
   const movingTrack = timeFilter(trackpoints, movingTime)
 
