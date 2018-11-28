@@ -3,10 +3,10 @@ const { promisify } = require('util')
 const { writeFileSync } = require('fs')
 const gpsUtil = require('gps-util')
 
-const gpxParseFile = promisify(gpsUtil.gpxParseFile)
-const toGPX = promisify(gpsUtil.toGPX)
-
 const [ , myname, file ] = process.argv
+
+const gpxParseFile = promisify(gpsUtil.gpxParseFile)
+const toGPX = promisify((points, callback) => gpsUtil.toGPX(points, callback, file))
 
 // Usage
 if (!file) {
