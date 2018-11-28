@@ -19,14 +19,14 @@ Usage: ${myname} gpxfile
 
 const thresholds = {
   minspeed: 0.8,   // minimal moving speed m/s
-  maxspeed: 80,    // maximal moving speed m/s
+  maxspeed: 60,    // maximal moving speed m/s
   minrest: 300,    // minimal rest time in seconds
   leap: 10,        // minimal no signal leap second
   duration: 15,    // minimal moving duration seconds
   dropdur: 40,     // minimal seconds to detect distance
   moveUp: 5,       // minimal ele change as moving up
   moveUpDis: 200,  // minimal move up distance
-  moveUpAng: 5,    // minimal move up angle change
+  moveUpAng: 30,   // minimal move up angle change
   dropdis: 200,    // drop distance m
   roughWindow: 2,  // window size in seconds
   fineWindow: 30   // window size in seconds
@@ -49,8 +49,6 @@ const addSpeed = (prev, trackpoint) => {
   trackpoint.eleSpeed = time === 0 ? 0 : trackpoint.eleDiff / time
   trackpoint.victor = new Victor(trackpoint.lng - prev.lng, trackpoint.lat - prev.lat)
   trackpoint.angle = trackpoint.victor.angleDeg()
-  trackpoint.angDiff = trackpoint.angle - prev.angle
-  trackpoint.angSpeed = time === 0 ? 0 : trackpoint.angDiff / time
 
   if (trackpoint.speed === undefined) {
     trackpoint.speed = time === 0 ? 0 : dis / time
@@ -109,6 +107,11 @@ const speedFilter = (trackpoints) => {
   return result
 }
 
+const angleDiff = (a, b) => {
+  const diff = Math.abs(a - b)
+  return diff < 180 ? diff : 360 - diff
+}
+
 const timeSlots = (trackpoints) => {
   const result = []
   let prev = trackpoints[0]
@@ -126,16 +129,17 @@ const timeSlots = (trackpoints) => {
           valid = false
         }
       }
-      const minmaxa = (new Victor(minPoint.lng - minPoint.lng, maxPoint.lat - maxPoint.lat)).angleDeg()
-      const startenda = (new Victor(startPoint.lng - startPoint.lng, prev.lat - prev.lat)).angleDeg()
+      const minmaxa = (new Victor(maxPoint.lng - minPoint.lng, maxPoint.lat - minPoint.lat)).angleDeg()
+      const startenda = (new Victor(prev.lng - startPoint.lng, prev.lat - startPoint.lat)).angleDeg()
       if (valid) {
+        const moveUp = prev.ele - startPoint.ele > thresholds.moveUp && distance > thresholds.moveUpDis && angleDiff(minmaxa, startenda) < 90
         result.push({
           startPoint,
           distance,
           endPoint: prev,
           minPoint,
           maxPoint,
-          moveUp: prev.ele - startPoint.ele > thresholds.moveUp && distance > thresholds.moveUpDis && Math.abs(minmaxa - startenda) < 90,
+          moveUp,
           minmaxa,
           startenda,
           start: startPoint.second,
@@ -143,6 +147,8 @@ const timeSlots = (trackpoints) => {
           end: prev.second
         })
       }
+      minPoint = trackpoint
+      maxPoint = trackpoint
       startPoint = trackpoint
     }
     if (minPoint.ele > prev.ele) {
@@ -168,9 +174,7 @@ const timeFilter = (trackpoints, movingTime, moveUp) => {
     if (timeslot.start <= trackpoint.second) {
       if (timeslot.end >= trackpoint.second) {
         if (moveUp) {
-          return timeslot.moveUp && Math.floor(trackpoint.angle - timeslot.minmaxa) < thresholds.moveUpAng
-      const startenda = (new Victor(startPoint.lng - startPoint.lng, prev.lat - prev.lat)).angleDeg()
-
+          return timeslot.moveUp && angleDiff(trackpoint.angle, timeslot.minmaxa) < thresholds.moveUpAng
         } else {
           return true
         }
