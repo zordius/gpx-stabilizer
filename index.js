@@ -26,7 +26,7 @@ const thresholds = {
   dropdur: 40,     // minimal seconds to detect distance
   moveUp: 5,       // minimal ele change as moving up
   moveUpDis: 200,  // minimal move up distance
-  moveUpAng: 10,   // minimal move up angle change
+  moveUpAng: 5,    // minimal move up angle change
   dropdis: 200,    // drop distance m
   roughWindow: 2,  // window size in seconds
   fineWindow: 30   // window size in seconds
@@ -126,6 +126,8 @@ const timeSlots = (trackpoints) => {
           valid = false
         }
       }
+      const minmaxa = (new Victor(minPoint.lng - minPoint.lng, maxPoint.lat - maxPoint.lat)).angleDeg()
+      const startenda = (new Victor(startPoint.lng - startPoint.lng, prev.lat - prev.lat)).angleDeg()
       if (valid) {
         result.push({
           startPoint,
@@ -133,7 +135,9 @@ const timeSlots = (trackpoints) => {
           endPoint: prev,
           minPoint,
           maxPoint,
-          moveUp: prev.ele - startPoint.ele > thresholds.moveUp && distance > thresholds.moveUpDis,
+          moveUp: prev.ele - startPoint.ele > thresholds.moveUp && distance > thresholds.moveUpDis && Math.abs(minmaxa - startenda) < 90,
+          minmaxa,
+          startenda,
           start: startPoint.second,
           duration,
           end: prev.second
@@ -153,7 +157,7 @@ const timeSlots = (trackpoints) => {
   return result
 }
 
-const timeFilter = (trackpoints, movingTime, logicKey) => {
+const timeFilter = (trackpoints, movingTime, moveUp) => {
   let timeIndex = 0
 
   return trackpoints.filter(trackpoint => {
@@ -163,7 +167,13 @@ const timeFilter = (trackpoints, movingTime, logicKey) => {
     }
     if (timeslot.start <= trackpoint.second) {
       if (timeslot.end >= trackpoint.second) {
-        return logicKey ? timeslot[logicKey] : true
+        if (moveUp) {
+          return timeslot.moveUp && Math.floor(trackpoint.angle - timeslot.minmaxa) < thresholds.moveUpAng
+      const startenda = (new Victor(startPoint.lng - startPoint.lng, prev.lat - prev.lat)).angleDeg()
+
+        } else {
+          return true
+        }
       } else {
         timeIndex++
       }
@@ -210,7 +220,7 @@ const firstPassCalc = (trackpoints) => {
   console.warn('Generate move filtered...')
   const movingTrack = timeFilter(trackpoints, movingTime)
   console.warn('Generate moveUp filtered...')
-  const moveUpTrack = timeFilter(avgTracksF, movingTime, 'moveUp')
+  const moveUpTrack = timeFilter(avgTracksF, movingTime, true)
   console.warn('Generate move average filtered...')
   const movingTrackAVG = timeFilter(avgTracksR, movingTime)
   console.warn('Generate moveHybrid...')
