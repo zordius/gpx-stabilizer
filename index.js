@@ -6,7 +6,7 @@ const gpsUtil = require('gps-util')
 const [ , myname, file ] = process.argv
 
 const gpxParseFile = promisify(gpsUtil.gpxParseFile)
-const toGPX = promisify((points, callback) => gpsUtil.toGPX(points, callback, file))
+const toGPX = promisify(({ points, title }, callback) => gpsUtil.toGPX({ points }, callback, title))
 
 // Usage
 if (!file) {
@@ -189,7 +189,10 @@ const firstPassCalc = (trackpoints) => {
 }
 
 const generateGPX = key => meta => {
-  return toGPX({points: meta[key]})
+  return toGPX({
+    points: meta[key],
+    title: `${file} - ${key}`
+  })
   .then(avgGpx => ({
     ...meta,
     [`${key}GPX`]: avgGpx
