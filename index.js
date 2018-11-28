@@ -19,10 +19,9 @@ Usage: ${myname} gpxfile
 const thresholds = {
   minspeed: 1,     // minimal moving speed m/s
   maxspeed: 80,    // maximal moving speed m/s
-  leap: 10,        // minimal moving leap second
+  leap: 10,        // minimal no signal leap second
   duration: 15,    // minimal moving duration seconds
-  points: 20,      // minimal points in a moving time slot
-  droppoints: 40,  // minimal points to detect distance
+  dropdur: 40,     // minimal seconds to detect distance
   dropdis: 10,     // drop distance m
   ele: 20,         // ele 20M
   dist: 20,        // distance 20M or 72KM/s , ski
@@ -88,30 +87,11 @@ const boundingRadius = (trackpoints) => {
 const speedFilter = (trackpoints, thresholds) => {
   const result = []
   let prev = trackpoints[0]
-  let startPoints = 0
-  let isStop = true
 
   trackpoints.forEach(trackpoint => {
     addSpeed(prev, trackpoint)
-    if (trackpoint.speed > thresholds.minspeed && trackpoint.second - prev.second < thresholds.leap) {
-      if (trackpoint.speed < thresholds.maxspeed) {
-        if (isStop) {
-          isStop = false
-          startPoints = 0
-        }
-        startPoints += 1
-        result.push(trackpoint)
-      }
-    } else {
-      if (!isStop) {
-        if (startPoints < thresholds.points) {
-          let I
-          for (I = 0;I < startPoints;I++) {
-            result.pop()
-          }
-        }
-        isStop = true
-      }
+    if (trackpoint.speed > thresholds.minspeed && trackpoint.speed < thresholds.maxspeed) {
+      result.push(trackpoint)
     }
     prev = trackpoint
   })
@@ -121,19 +101,25 @@ const speedFilter = (trackpoints, thresholds) => {
 const timeSlots = (trackpoints, thresholds) => {
   const result = []
   let prev = trackpoints[0]
-  let start = prev.second
+  let startPoint = prev
 
   trackpoints.forEach(trackpoint => {
     if (trackpoint.second - prev.second > thresholds.leap) {
-      const duration = trackpoint.second - start
-      if (duration > thresholds.duration) {
+      const duration = trackpoint.second - startPoint.second
+      const valid = duration > thresholds.duration
+console.log(duration, new Date(trackpoint.second * 1000))
+      if (duration < thresholds.dropdur) {
+        const dis = gpsUtil.getDistance(startPoint.lng, startPoint.lat, trackpoint.lng, trackpoint.lat)
+        console.log('Drop?!', dis, startPoint, trackpoint)
+      }
+      if (valid) {
         result.push({
-          start,
+          start: startPoint.second,
           duration,
           end: trackpoint.second
         })
       }
-      start = trackpoint.second
+      startPoint = trackpoint
     }
     prev = trackpoint
   })
