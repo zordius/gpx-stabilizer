@@ -19,7 +19,7 @@ Usage: ${myname} gpxfile
 
 const thresholds = {
   minspeed: 0.8,   // minimal moving speed m/s
-  maxspeed: 60,    // maximal moving speed m/s
+  maxspeed: 12,    // maximal avg moving speed m/s
   minrest: 300,    // minimal rest time in seconds
   leap: 10,        // minimal no signal leap second
   duration: 15,    // minimal moving duration seconds
