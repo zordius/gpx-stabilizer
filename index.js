@@ -176,6 +176,10 @@ const hybridTrack = (firstTrack, secondTrack) => {
   const result = []
   let prev = firstTrack[0]
   let index = 0
+  while (secondTrack[index].second < prev.second) {
+    result.push(secondTrack[index])
+    index++
+  }
   firstTrack.forEach(trackpoint => {
     if (trackpoint.second - prev.second > thresholds.leap) {
       while (secondTrack[index].second < prev.second) {
@@ -207,8 +211,10 @@ const firstPassCalc = (trackpoints) => {
   const movingTrack = timeFilter(trackpoints, movingTime)
   console.warn('Generate moveUp filtered...')
   const moveUpTrack = timeFilter(avgTracksF, movingTime, 'moveUp')
+  console.warn('Generate move average filtered...')
+  const movingTrackAVG = timeFilter(avgTracksR, movingTime)
   console.warn('Generate moveHybrid...')
-  const moveHybridTrack = hybridTrack(moveUpTrack, avgTracksR)
+  const moveHybridTrack = hybridTrack(moveUpTrack, movingTrackAVG)
 
   return {
     trackpoints,
@@ -217,6 +223,7 @@ const firstPassCalc = (trackpoints) => {
     avgTracksFT,
     movingTrack,
     moveUpTrack,
+    movingTrackAVG,
     moveHybridTrack,
     movingTime
   }
