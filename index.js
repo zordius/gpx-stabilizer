@@ -20,15 +20,14 @@ Usage: ${myname} gpxfile
 const thresholds = {
   minspeed: 0.8,   // minimal moving speed m/s
   maxspeed: 80,    // maximal moving speed m/s
+  minrest: 300,    // minimal rest time in seconds
   leap: 10,        // minimal no signal leap second
   duration: 15,    // minimal moving duration seconds
   dropdur: 40,     // minimal seconds to detect distance
   moveUp: 5,       // minimal ele change as moving up
   moveUpDis: 200,  // minimal move up distance
   moveUpAng: 10,   // minimal move up angle change
-  dropdis: 10,     // drop distance m
-  ele: 20,         // ele 20M
-  dist: 20,        // distance 20M or 72KM/s , ski
+  dropdis: 200,    // drop distance m
   roughWindow: 2,  // window size in seconds
   fineWindow: 30   // window size in seconds
 }
@@ -102,7 +101,7 @@ const speedFilter = (trackpoints) => {
 
   trackpoints.forEach(trackpoint => {
     addSpeed(prev, trackpoint)
-    if (trackpoint.speed > thresholds.minspeed && trackpoint.speed < thresholds.maxspeed) {
+    if (trackpoint.speed > thresholds.minspeed && trackpoint.speed < thresholds.maxspeed && trackpoint.diff < thresholds.dropdis) {
       result.push(trackpoint)
     }
     prev = trackpoint
@@ -180,6 +179,7 @@ const hybridTrack = (firstTrack, secondTrack) => {
     result.push(secondTrack[index])
     index++
   }
+
   firstTrack.forEach(trackpoint => {
     if (trackpoint.second - prev.second > thresholds.leap) {
       while (secondTrack[index].second < prev.second) {
@@ -194,7 +194,7 @@ const hybridTrack = (firstTrack, secondTrack) => {
     prev = trackpoint
   })
 
-  return result
+  return result.concat(secondTrack.slice(index + 1))
 }
 
 const firstPassCalc = (trackpoints) => {
