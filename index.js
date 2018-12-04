@@ -189,7 +189,7 @@ const hybridTrack = (firstTrack, secondTrack) => {
   const result = []
   let prev = firstTrack[0]
   let index = 0
-  while (secondTrack[index].second < prev.second) {
+  while (secondTrack[index] && secondTrack[index].second < prev.second) {
     result.push(secondTrack[index])
     index++
   }
@@ -227,10 +227,12 @@ const firstPassCalc = (trackpoints) => {
   const moveUpTrack = timeFilter(avgTracksF, movingTime, true)
   console.warn('Generate move average filtered...')
   const movingTrackAVG = timeFilter(avgTracksR, movingTime)
-  console.warn('Generate moveHybrid...')
-  const moveHybridTrack = hybridTrack(moveUpTrack, movingTrackAVG)
+  isSki = moveUpTrack.length && movingTrackAVG.length
+  console.warn(isSki ? 'Generate moveHybrid...' : 'Skip moveHybrid')
+  const moveHybridTrack = isSki ? hybridTrack(moveUpTrack, movingTrackAVG) : []
 
   return {
+    isSki,
     trackpoints,
     avgTracksR,
     avgTracksF,
@@ -259,8 +261,10 @@ const saveGpx = (meta) => {
   writeFileSync(`${file}.avg2.gpx`, meta.avgTracksFGPX)
   writeFileSync(`${file}.avg3.gpx`, meta.avgTracksFTGPX)
   writeFileSync(`${file}.mov1.gpx`, meta.movingTrackGPX)
-  writeFileSync(`${file}.mov2.gpx`, meta.moveUpTrackGPX)
-  writeFileSync(`${file}.mov3.gpx`, meta.moveHybridTrackGPX)
+  if (meta.isSki) {
+    writeFileSync(`${file}.mov2.gpx`, meta.moveUpTrackGPX)
+    writeFileSync(`${file}.mov3.gpx`, meta.moveHybridTrackGPX)
+  }
   console.warn('All GPX saved!')
 }
 
