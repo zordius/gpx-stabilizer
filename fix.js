@@ -40,4 +40,4 @@ gpxParseFile(file)
   points: trackpoints,
   title: file
 }))
-.then(data => writeFileSync(`${file}.fixed.gpx`, data.replace(/<trkpt/g, '\n<trkpt')))
+.then(data => writeFileSync(`${file}.fixed.gpx`, data.replace(/(<\/*trkpt[^>]*>)/g, '\n$1\n')))

@@ -36,9 +36,10 @@ const averageKey = (points, key) => points.reduce((sum, point) => sum + point[ke
 
 const addSecond = trackpoint => {
   trackpoint.second = (new Date(trackpoint.time)).getTime() / 1000
+  return trackpoint
 }
 
-const addSeconds = trackpoints => trackpoints.forEach(trackpoint => addSecond(trackpoint))
+const addSeconds = trackpoints => trackpoints.map(trackpoint => addSecond(trackpoint))
 
 const addSpeed = (prev, trackpoint) => {
   const dis = gpsUtil.getDistance(prev.lng, prev.lat, trackpoint.lng, trackpoint.lat)
@@ -196,7 +197,7 @@ const hybridTrack = (firstTrack, secondTrack) => {
 
   firstTrack.forEach(trackpoint => {
     if (trackpoint.second - prev.second > thresholds.leap) {
-      while (secondTrack[index].second < prev.second) {
+      while (secondTrack[index].second <= prev.second) {
         index++
       }
       while (secondTrack[index].second < trackpoint.second) {
@@ -211,8 +212,14 @@ const hybridTrack = (firstTrack, secondTrack) => {
   return result.concat(secondTrack.slice(index + 1))
 }
 
+const filterGoproBadTime = trackpoints => {
+  let prev = trackpoints[0]
+  return trackpoints.filter(cur => {
+    return cur.time >= prev.time
+  })
+}
+
 const firstPassCalc = (trackpoints) => {
-  addSeconds(trackpoints)
   console.warn('Generate rough average...')
   const avgTracksR = movingWindowAvg(trackpoints, thresholds.roughWindow)
   console.warn('Generate fine average...')
@@ -269,6 +276,8 @@ const saveGpx = (meta) => {
 }
 
 gpxParseFile(file)
+.then(addSeconds)
+.then(filterGoproBadTime)
 .then(firstPassCalc)
 .then(generateGPX('avgTracksR'))
 .then(generateGPX('avgTracksF'))
