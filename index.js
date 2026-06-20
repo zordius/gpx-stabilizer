@@ -32,6 +32,7 @@ const thresholds = {
   roughWindow: 2,  // window size in seconds
   fineWindow: 30   // window size in seconds
 }
+*/
 
 // PROFILE FOR NEW GOPRO only ski
 const thresholds = {
