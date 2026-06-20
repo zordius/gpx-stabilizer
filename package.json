@@ -3,6 +3,10 @@
   "version": "0.0.1",
   "description": "A nodejs GPX track stabilizer",
   "main": "index.js",
+  "bin": {
+    "gpx-stabilizer": "index.js",
+    "gpx-fix": "fix.js"
+  },
   "scripts": {
     "lint": "eslint *.js",
     "test": "jest"
