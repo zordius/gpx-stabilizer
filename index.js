@@ -17,6 +17,7 @@ Usage: ${myname} gpxfile
   process.exit()
 }
 
+/* PROFILE FOR OLD GOPRO or car
 const thresholds = {
   minspeed: 0.8,   // minimal moving speed m/s
   maxspeed: 12,    // maximal avg moving speed m/s
@@ -28,6 +29,22 @@ const thresholds = {
   moveUpDis: 200,  // minimal move up distance
   moveUpAng: 30,   // minimal move up angle change
   dropdis: 200,    // drop distance m
+  roughWindow: 2,  // window size in seconds
+  fineWindow: 30   // window size in seconds
+}
+
+// PROFILE FOR NEW GOPRO only ski
+const thresholds = {
+  minspeed: 1,   // minimal moving speed m/s
+  maxspeed: 10,    // maximal avg moving speed m/s
+  minrest: 300,    // minimal rest time in seconds
+  leap: 10,        // minimal no signal leap second
+  duration: 15,    // minimal moving duration seconds
+  dropdur: 20,     // minimal seconds to detect distance
+  moveUp: 5,       // minimal ele change as moving up
+  moveUpDis: 200,  // minimal move up distance
+  moveUpAng: 30,   // minimal move up angle change
+  dropdis: 50,     // drop distance m
   roughWindow: 2,  // window size in seconds
   fineWindow: 30   // window size in seconds
 }
