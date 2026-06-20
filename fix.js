@@ -20,7 +20,9 @@ const filterGoproBadTime = trackpoints => {
   let prev = trackpoints[0]
   return trackpoints.filter(cur => {
     const OK = cur.time > prev.time && !((cur.lat === prev.lat) && (cur.lng === prev.lng))
-    prev = cur
+    if (OK) {
+      prev = cur
+    }
     return OK
   })
 }
