@@ -1,0 +1,8 @@
+node_modules/
+*.stab.gpx
+gpx_eval/
+osm_cache/
+*.log
+.DS_Store
+.env
+coverage/

@@ -1,0 +1,22 @@
+{
+  "name": "gpx-stabilizer",
+  "version": "0.1.0",
+  "description": "Stabilize GPX ski-track recordings into clean, physics-grounded segments and emit a smoothed .stab.gpx (Node.js rewrite).",
+  "type": "module",
+  "bin": {
+    "gpx-stabilize": "src/cli.js"
+  },
+  "exports": "./src/index.js",
+  "scripts": {
+    "start": "node src/cli.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/zordius/gpx-stabilizer.git"
+  }
+}
