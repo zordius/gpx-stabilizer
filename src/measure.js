@@ -1,11 +1,8 @@
-// Per-point INIT signals — ported from the Python prototype's L1 CORE first step
-// (gpx_stabilize.py lines 216–261). This is the time-window calculation only: it projects to
-// local meters and derives motion/shape/reliability signals for each point. No labelling.
-//
-// `signals()` is a thin orchestrator; each numbered block below is its own pure function
-// (exported so it can be unit-tested in isolation).
-
-import { builtins } from "./mods/index.js";
+// Per-point INIT signals — the pure measurement engine, ported from the Python prototype's L1 CORE
+// first step (gpx_stabilize.py lines 216–261). It projects to local meters and derives the
+// motion/shape/reliability signal for each point. No screening, no modules, no labelling — that
+// orchestration lives in ./analyze.js. `measure()` runs the numbered blocks below; each block is
+// its own exported pure function (unit-testable in isolation).
 
 export const PARAMS = Object.freeze({
   SW: 15, //          point-count window half-width (smoothing + local straight/steady/carve)
@@ -112,52 +109,20 @@ function sDelta(x, y, shortHw, longHw) {
  */
 
 /**
- * Compute the per-point INIT signals for one chronological track. The projection is local
- * equirectangular in meters, recentred on THIS track's mean (lat0/lon0) — accurate for any
- * ski-area-sized box anywhere on Earth. Returns a new array; inputs are not mutated.
+ * Run the measurement blocks over `points`, treating `valid` (an index array) as the trusted time
+ * series: the projection centre is their mean and the windowed signals are computed over them. Every
+ * point is still projected (so excluded points get `xAll/yAll`). Returns one bundle of arrays — the
+ * per-point context that analyze.js feeds to compute modules and assembles back onto the points.
  *
- * Each returned point keeps its original fields and gains:
- *   x, y         local meters (east, north)
- *   hs, vs       horizontal / vertical speed (m/s), smoothed
- *   straight     local straightness (disp/path) over +/-SW
- *   steady       local speed steadiness (CoV of hs) over +/-SW; 9 when too slow to be meaningful
- *   netsp        net speed over +/-NET_WIN seconds
- *   netd150      net displacement over +/-NETD_WIN seconds
- *   wander       3D step-direction circular variance over +/-NET_WIN seconds (GPS jitter, 0..1)
- *   maDist       3D distance from the moving-average line (high-frequency jitter)
- *   carve        local S-arc density (swings / 100 m)
- *   paused       net speed below NETSTAY
+ * Signals (over the `valid` sub-sequence): hs, vs (speed); straight, steady (local shape);
+ * netsp, netd150, wander (time-windowed); maDist (jitter); carve (S-arc density); paused.
  *
- * There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops
- * are recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`), contributed
- * by modules in two phases — a module joins a phase by exposing that phase's callback:
- *   - `screen` (screen phase): run on raw points, before signals: noTime, sameTime, oversample. A point
- *     they drop is excluded from the projection centre and the time series, so it carries only
- *     `x, y` and its drop reasons — no signals.
- *   - `compute` (compute phase): run on the per-point context, after the blocks: outlier (GPS
- *     spike). These flag points that DO carry signals.
- * A module may expose both callbacks and run in both phases. The built-in modules (./mods) always
- * run; caller modules are appended via `opts.modules`. The Module contract + validator + loader
- * live in `./mods/index.js`.
- *
- * @param {TrackPoint[]} points  one track's points, in time order
- * @param {Partial<typeof PARAMS> & { modules?: import("./mods/index.js").Module[] }} [opts]
- * @returns {Array<TrackPoint & Record<string, number|boolean|object>>}
+ * @param {TrackPoint[]} points
+ * @param {number[]} valid  indices of the trusted/timed points
+ * @param {Partial<typeof PARAMS>} [opts]
  */
-export function signals(points, opts = {}) {
-  const { modules = [], ...paramOpts } = opts;
-  const g = { ...PARAMS, ...paramOpts };
-  if (points.length === 0) return [];
-
-  // A module declares its phase(s) by which callback it exposes: `screen` → screen phase,
-  // `compute` → compute phase. A module may expose both and run in both. Built-ins (from ./mods)
-  // always run; caller modules are appended.
-  const all = [...builtins, ...modules];
-  const screenMods = all.filter((m) => m.screen);
-  const computeMods = all.filter((m) => m.compute);
-
-  const preDrops = screen(points, screenMods); //                 screen phase (pre-series drops)
-  const valid = keptIndices(preDrops);
+export function measure(points, valid, opts = {}) {
+  const g = { ...PARAMS, ...opts };
   const { xAll, yAll, x, y, el, t } = project(points, valid); //  block 1
   const { dt, step } = deltas(x, y, t); //                        block 2
   const { hs, vs } = speeds(step, dt, el, g); //                  block 3
@@ -165,16 +130,16 @@ export function signals(points, opts = {}) {
   const { maDist, cu } = jitter(x, y, el, g); //                  block 5
   const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 6
   const carve = carveDensity(x, y, step, g); //                   block 7
-
-  // Compute-phase modules run on the per-point context after the blocks; each module's compute(ctx)
-  // returns { [signalKey]: array, drop?: (null|context)[] } (see assemble).
-  const ctx = {
+  return {
+    xAll,
+    yAll,
     x,
     y,
     el,
     t,
     dt,
     step,
+    cu,
     hs,
     vs,
     straight,
@@ -188,75 +153,12 @@ export function signals(points, opts = {}) {
     n: valid.length,
     g,
   };
-  const modData = {};
-  for (const mod of computeMods) modData[mod.name] = mod.compute(ctx);
-
-  const sig = {
-    xAll,
-    yAll,
-    hs,
-    vs,
-    straight,
-    steady,
-    netsp,
-    netd150,
-    wander,
-    maDist,
-    carve,
-    paused,
-  };
-  return assemble(points, preDrops, valid, sig, modData);
 }
 
 /**
- * Record why a point might be dropped from the clean output. Maintains `point.dropReason`
- * (`{ reasonKey: context }`) and `point.dropCount`; idempotent per key (re-adding a key updates its
- * context without re-counting). Any module can call it.
- */
-export function addDrop(point, reasonKey, context = true) {
-  if (!point.dropReason) point.dropReason = {};
-  if (!(reasonKey in point.dropReason)) point.dropCount = (point.dropCount ?? 0) + 1;
-  point.dropReason[reasonKey] = context;
-  return point;
-}
-
-// The built-in screen/compute modules now live in ./mods (see `builtins`).
-
-/**
- * Run the screen modules over the raw points in one sweep with a shared "last kept" reference.
- * Returns, per point, `null` if it survives (enters the time series) or a `{ name: context }`
- * object of the screen-phase drop reasons it accumulated.
- */
-export function screen(points, modules) {
-  const preDrops = new Array(points.length).fill(null);
-  let lastKept = null; // the last point that survived every screen module — the running reference
-  for (let i = 0; i < points.length; i++) {
-    const p = points[i];
-    let reasons = null;
-    for (const m of modules) {
-      const ctx = m.screen(p, lastKept);
-      if (ctx != null) {
-        if (!reasons) reasons = {};
-        reasons[m.name] = ctx;
-      }
-    }
-    preDrops[i] = reasons;
-    if (!reasons) lastKept = p;
-  }
-  return preDrops;
-}
-
-/** Original indices of the kept points (survived screening → the time-series sub-sequence). */
-function keptIndices(preDrops) {
-  const valid = [];
-  for (let i = 0; i < preDrops.length; i++) if (preDrops[i] == null) valid.push(i);
-  return valid;
-}
-
-/**
- * Block 1 — project to local meters. The centre (lat0/lon0) is the mean of the `ok` points (falls
- * back to all points if none are ok), but every point is projected so excluded points still have a
- * position. Returns `xAll/yAll` for all points and `x/y/el/t` for the ok sub-sequence.
+ * Block 1 — project to local meters. The centre (lat0/lon0) is the mean of the `valid` points (falls
+ * back to all points if none are valid), but every point is projected so excluded points still have
+ * a position. Returns `xAll/yAll` for all points and `x/y/el/t` for the valid sub-sequence.
  */
 export function project(points, valid) {
   const centre = valid.length > 0 ? valid : points.map((_, i) => i);
@@ -411,52 +313,4 @@ export function carveDensity(x, y, step, g) {
     carve[k] = pth > 0 ? ((cps[hi] - cps[lo]) / pth) * 100 : 0.0;
   }
   return carve;
-}
-
-/**
- * Merge the ok sub-sequence signals back onto every original point by index. Each module's
- * non-`drop` keys attach as a namespaced `point[modName] = { ...keys }`; a module's `drop` array
- * (null | context per point) is applied as a drop reason under the module's name (via `addDrop`).
- */
-function assemble(points, preDrops, valid, sig, modData) {
-  const pos = new Array(points.length).fill(-1);
-  valid.forEach((i, k) => {
-    pos[i] = k;
-  });
-  return points.map((p, i) => {
-    const out = { ...p, x: sig.xAll[i], y: sig.yAll[i] };
-    if (preDrops[i]) {
-      // dropped in the screen phase: position + drop reasons only, no signals
-      for (const key in preDrops[i]) addDrop(out, key, preDrops[i][key]);
-      return out;
-    }
-    const k = pos[i];
-    Object.assign(out, {
-      hs: sig.hs[k],
-      vs: sig.vs[k],
-      straight: sig.straight[k],
-      steady: sig.steady[k],
-      netsp: sig.netsp[k],
-      netd150: sig.netd150[k],
-      wander: sig.wander[k],
-      maDist: sig.maDist[k],
-      carve: sig.carve[k],
-      paused: sig.paused[k],
-    });
-    for (const modName in modData) {
-      const merged = modData[modName];
-      const ns = {};
-      let hasSignal = false;
-      for (const key in merged) {
-        if (key === "drop") {
-          if (merged.drop[k]) addDrop(out, modName, merged.drop[k]);
-        } else {
-          ns[key] = merged[key][k];
-          hasSignal = true;
-        }
-      }
-      if (hasSignal) out[modName] = ns;
-    }
-    return out;
-  });
 }
