@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { addDrop, analyze } from "../src/analyze.js";
-import { PARAMS } from "../src/measure.js";
+import { PARAMS } from "../src/profile.js";
 
 // ════════════════════════════════════════════════════════════════════════════════════════
 // analyze() integration — screen → measure → compute → assemble: wiring, drop reasons, the

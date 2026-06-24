@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { screen } from "../src/analyze.js";
-import { deltas, PARAMS } from "../src/measure.js";
+import { deltas } from "../src/measure.js";
 import { builtins, loadModule, validateModule } from "../src/mods/index.js";
+import { PARAMS } from "../src/profile.js";
 
 const outlier = builtins.find((m) => m.name === "outlier");
 const screenMods = builtins.filter((m) => m.screen); // noTime, sameTime, oversample (in order)

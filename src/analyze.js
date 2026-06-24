@@ -1,6 +1,8 @@
-// Analyze a track: screen raw points (drop bad ones), measure the survivors, run compute modules,
-// and assemble everything back onto the original points. This is the orchestration/policy layer on
-// top of the pure measurement engine (./measure.js) and the pluggable modules (./mods).
+// Analyze a track: screen raw points (drop bad ones), measure the survivors, profile their
+// neighbourhoods, run compute modules, and assemble everything back onto the original points. This
+// is the orchestration/policy layer on top of the point-level engine (./measure.js), the
+// window-level descriptors (./profile.js), and the pluggable modules (./mods). The per-point context
+// modules see is the union of the measure and profile bundles.
 //
 // There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops
 // are recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`), contributed
@@ -14,6 +16,7 @@
 
 import { measure } from "./measure.js";
 import { builtins } from "./mods/index.js";
+import { profile } from "./profile.js";
 
 /**
  * @param {import("./measure.js").TrackPoint[]} points  one track's points, in time order
@@ -31,12 +34,14 @@ export function analyze(points, opts = {}) {
     all.filter((m) => m.screen),
   );
   const valid = keptIndices(preDrops);
-  const m = measure(points, valid, paramOpts); // the per-point context (doubles as the signal bundle)
+  const m = measure(points, valid); //                  point-level primitives (positions, dt, step)
+  const w = profile(m, paramOpts); //                   window-level descriptors (hs, straight, …)
+  const ctx = { ...m, ...w }; //                        the per-point context: measure ∪ profile
 
   const modData = {};
-  for (const mod of all.filter((mm) => mm.compute)) modData[mod.name] = mod.compute(m);
+  for (const mod of all.filter((mm) => mm.compute)) modData[mod.name] = mod.compute(ctx);
 
-  return assemble(points, preDrops, valid, m, modData);
+  return assemble(points, preDrops, valid, ctx, modData);
 }
 
 /**
