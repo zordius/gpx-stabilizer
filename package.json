@@ -1,7 +1,17 @@
 {
   "name": "gpx-stabilizer",
   "version": "0.1.0",
-  "description": "Stabilize GPX ski-track recordings into clean, physics-grounded segments and emit a smoothed .stab.gpx (Node.js rewrite).",
+  "description": "Remove noise lines from a GPX recording and emit a smoothed .out.gpx; everything beyond is an optional module.",
+  "keywords": [
+    "gpx",
+    "gps",
+    "ski",
+    "track",
+    "cleanup",
+    "smoothing",
+    "noise-removal"
+  ],
+  "author": "zordius",
   "type": "module",
   "bin": {
     "gpx-stabilize": "src/cli.js"
@@ -9,7 +19,9 @@
   "exports": "./src/index.js",
   "scripts": {
     "start": "node src/cli.js",
-    "test": "node --test"
+    "test": "node --test",
+    "lint": "biome check .",
+    "format": "biome format --write ."
   },
   "engines": {
     "node": ">=18"
@@ -18,5 +30,8 @@
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zordius/gpx-stabilizer.git"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.1"
   }
 }

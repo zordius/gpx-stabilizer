@@ -1,5 +1,5 @@
 node_modules/
-*.stab.gpx
+*.out.gpx
 gpx_eval/
 osm_cache/
 *.log
