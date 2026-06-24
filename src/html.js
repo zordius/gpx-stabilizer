@@ -66,7 +66,7 @@ function* layerPoints(layer) {
  * @param {{ viewWidth?: number, viewHeight?: number, padding?: number, background?: string }} [opts]
  * @returns {string}
  */
-export function writeSvg(layers = [], opts = {}) {
+export function toSvg(layers = [], opts = {}) {
   const vw = opts.viewWidth ?? 1280;
   const vh = opts.viewHeight ?? 720;
   const pad = opts.padding ?? 16;
@@ -189,11 +189,47 @@ function renderLayer(layer, sx, sy) {
 }
 
 /**
- * Render labelled layers to an SVG file.
- * @param {Layer[]} layers
- * @param {string} path
- * @param {Parameters<typeof writeSvg>[1]} [opts]
+ * One SVG's worth of input — the same `(layers, opts)` pair `toSvg` consumes, so a panel is
+ * literally one `toSvg` call.
+ * @typedef {object} Panel
+ * @property {Layer[]} layers   the layers for this SVG
+ * @property {Parameters<typeof toSvg>[1]} [opts]   per-SVG toSvg options
  */
-export function saveSvg(layers, path, opts) {
-  writeFileSync(path, writeSvg(layers, opts));
+
+/**
+ * Render a standalone HTML document that stacks one SVG per panel vertically. Each panel is drawn
+ * by `toSvg` and inlined (no intermediate files). A `<style>` block caps every `<svg>` at one
+ * viewport (`max-width:100vw`, `max-height:100vh`); combined with each SVG's `preserveAspectRatio`
+ * the drawing keeps its aspect ratio at any size.
+ * @param {Panel[]} panels
+ * @param {{ title?: string }} [opts]
+ * @returns {string}  complete HTML document
+ */
+export function writeHtml(panels = [], opts = {}) {
+  const title = enc(opts.title ?? "gpx-stabilizer");
+  const svgs = panels.map((p) => toSvg(p.layers ?? [], p.opts)).join("\n");
+  return `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"/>
+<title>${title}</title>
+<style>
+body { margin: 0; }
+svg { display: block; max-width: 100vw; max-height: 100vh; width: auto; height: auto; }
+</style>
+</head>
+<body>
+${svgs}</body>
+</html>
+`;
+}
+
+/**
+ * Render panels to an HTML file.
+ * @param {Panel[]} panels
+ * @param {string} path
+ * @param {Parameters<typeof writeHtml>[1]} [opts]
+ */
+export function saveHtml(panels, path, opts) {
+  writeFileSync(path, writeHtml(panels, opts));
 }
