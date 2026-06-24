@@ -1,1 +1,1 @@
-export { parseGpx, readGpx } from "./gpx.js";
+export { parseGpx, readGpx, saveGpx, writeGpx } from "./gpx.js";

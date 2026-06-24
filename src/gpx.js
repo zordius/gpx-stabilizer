@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
 
 /**
  * @typedef {object} TrackPoint
@@ -9,8 +9,8 @@ import { readFileSync } from "node:fs";
  */
 
 /**
- * File-level metadata worth preserving in the output. All values are raw strings (as they
- * appear in the source) or null when absent.
+ * File-level metadata worth preserving in the output. All values are strings (decoded from
+ * the source) or null when absent.
  * @typedef {object} Meta
  * @property {string | null} creator software that produced the source (`<gpx creator>`)
  * @property {string | null} name     track name (`<metadata>` name, falling back to `<trk>`)
@@ -38,10 +38,43 @@ const NAME_RE = /<name>\s*([^<]*?)\s*<\/name>/i;
 const META_TIME_RE = /<time>\s*([^<]*?)\s*<\/time>/i;
 const TYPE_RE = /<type>\s*([^<]*?)\s*<\/type>/i;
 
+const GPX_NS = "http://www.topografix.com/GPX/1/1";
+
 /** First capture group of `re` in `text`, or null. */
 function pick(text, re) {
   const m = text ? re.exec(text) : null;
   return m ? m[1] : null;
+}
+
+/** Decode the five predefined XML entities. */
+function xmlDecode(s) {
+  if (s === null) return null;
+  return s
+    .replaceAll("&lt;", "<")
+    .replaceAll("&gt;", ">")
+    .replaceAll("&quot;", '"')
+    .replaceAll("&apos;", "'")
+    .replaceAll("&amp;", "&");
+}
+
+/** Encode text for XML (`&` first). */
+function xmlEncode(s) {
+  return String(s)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+/** Cap precision and drop trailing zeros. */
+function fmt(n, digits) {
+  return Number(n.toFixed(digits)).toString();
+}
+
+/** Epoch ms → ISO 8601, dropping the millisecond part when it is zero. */
+function isoTime(ms) {
+  return new Date(ms).toISOString().replace(/\.000Z$/, "Z");
 }
 
 /** Extract preserved file-level metadata. */
@@ -49,11 +82,11 @@ function parseMeta(xml) {
   const metaBlock = pick(xml, METADATA_RE) ?? "";
   const trkHead = pick(xml, TRK_HEAD_RE) ?? "";
   return {
-    creator: pick(xml, CREATOR_RE),
-    name: pick(metaBlock, NAME_RE) ?? pick(trkHead, NAME_RE),
-    time: pick(metaBlock, META_TIME_RE),
+    creator: xmlDecode(pick(xml, CREATOR_RE)),
+    name: xmlDecode(pick(metaBlock, NAME_RE) ?? pick(trkHead, NAME_RE)),
+    time: xmlDecode(pick(metaBlock, META_TIME_RE)),
     // <type> may sit after <trkseg> (e.g. FitoTrack); trkpts carry no <type>, so scan the doc.
-    type: pick(xml, TYPE_RE),
+    type: xmlDecode(pick(xml, TYPE_RE)),
   };
 }
 
@@ -109,4 +142,53 @@ export function parseGpx(xml) {
  */
 export function readGpx(path) {
   return parseGpx(readFileSync(path, "utf8"));
+}
+
+/**
+ * Serialize a parsed track to a GPX 1.1 string, reproducing the preserved metadata.
+ * The output `creator` defaults to the source's (so provenance is kept); override via opts.
+ *
+ * @param {Track} track
+ * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number }} [opts]
+ * @returns {string}
+ */
+export function writeGpx(track, opts = {}) {
+  const { segments = [], meta = {} } = track ?? {};
+  const creator = opts.creator ?? meta.creator ?? "gpx-stabilizer";
+  const llDigits = opts.latlonDigits ?? 7;
+  const eleDigits = opts.eleDigits ?? 2;
+
+  const out = ['<?xml version="1.0" encoding="UTF-8"?>'];
+  out.push(`<gpx version="1.1" creator="${xmlEncode(creator)}" xmlns="${GPX_NS}">`);
+
+  const metaLines = [];
+  if (meta.name != null) metaLines.push(`    <name>${xmlEncode(meta.name)}</name>`);
+  if (meta.time != null) metaLines.push(`    <time>${xmlEncode(meta.time)}</time>`);
+  if (metaLines.length > 0) out.push("  <metadata>", ...metaLines, "  </metadata>");
+
+  out.push("  <trk>");
+  if (meta.name != null) out.push(`    <name>${xmlEncode(meta.name)}</name>`);
+  if (meta.type != null) out.push(`    <type>${xmlEncode(meta.type)}</type>`);
+  for (const seg of segments) {
+    out.push("    <trkseg>");
+    for (const p of seg) {
+      let pt = `      <trkpt lat="${fmt(p.lat, llDigits)}" lon="${fmt(p.lon, llDigits)}">`;
+      if (p.ele != null) pt += `<ele>${fmt(p.ele, eleDigits)}</ele>`;
+      if (p.time != null) pt += `<time>${isoTime(p.time)}</time>`;
+      out.push(`${pt}</trkpt>`);
+    }
+    out.push("    </trkseg>");
+  }
+  out.push("  </trk>", "</gpx>", "");
+  return out.join("\n");
+}
+
+/**
+ * Serialize a parsed track and write it to a GPX file.
+ * @param {Track} track
+ * @param {string} path
+ * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number }} [opts]
+ */
+export function saveGpx(track, path, opts) {
+  writeFileSync(path, writeGpx(track, opts));
 }
