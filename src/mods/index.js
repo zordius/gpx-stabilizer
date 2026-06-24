@@ -6,7 +6,8 @@
 // A module joins the screen phase by exposing `screen`, the compute phase by exposing `compute`,
 // and both phases by exposing both.
 
-import { basename } from "node:path";
+import { basename, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import * as noTime from "./noTime.js";
 import * as outlier from "./outlier.js";
 import * as oversample from "./oversample.js";
@@ -44,9 +45,35 @@ export const builtins = [
   validateModule("outlier", outlier),
 ];
 
-/** Dynamically load a custom module file; its name is the file's basename (sans extension). */
-export async function loadModule(path) {
-  const ns = await import(path);
-  const name = basename(path).replace(/\.[cm]?js$/, "");
-  return validateModule(name, ns);
+/**
+ * Load a module by spec. A path (contains a separator or a `.js`/`.mjs`/`.cjs` extension) is
+ * imported directly, relative to the cwd; its name is the file's basename. A bare name (e.g.
+ * "noTime") is resolved in order — 1) `<cwd>/<name>.js`, 2) an installed npm package `<name>`,
+ * 3) the internal `./mods/<name>.js` — and throws if none resolve; its name is the bare spec.
+ * @param {string} spec
+ * @returns {Promise<Module>}
+ */
+export async function loadModule(spec) {
+  if (/[\\/]/.test(spec) || /\.[cm]?js$/.test(spec)) {
+    const url = pathToFileURL(resolve(process.cwd(), spec)).href;
+    return validateModule(basename(spec).replace(/\.[cm]?js$/, ""), await import(url));
+  }
+  const candidates = [
+    pathToFileURL(resolve(process.cwd(), `${spec}.js`)).href, // 1. <cwd>/<name>.js
+    spec, //                                                     2. an npm package
+    `./${spec}.js`, //                                           3. internal ./mods/<name>.js
+  ];
+  for (const candidate of candidates) {
+    let ns;
+    try {
+      ns = await import(candidate);
+    } catch (err) {
+      if (err?.code === "ERR_MODULE_NOT_FOUND" || err?.code === "ERR_PACKAGE_PATH_NOT_EXPORTED") {
+        continue; // not here — try the next location
+      }
+      throw err; // a real error inside a resolved module
+    }
+    return validateModule(spec, ns);
+  }
+  throw new Error(`cannot resolve module "${spec}" (tried cwd file, npm package, internal mods/)`);
 }

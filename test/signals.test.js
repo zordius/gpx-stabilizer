@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { builtins, validateModule } from "../src/mods/index.js";
+import { builtins, loadModule, validateModule } from "../src/mods/index.js";
 import {
   addDrop,
   carveDensity,
@@ -323,6 +323,16 @@ test("validateModule: rejects a module with no callbacks", () => {
   assert.throws(() => validateModule("", { compute: () => ({}) }), /non-empty string/);
   const ok = validateModule("ok", { screen: () => null });
   assert.equal(ok.name, "ok");
+});
+
+test("loadModule: a bare name falls back to the internal mods file", async () => {
+  const m = await loadModule("noTime"); // no cwd file / npm pkg → resolves ./mods/noTime.js
+  assert.equal(m.name, "noTime");
+  assert.equal(typeof m.screen, "function");
+});
+
+test("loadModule: an unresolvable name throws", async () => {
+  await assert.rejects(loadModule("definitely_not_a_module_xyz"), /cannot resolve module/);
 });
 
 test("signals: excluded points get no module data", () => {
