@@ -1,22 +1,22 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { builtins, validateModule } from "../src/mods/index.js";
 import {
   addDrop,
   carveDensity,
-  dedupeModule,
   deltas,
   jitter,
   localShape,
-  noTimeModule,
-  outlierModule,
   PARAMS,
   project,
-  resampleModule,
+  screen,
   signals,
   speeds,
-  triage,
   windows,
 } from "../src/signals.js";
+
+const outlier = builtins.find((m) => m.name === "outlier");
+const screenMods = builtins.filter((m) => m.screen); // noTime, sameTime, oversample (in order)
 
 // ════════════════════════════════════════════════════════════════════════════════════════
 // Block units — each exported block is tested directly on clean local-meter inputs, so the
@@ -25,24 +25,23 @@ import {
 
 const ramp = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => f(i));
 
-test("triage: drops dupe/resample/noTime against the last kept point, keeps the rest", () => {
+test("screen: drops sameTime/oversample/noTime against the last kept point, keeps the rest", () => {
   const at = (ms, lat = 36, lon = 138) => ({ lat, lon, ele: 0, time: ms });
-  const mods = [noTimeModule, dedupeModule, resampleModule];
-  const pre = triage(
+  const pre = screen(
     [
       at(0), //          kept (first timed)
-      at(0), //          dupe (same time + position)
-      at(0, 36.1), //    dupe-conflict (same time, moved)
-      at(500), //        resample (< 1 s from the kept point)
+      at(0), //          sameTime (same time + position)
+      at(0, 36.1), //    sameTime conflict (same time, moved)
+      at(500), //        oversample (< 1 s from the kept point)
       at(1500), //       kept (>= 1 s from the last kept point)
       { lat: 36, lon: 138, ele: 0, time: null }, // noTime
     ],
-    mods,
+    screenMods,
   );
   assert.equal(pre[0], null); // kept
-  assert.deepEqual(pre[1], { dupe: { moved: false } });
-  assert.deepEqual(pre[2], { dupe: { moved: true } });
-  assert.deepEqual(pre[3], { resample: { gap: 500 } });
+  assert.deepEqual(pre[1], { sameTime: { moved: false } });
+  assert.deepEqual(pre[2], { sameTime: { moved: true } });
+  assert.deepEqual(pre[3], { oversample: { gap: 500 } });
   assert.equal(pre[4], null); // kept (measured from the first point, not the dropped ones)
   assert.deepEqual(pre[5], { noTime: true });
 });
@@ -95,13 +94,13 @@ test("localShape: straight ~ 1, zigzag < 1; steady ~ 0 for constant speed", () =
   assert.ok(localShape(xs, sawY, hs, PARAMS).straight[20] < 0.95);
 });
 
-test("outlierModule: flags a perpendicular jump, clears a straight line", () => {
+test("outlier module: flags a perpendicular jump, clears a straight line", () => {
   const n = 40;
   const xs = ramp(n);
   const t = ramp(n);
   const hs = new Array(n).fill(1);
   const flat = new Array(n).fill(0);
-  const run = (y, d) => outlierModule.run({ x: xs, y, step: d.step, hs, dt: d.dt, g: PARAMS }).drop;
+  const run = (y, d) => outlier.compute({ x: xs, y, step: d.step, hs, dt: d.dt, g: PARAMS }).drop;
   assert.equal(run(flat, deltas(xs, flat, t))[20], null); // clean -> no context
   const bumped = flat.slice();
   bumped[20] = 100; // one point jumps 100 m sideways
@@ -219,15 +218,15 @@ test("signals: missing elevations are interpolated, never NaN", () => {
 test("signals: kept points get full signals; dropped points get only position + drop reasons", () => {
   const out = signals([
     { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  kept
-    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  dupe
-    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 0 }, //          dupe (same time, moved)
-    { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 500 }, //    resample
+    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  sameTime
+    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 0 }, //          sameTime (moved)
+    { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 500 }, //    oversample
     { lat: 36, lon: 138 + 3 * STEP5, ele: 1000, time: 1500 }, //   kept
     { lat: 36, lon: 138 + 4 * STEP5, ele: 1000, time: null }, //   noTime
   ]);
   assert.deepEqual(
     out.map((p) => (p.dropReason ? Object.keys(p.dropReason)[0] : "kept")),
-    ["kept", "dupe", "dupe", "resample", "kept", "noTime"],
+    ["kept", "sameTime", "sameTime", "oversample", "kept", "noTime"],
   );
   for (const p of out) assert.equal(typeof p.x, "number"); // every point projected
   for (const i of [1, 2, 3, 5]) assert.equal(out[i].hs, undefined, `dropped #${i} has no signals`);
@@ -249,7 +248,7 @@ test("signals: a dropped point does not shift the projection centre", () => {
   const pts = track({ n: 121, dlon: STEP5 });
   pts.splice(61, 0, { lat: 80, lon: 200, ele: 0, time: 60500 }); // wild, < 1 s after a kept point
   const out = signals(pts);
-  assert.ok(out[61].dropReason.resample); // resampled out
+  assert.ok(out[61].dropReason.oversample); // resampled out
   assert.ok(Math.abs(out[60].x) < 1, "centre unaffected by the dropped point");
 });
 
@@ -267,7 +266,7 @@ test("signals: leading untimed point is dropped (noTime); the first timed point 
 test("signals: a module's run output attaches under its name on each ok point", () => {
   const demo = {
     name: "demo",
-    run: (ctx) => ({ a: ctx.hs.map((v) => v * 2), q: ctx.hs.map(() => 7) }),
+    compute: (ctx) => ({ a: ctx.hs.map((v) => v * 2), q: ctx.hs.map(() => 7) }),
   };
   const out = signals(track({ n: 5, dlon: STEP5 }), { modules: [demo] });
   assert.deepEqual(Object.keys(out[2].demo).sort(), ["a", "q"]);
@@ -278,7 +277,7 @@ test("signals: a module's run output attaches under its name on each ok point", 
 test("signals: a module adds a drop reason via a drop array under its name", () => {
   const mymod = {
     name: "mymod",
-    run: (ctx) => ({ drop: ctx.x.map((_, k) => (k === 2 ? { why: "demo" } : null)) }),
+    compute: (ctx) => ({ drop: ctx.x.map((_, k) => (k === 2 ? { why: "demo" } : null)) }),
   };
   const out = signals(track({ n: 5, dlon: STEP5 }), { modules: [mymod] });
   assert.deepEqual(out[2].dropReason.mymod, { why: "demo" });
@@ -287,24 +286,56 @@ test("signals: a module adds a drop reason via a drop array under its name", () 
   assert.equal(out[0].dropReason, undefined); // other points untouched
 });
 
-test("signals: the built-in outlier module always runs first", () => {
-  const out = signals(track({ n: 3, dlon: STEP5 })); // no caller modules
-  // a clean track has no outlier drops, but the module ran (no error) and is the default first one
-  assert.equal(out[1].dropReason, undefined);
-  assert.equal(outlierModule.name, "outlier");
+test("signals: a module exposing both check and run is used in both phases", () => {
+  const both = {
+    name: "both",
+    screen: (p, q) => (q && p.lon === q.lon ? { dup: true } : null), // screen: drop a repeat lon
+    compute: (ctx) => ({ doubled: ctx.hs.map((v) => v * 2) }), //      compute: a namespaced signal
+  };
+  const out = signals(
+    [
+      { lat: 36, lon: 138, ele: 0, time: 0 }, //                kept
+      { lat: 36, lon: 138, ele: 0, time: 2000 }, //             check drops (same lon as last kept)
+      { lat: 36, lon: 138 + STEP5, ele: 0, time: 4000 }, //     kept
+    ],
+    { modules: [both] },
+  );
+  assert.deepEqual(out[1].dropReason.both, { dup: true }); // screen fired
+  assert.equal(typeof out[0].both.doubled, "number"); // run fired (signal) on a kept point
+  assert.equal(out[1].both, undefined); // dropped point has no signal-phase data
+});
+
+test("mods: builtins are the four named modules, routed by callback", () => {
+  assert.deepEqual(
+    builtins.map((m) => m.name),
+    ["noTime", "sameTime", "oversample", "outlier"],
+  );
+  assert.deepEqual(
+    screenMods.map((m) => m.name),
+    ["noTime", "sameTime", "oversample"],
+  );
+  assert.equal(typeof outlier.compute, "function");
+  assert.equal(outlier.screen, undefined); // outlier is compute-only
+});
+
+test("validateModule: rejects a module with no callbacks", () => {
+  assert.throws(() => validateModule("bad", {}), /screen and\/or compute/);
+  assert.throws(() => validateModule("", { compute: () => ({}) }), /non-empty string/);
+  const ok = validateModule("ok", { screen: () => null });
+  assert.equal(ok.name, "ok");
 });
 
 test("signals: excluded points get no module data", () => {
-  const m = { name: "m", run: (ctx) => ({ a: ctx.hs }) };
+  const m = { name: "m", compute: (ctx) => ({ a: ctx.hs }) };
   const out = signals(
     [
-      { lat: 36, lon: 138, ele: 0, time: 0 }, //  ok
-      { lat: 36, lon: 138, ele: 0, time: 0 }, //  dupe
+      { lat: 36, lon: 138, ele: 0, time: 0 }, //  kept
+      { lat: 36, lon: 138, ele: 0, time: 0 }, //  sameTime
     ],
     { modules: [m] },
   );
   assert.ok(out[0].m); //                  kept point has the module
-  assert.ok(out[1].dropReason.dupe); //    dropped (dupe)
+  assert.ok(out[1].dropReason.sameTime); // dropped (sameTime)
   assert.equal(out[1].m, undefined); //    dropped point has no module data
 });
 

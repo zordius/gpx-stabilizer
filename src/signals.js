@@ -5,6 +5,8 @@
 // `signals()` is a thin orchestrator; each numbered block below is its own pure function
 // (exported so it can be unit-tested in isolation).
 
+import { builtins } from "./mods/index.js";
+
 export const PARAMS = Object.freeze({
   SW: 15, //          point-count window half-width (smoothing + local straight/steady/carve)
   ELE_SMOOTH: 9, //   ele pre-smoothing width for vertical speed
@@ -128,25 +130,18 @@ function sDelta(x, y, shortHw, longHw) {
  *
  * There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops
  * are recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`), contributed
- * by modules in two phases:
- *   - triage modules (run on raw points, before signals): noTime, dupe, resample. A point they drop
- *     is excluded from the projection centre and the time series, so it carries only `x, y` and its
- *     drop reasons — no signals.
- *   - signal modules (run on the per-point context, after the blocks): outlier (GPS spike). These
- *     flag points that DO carry signals.
- * Built-in modules always run; caller modules are appended via `opts.modules`.
- *
- * @typedef {{ name: string, phase?: "triage" | "signal",
- *             check?: (point: object, lastKept: object|null) => (null | any),
- *             run?: (ctx: object) => Record<string, any> }} Module
- *   A pluggable module — the standard export shape so a CLI can load a custom JS file
- *   (`export default { name, phase, ... }`). A "triage" module implements `check(point, lastKept)`
- *   returning null (keep) or a context (drop, under `name`). A "signal" module (default) implements
- *   `run(ctx)`: non-`drop` keys attach as `point[name][key]`; a `drop` array (null | context per
- *   point) becomes a drop reason under `name`.
+ * by modules in two phases — a module joins a phase by exposing that phase's callback:
+ *   - `screen` (screen phase): run on raw points, before signals: noTime, sameTime, oversample. A point
+ *     they drop is excluded from the projection centre and the time series, so it carries only
+ *     `x, y` and its drop reasons — no signals.
+ *   - `compute` (compute phase): run on the per-point context, after the blocks: outlier (GPS
+ *     spike). These flag points that DO carry signals.
+ * A module may expose both callbacks and run in both phases. The built-in modules (./mods) always
+ * run; caller modules are appended via `opts.modules`. The Module contract + validator + loader
+ * live in `./mods/index.js`.
  *
  * @param {TrackPoint[]} points  one track's points, in time order
- * @param {Partial<typeof PARAMS> & { modules?: Module[] }} [opts]
+ * @param {Partial<typeof PARAMS> & { modules?: import("./mods/index.js").Module[] }} [opts]
  * @returns {Array<TrackPoint & Record<string, number|boolean|object>>}
  */
 export function signals(points, opts = {}) {
@@ -154,12 +149,14 @@ export function signals(points, opts = {}) {
   const g = { ...PARAMS, ...paramOpts };
   if (points.length === 0) return [];
 
-  // Modules come in two phases. Built-ins always run; caller modules are appended.
-  const all = [noTimeModule, dedupeModule, resampleModule, outlierModule, ...modules];
-  const triageMods = all.filter((m) => m.phase === "triage");
-  const signalMods = all.filter((m) => m.phase !== "triage");
+  // A module declares its phase(s) by which callback it exposes: `screen` → screen phase,
+  // `compute` → compute phase. A module may expose both and run in both. Built-ins (from ./mods)
+  // always run; caller modules are appended.
+  const all = [...builtins, ...modules];
+  const screenMods = all.filter((m) => m.screen);
+  const computeMods = all.filter((m) => m.compute);
 
-  const preDrops = triage(points, triageMods); //                 triage phase (pre-series drops)
+  const preDrops = screen(points, screenMods); //                 screen phase (pre-series drops)
   const valid = keptIndices(preDrops);
   const { xAll, yAll, x, y, el, t } = project(points, valid); //  block 1
   const { dt, step } = deltas(x, y, t); //                        block 2
@@ -169,7 +166,7 @@ export function signals(points, opts = {}) {
   const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 6
   const carve = carveDensity(x, y, step, g); //                   block 7
 
-  // Signal-phase modules run on the per-point context after the blocks; each module's run(ctx)
+  // Compute-phase modules run on the per-point context after the blocks; each module's compute(ctx)
   // returns { [signalKey]: array, drop?: (null|context)[] } (see assemble).
   const ctx = {
     x,
@@ -192,7 +189,7 @@ export function signals(points, opts = {}) {
     g,
   };
   const modData = {};
-  for (const mod of signalMods) modData[mod.name] = mod.run(ctx);
+  for (const mod of computeMods) modData[mod.name] = mod.compute(ctx);
 
   const sig = {
     xAll,
@@ -223,51 +220,21 @@ export function addDrop(point, reasonKey, context = true) {
   return point;
 }
 
-// ── Built-in triage modules (phase "triage"): run on raw points before signals, in one sequential
-//    sweep that shares a running "last kept" reference. A point that any of them flags is dropped
-//    from the time series; survivors become the reference for the points that follow. ──
-
-/** A point with no timestamp can't join the motion time series. */
-export const noTimeModule = {
-  name: "noTime",
-  phase: "triage",
-  check: (p) => (p.time == null ? true : null),
-};
-
-/** Drop points that share the last kept point's timestamp (exact duplicate, or a moved conflict). */
-export const dedupeModule = {
-  name: "dupe",
-  phase: "triage",
-  check: (p, q) => {
-    if (!q || p.time == null || p.time !== q.time) return null;
-    return { moved: p.lat !== q.lat || p.lon !== q.lon };
-  },
-};
-
-/** Resample to ~1 Hz: drop points less than 1 s after the last kept point. */
-export const resampleModule = {
-  name: "resample",
-  phase: "triage",
-  check: (p, q) => {
-    if (!q || p.time == null) return null;
-    const gap = p.time - q.time;
-    return gap > 0 && gap < 1000 ? { gap } : null;
-  },
-};
+// The built-in screen/compute modules now live in ./mods (see `builtins`).
 
 /**
- * Run the triage modules over the raw points in one sweep with a shared "last kept" reference.
+ * Run the screen modules over the raw points in one sweep with a shared "last kept" reference.
  * Returns, per point, `null` if it survives (enters the time series) or a `{ name: context }`
- * object of the triage drop reasons it accumulated.
+ * object of the screen-phase drop reasons it accumulated.
  */
-export function triage(points, modules) {
+export function screen(points, modules) {
   const preDrops = new Array(points.length).fill(null);
-  let lastKept = null; // the last point that survived every triage module — the running reference
+  let lastKept = null; // the last point that survived every screen module — the running reference
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
     let reasons = null;
     for (const m of modules) {
-      const ctx = m.check(p, lastKept);
+      const ctx = m.screen(p, lastKept);
       if (ctx != null) {
         if (!reasons) reasons = {};
         reasons[m.name] = ctx;
@@ -279,7 +246,7 @@ export function triage(points, modules) {
   return preDrops;
 }
 
-/** Original indices of the kept points (survived triage → the time-series sub-sequence). */
+/** Original indices of the kept points (survived screening → the time-series sub-sequence). */
 function keptIndices(preDrops) {
   const valid = [];
   for (let i = 0; i < preDrops.length; i++) if (preDrops[i] == null) valid.push(i);
@@ -355,30 +322,6 @@ export function localShape(x, y, hs, g) {
   }
   return { straight, steady };
 }
-
-/**
- * Built-in module — GPS spike detector (position 3-point detour, or impossible acceleration).
- * Its `run` returns `{ drop }` where each entry is `{ detour, accel }` when flagged, else `null`,
- * so spikes become the "outlier" drop reason. This is also the reference `Module` shape.
- */
-export const outlierModule = {
-  name: "outlier",
-  phase: "signal",
-  run({ x, y, step, hs, dt, g }) {
-    const n = x.length;
-    const detour = new Array(n).fill(0);
-    for (let i = 1; i < n - 1; i++) {
-      const d02 = Math.hypot(x[i + 1] - x[i - 1], y[i + 1] - y[i - 1]);
-      detour[i] = step[i - 1] + step[i] - d02;
-    }
-    const drop = new Array(n).fill(null);
-    for (let i = 0; i < n; i++) {
-      const accel = i >= 1 ? Math.abs(hs[i] - hs[i - 1]) / dt[i - 1] : 0;
-      if (detour[i] > g.D_JUMP || accel > g.A_MAX) drop[i] = { detour: detour[i], accel };
-    }
-    return { drop };
-  },
-};
 
 /**
  * Block 5 — high-frequency jitter: distance from the moving-average line, plus the cumulative 3D
@@ -483,7 +426,7 @@ function assemble(points, preDrops, valid, sig, modData) {
   return points.map((p, i) => {
     const out = { ...p, x: sig.xAll[i], y: sig.yAll[i] };
     if (preDrops[i]) {
-      // dropped in triage: position + drop reasons only, no signals
+      // dropped in the screen phase: position + drop reasons only, no signals
       for (const key in preDrops[i]) addDrop(out, key, preDrops[i][key]);
       return out;
     }
