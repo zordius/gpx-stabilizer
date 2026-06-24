@@ -3,8 +3,8 @@ import { writeFileSync } from "node:fs";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 /**
- * @typedef {{ lat: number, lon: number }} Point  any object carrying lat/lon
- * @typedef {{ lat: number, lon: number, text: string }} Label  a positioned text label
+ * @typedef {{ x: number, y: number }} Point  any object carrying SVG x/y coordinates
+ * @typedef {{ x: number, y: number, text: string }} Label  a positioned text label
  */
 
 /**
@@ -12,14 +12,17 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * the SVG's single projection. The `label` becomes the `<g>` id so HTML/CSS can toggle it.
  * @typedef {object} Layer
  * @property {string} label              names the group: `<g id="layer-{slug}" class="layer">`
- * @property {Point[][]} [lines]         polylines (each inner array is one connected line)
- * @property {Point[]} [points]          marker positions
+ * @property {Point[][]} [lines]         the geometry (each inner array is one connected run); drawn
+ *                                       as a line when `width` is set, otherwise as markers
+ * @property {Point[]} [points]          extra explicit marker positions (always drawn as markers)
  * @property {Label[]} [labels]          text labels; rendered in a `<g class="label" font-size=…>`
  * @property {boolean} [polygon]         render lines as filled, closed polygons (color = fill)
- * @property {string} [color]            stroke for lines; fill for points, polygons, and text (default "#0a6")
- * @property {number} [width]            line stroke-width (default 1.5)
- * @property {number} [size]             marker radius in px (default 2)
- * @property {"circle" | "square"} [shape] marker shape (default "circle")
+ * @property {string} [color]            line stroke + default marker stroke; polygon/text fill (default "#0a6")
+ * @property {number} [width]            line stroke-width; its presence is what draws the line
+ * @property {string} [pointColor]       marker stroke; its presence also draws the line's points as markers
+ * @property {number} [size]             marker radius (dot diameter = 2*size, default 2); its presence also
+ *                                       draws the line's points as markers
+ * @property {"circle" | "square"} [shape] marker shape via stroke-linecap: round | square (default "circle")
  * @property {number} [fontSize]         label font-size in user units (default 12)
  * @property {number} [opacity]          element opacity 0..1
  */
@@ -54,62 +57,61 @@ function* layerPoints(layer) {
 }
 
 /**
- * Render labelled layers to one SVG string. Geometry is fit and centred inside a fixed
- * `viewWidth`×`viewHeight` viewBox (default 1280×720), so text uses real px-like sizes. Each
- * layer is wrapped in a toggleable `<g>`; every `<text>` also carries `class="label"`, and all
- * sizes/colours are presentation attributes — no `<style>` is emitted, so embedding HTML can
- * override everything by `class`.
+ * Render labelled layers to one SVG string. Points are plotted with their RAW `x`/`y` coordinates
+ * (no projection here — produce x/y upstream, e.g. via view.js). The `viewBox` is set to the data's
+ * OWN bounding box (inset proportionally by `padding`), so the SVG keeps the data's original aspect
+ * ratio and bakes in NO zoom. CSS sizes the `<svg>` to the real viewport (e.g. 100vw × 100vh) and
+ * `preserveAspectRatio="xMidYMid meet"` lets the browser compute the best-fit scale for that ACTUAL
+ * aspect ratio — the fit is pure CSS, not baked-in JS. Each layer is a toggleable `<g id="layer-…">`;
+ * every `<text>` carries `class="label"`; no `<style>` is emitted, so embedding HTML can restyle.
  *
- * Projection is local equirectangular (longitude compressed by cos(lat)), north up.
- *
- * @param {Layer[]} layers
- * @param {{ viewWidth?: number, viewHeight?: number, padding?: number, background?: string }} [opts]
+ * @param {Layer[]} layers  points carry `x`, `y` (and `text` for labels)
+ * @param {{ padding?: number, background?: string }} [opts]  padding is a fraction of the data size
  * @returns {string}
  */
 export function toSvg(layers = [], opts = {}) {
-  const vw = opts.viewWidth ?? 1280;
-  const vh = opts.viewHeight ?? 720;
-  const pad = opts.padding ?? 16;
+  const pad = opts.padding ?? 0.02;
   const background = opts.background ?? null;
 
-  const head = `<svg xmlns="${SVG_NS}" viewBox="0 0 ${vw} ${vh}" width="${vw}" height="${vh}" preserveAspectRatio="xMidYMid meet">`;
-
-  let minLat = Number.POSITIVE_INFINITY;
-  let maxLat = Number.NEGATIVE_INFINITY;
-  let minLon = Number.POSITIVE_INFINITY;
-  let maxLon = Number.NEGATIVE_INFINITY;
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
   let count = 0;
   for (const layer of layers) {
     for (const p of layerPoints(layer)) {
       count++;
-      if (p.lat < minLat) minLat = p.lat;
-      if (p.lat > maxLat) maxLat = p.lat;
-      if (p.lon < minLon) minLon = p.lon;
-      if (p.lon > maxLon) maxLon = p.lon;
+      if (p.x < minX) minX = p.x;
+      if (p.x > maxX) maxX = p.x;
+      if (p.y < minY) minY = p.y;
+      if (p.y > maxY) maxY = p.y;
     }
   }
-  if (count === 0) return `${head}</svg>\n`;
+  if (count === 0) return `<svg xmlns="${SVG_NS}"></svg>\n`;
 
-  const kx = Math.cos((((minLat + maxLat) / 2) * Math.PI) / 180);
-  const minX = minLon * kx;
-  const dataW = maxLon * kx - minX;
-  const dataH = maxLat - minLat;
-  const availW = vw - 2 * pad;
-  const availH = vh - 2 * pad;
-  const scale = Math.min(
-    dataW > 0 ? availW / dataW : Number.POSITIVE_INFINITY,
-    dataH > 0 ? availH / dataH : Number.POSITIVE_INFINITY,
-  );
-  const s = Number.isFinite(scale) ? scale : 1;
-  const offX = (vw - dataW * s) / 2;
-  const offY = (vh - dataH * s) / 2;
-  const sx = (lon) => round(offX + (lon * kx - minX) * s);
-  const sy = (lat) => round(offY + (maxLat - lat) * s); // flip so north is up
+  // viewBox = the data's own bounding box, inset by `padding` on each axis (a fraction of that
+  // axis's extent, so the box keeps the data's aspect ratio). No zoom is baked in: CSS sizes the
+  // <svg> to the viewport and preserveAspectRatio="meet" computes the best fit for its real shape.
+  const dataW = Math.max(maxX - minX, 1e-9);
+  const dataH = Math.max(maxY - minY, 1e-9);
+  const vbX = round(minX - dataW * pad);
+  const vbY = round(minY - dataH * pad);
+  const vbW = round(dataW * (1 + 2 * pad));
+  const vbH = round(dataH * (1 + 2 * pad));
+  // Expose the bbox aspect ratio (width/height) as a CSS variable so the stylesheet can size the
+  // <svg> element to the largest box of this ratio that fits the real viewport — the zoom-to-fit is
+  // computed in CSS from `--ar` and vw/vh, not baked in here.
+  const ar = Math.round((vbW / vbH) * 1e6) / 1e6;
+  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" style="--ar:${ar}">`;
 
   const out = [head];
-  if (background) out.push(`  <rect width="100%" height="100%" fill="${enc(background)}"/>`);
+  if (background) {
+    out.push(
+      `  <rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="${enc(background)}"/>`,
+    );
+  }
   for (const layer of layers) {
-    const { groupAttrs, body } = renderLayer(layer, sx, sy);
+    const { groupAttrs, body } = renderLayer(layer);
     out.push(`  <g id="layer-${slug(layer.label)}" class="layer"${groupAttrs}>`);
     out.push(...body);
     out.push("  </g>");
@@ -124,63 +126,65 @@ export function toSvg(layers = [], opts = {}) {
  * stroked polylines with filled shapes keeps its attributes per-element to avoid a stroke leaking
  * onto markers. Returns the group's hoisted attribute string and the child element lines.
  */
-function renderLayer(layer, sx, sy) {
+function renderLayer(layer) {
   const color = layer.color ?? "#0a6";
-  const width = layer.width ?? 1.5;
-  const size = layer.size ?? 2;
-  const shape = layer.shape ?? "circle";
   const fontSize = layer.fontSize ?? 12;
   const op = layer.opacity == null || layer.opacity === 1 ? "" : ` opacity="${layer.opacity}"`;
 
   const lines = (layer.lines ?? []).filter((line) => line.length > 0);
-  const points = layer.points ?? [];
   const labels = layer.labels ?? [];
-  const strokeBased = !layer.polygon && lines.length > 0; // polylines: fill=none + stroke
-  const fillBased = (layer.polygon && lines.length > 0) || points.length > 0; // polygons + markers
-  const hoist = !(strokeBased && fillBased); // mixed stroke+fill stays per-element
+  const hasLines = lines.length > 0;
 
+  // A line is drawn when a line `width` is set (a polygon when `polygon` is set); otherwise the
+  // geometry shows as markers. Markers are ALSO drawn — reusing the line's points, on top of the
+  // line — when a point style (`pointColor` or `size`) is set. `layer.points` adds explicit markers.
+  const drawPolygon = layer.polygon && hasLines;
+  const drawLine = !layer.polygon && layer.width != null && hasLines;
+  const pointStyled = layer.pointColor != null || layer.size != null;
+  const lineAsMarkers = hasLines && (pointStyled || (!drawLine && !drawPolygon));
+
+  const markerPts = [...(layer.points ?? [])];
+  if (lineAsMarkers) for (const line of lines) markerPts.push(...line);
+
+  // Hoist the LINE paint onto the layer <g> so polylines/polygons stay bare; the marker <path> and
+  // labels carry their own paint.
   let groupAttrs = "";
-  if (hoist && strokeBased) {
-    groupAttrs = ` fill="none" stroke="${enc(color)}" stroke-width="${width}"${op}`;
-  } else if (hoist && fillBased) {
-    groupAttrs = ` fill="${enc(color)}"${op}`;
-  }
+  if (drawPolygon) groupAttrs = ` fill="${enc(color)}"${op}`;
+  else if (drawLine)
+    groupAttrs = ` fill="none" stroke="${enc(color)}" stroke-width="${layer.width}"${op}`;
   // opacity that rode up to the <g> must not be repeated on inner elements (it would compound).
-  const childOp = groupAttrs.includes("opacity") ? "" : op;
-  const stroke = hoist ? "" : ` fill="none" stroke="${enc(color)}" stroke-width="${width}"${op}`;
-  const fill = hoist ? "" : ` fill="${enc(color)}"${op}`;
+  const elOp = groupAttrs.includes("opacity") ? "" : op;
 
   const body = [];
-  for (const line of lines) {
-    const pts = line.map((p) => `${sx(p.lon)},${sy(p.lat)}`).join(" ");
-    body.push(
-      layer.polygon
-        ? `    <polygon points="${pts}"${fill}/>`
-        : `    <polyline points="${pts}"${stroke}/>`,
-    );
+  // line/polygon first, so the markers land on top of it
+  if (drawPolygon || drawLine) {
+    for (const line of lines) {
+      const pts = line.map((p) => `${round(p.x)},${round(p.y)}`).join(" ");
+      body.push(drawPolygon ? `    <polygon points="${pts}"/>` : `    <polyline points="${pts}"/>`);
+    }
   }
 
-  for (const p of points) {
-    const cx = sx(p.lon);
-    const cy = sy(p.lat);
-    if (shape === "square") {
-      const d = round(size * 2);
-      body.push(
-        `    <rect x="${round(cx - size)}" y="${round(cy - size)}" width="${d}" height="${d}"${fill}/>`,
-      );
-    } else {
-      body.push(`    <circle cx="${cx}" cy="${cy}" r="${size}"${fill}/>`);
-    }
+  // markers: one stroked <path> of zero-length dots — the dot size IS the stroke-width, so the
+  // `non-scaling-stroke` CSS rule keeps both line and marker size constant under zoom. round cap =
+  // circle, square cap = square. `pointColor`/`size` style them independently of the line.
+  if (markerPts.length > 0) {
+    const d = markerPts.map((p) => `M${round(p.x)},${round(p.y)} h0`).join(" ");
+    const cap = layer.shape === "square" ? "square" : "round";
+    const mColor = layer.pointColor ?? color;
+    const mSize = layer.size ?? 2;
+    body.push(
+      `    <path d="${d}" stroke="${enc(mColor)}" stroke-width="${round(mSize * 2)}" stroke-linecap="${cap}"${elOp}/>`,
+    );
   }
 
   if (labels.length > 0) {
     // font-size/fill/anchor are inherited presentation attributes: set once on the group so
     // embedding HTML can restyle every label by targeting `.label` (CSS beats the attribute).
     body.push(
-      `    <g class="label" font-size="${fontSize}" fill="${enc(color)}" text-anchor="middle" dominant-baseline="central"${childOp}>`,
+      `    <g class="label" font-size="${fontSize}" fill="${enc(color)}" text-anchor="middle" dominant-baseline="central"${elOp}>`,
     );
     for (const lb of labels) {
-      body.push(`      <text x="${sx(lb.lon)}" y="${sy(lb.lat)}">${enc(lb.text)}</text>`);
+      body.push(`      <text x="${round(lb.x)}" y="${round(lb.y)}">${enc(lb.text)}</text>`);
     }
     body.push("    </g>");
   }
@@ -193,35 +197,135 @@ function renderLayer(layer, sx, sy) {
  * literally one `toSvg` call.
  * @typedef {object} Panel
  * @property {Layer[]} layers   the layers for this SVG
+ * @property {string} [title]   panel heading, rendered as a sticky `<h2>` above the SVG (e.g. file name)
  * @property {Parameters<typeof toSvg>[1]} [opts]   per-SVG toSvg options
  */
 
 /**
- * Render a standalone HTML document that stacks one SVG per panel vertically. Each panel is drawn
- * by `toSvg` and inlined (no intermediate files). A `<style>` block caps every `<svg>` at one
- * viewport (`max-width:100vw`, `max-height:100vh`); combined with each SVG's `preserveAspectRatio`
- * the drawing keeps its aspect ratio at any size.
+ * Render a standalone HTML document (semantic markup, no `<div>`): a page `<header>` with the `<h1>`
+ * heading and an optional summary `<p>`, then one `<section>` per panel — each holding a sticky
+ * `<header>` (the panel title as `<h2>` plus an overlaid legend) and one full-viewport SVG that
+ * scrolls past underneath. Each panel is drawn by `toSvg` and inlined (no intermediate files). A
+ * `<style>` block sizes every `<svg>` to one viewport (`100vw` x `100vh`, white card on a grey
+ * page); combined with each SVG's `preserveAspectRatio` the drawing scales to fill and stays
+ * centred, keeping its aspect ratio. Any element's hover fade eases in over 0.3 s and out over 0.7 s.
  * @param {Panel[]} panels
- * @param {{ title?: string }} [opts]
+ * @param {{ title?: string, heading?: string, summary?: string }} [opts]
  * @returns {string}  complete HTML document
  */
 export function writeHtml(panels = [], opts = {}) {
   const title = enc(opts.title ?? "gpx-stabilizer");
-  const svgs = panels.map((p) => toSvg(p.layers ?? [], p.opts)).join("\n");
+  const heading = enc(opts.heading ?? "GPX Stabilizer");
+  const summary = opts.summary == null ? "" : `<p>${enc(opts.summary)}</p>\n`;
+  const body = panels
+    .map((p) => {
+      const layers = p.layers ?? [];
+      const id = p.title != null ? slug(p.title) : null;
+      const open = id ? `<section id="${id}">` : "<section>";
+      return `${open}\n${renderHead(p.title, layers, id)}${toSvg(layers, p.opts)}\n</section>`;
+    })
+    .join("\n");
   return `<!doctype html>
 <html lang="en">
 <head>
 <meta charset="utf-8"/>
 <title>${title}</title>
 <style>
-body { margin: 0; }
-svg { display: block; max-width: 100vw; max-height: 100vh; width: auto; height: auto; }
+html { scroll-behavior: smooth; }
+html, body { margin: 0; padding: 0; }
+h1 { padding: 10px; }
+p { margin: 10px; padding: 0; }
+section { overflow: clip; } /* clip this section's legend so it can't bleed into the next section */
+section > header { position: sticky; top: 0; z-index: 1; }
+section h2 { margin: 0; padding: 4px 8px; background: #aaa8; cursor: pointer; }
+section h2 a { color: inherit; text-decoration: none; display: block; }
+section h2:hover { background: #aaa3; }
+section ul { position: absolute; top: 100%; left: 0; margin: 10px; padding: 10px; list-style: none; font: 12px/1.5 sans-serif; background: #fff; border: 1px solid #000; }
+section li { display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 10px; }
+section li:hover { background: #ffffaa; }
+/* Size the <svg> to the largest box of the data's aspect ratio (--ar, set per-svg) that fits the
+   real viewport — the zoom-to-max is computed here in CSS from --ar and vw/vh, then centred. */
+section > svg { display: block; margin: auto; width: min(100vw, calc(100vh * var(--ar))); height: min(100vh, calc(100vw / var(--ar))); }
+section > svg polyline, section > svg path { vector-effect: non-scaling-stroke; }
+* { transition: opacity 0.7s ease, background-color 0.7s ease; } /* hover-out: slow fade back */
+*:hover { transition-duration: 0.3s; }      /* hover-in: quick fade */
 </style>
 </head>
 <body>
-${svgs}</body>
+<header>
+<h1>${heading}</h1>
+${summary}</header>
+${body}</body>
 </html>
 `;
+}
+
+/**
+ * Sticky panel header: the `<h2>` title plus a `<ul>` legend of each layer's colour + label.
+ * Wrapped in a sticky `<header>` so both pin to the top together; the legend is positioned `absolute`
+ * below the h2 so it overlays the SVG without taking layout space. The `<h2>` is an `<a href="#id">`
+ * anchor so clicking it smooth-scrolls (pure CSS) to align this panel's section. Returns "" when
+ * there is nothing to show (no title, no labelled layers).
+ * @param {string} [title]
+ * @param {Layer[]} layers
+ * @param {string} [id]  the section id this header's anchor links to
+ * @returns {string}
+ */
+function renderHead(title, layers, id) {
+  const h2 = title == null ? "" : `<h2><a href="#${id}">${enc(title)}</a></h2>`;
+  const items = layers
+    .filter((l) => l.label)
+    .map((l) => `<li>${legendSwatch(l)}${enc(l.label)}</li>`)
+    .join("");
+  const legend = items ? `<ul>${items}</ul>` : "";
+  if (!h2 && !legend) return "";
+  return `<header>${h2}${legend}</header>\n`;
+}
+
+/**
+ * A legend swatch: a tiny inline SVG that previews exactly what the layer draws — a line segment at
+ * its real colour and width, and/or a marker at its real colour, size, and shape (circle vs square).
+ * A layer that draws both shows both, so line-vs-point colour, line width, and point size are all
+ * distinguishable; the draw decisions mirror `renderLayer`.
+ * @param {Layer} layer
+ * @returns {string}
+ */
+function legendSwatch(layer) {
+  const color = layer.color ?? "#0a6";
+  const polygon = Boolean(layer.polygon);
+  const drawLine = !polygon && layer.width != null;
+  const pointStyled = layer.pointColor != null || layer.size != null;
+  const hasPoints = (layer.points?.length ?? 0) > 0;
+  // markers appear when point-styled, when there is no line/polygon (geometry falls back to dots),
+  // or when the layer carries explicit points — same as renderLayer.
+  const drawMarker = hasPoints || pointStyled || (!drawLine && !polygon);
+
+  const w = 30;
+  const h = 16;
+  const cx = w / 2;
+  const cy = h / 2;
+  const parts = [];
+  if (polygon) {
+    parts.push(`<rect x="3" y="3" width="${w - 6}" height="${h - 6}" fill="${enc(color)}"/>`);
+  } else if (drawLine) {
+    const lw = Math.min(layer.width, h - 2);
+    parts.push(
+      `<line x1="2" y1="${cy}" x2="${w - 2}" y2="${cy}" stroke="${enc(color)}" stroke-width="${lw}"/>`,
+    );
+  }
+  if (drawMarker) {
+    const mColor = enc(layer.pointColor ?? color);
+    const r = Math.min(layer.size ?? 2, cy - 1); // dot radius = size (diameter 2*size, as rendered)
+    if ((layer.shape ?? "circle") === "square") {
+      const side = round(2 * r);
+      parts.push(
+        `<rect x="${round(cx - r)}" y="${round(cy - r)}" width="${side}" height="${side}" fill="${mColor}"/>`,
+      );
+    } else {
+      parts.push(`<circle cx="${cx}" cy="${cy}" r="${round(r)}" fill="${mColor}"/>`);
+    }
+  }
+  return `<svg viewBox="0 0 ${w} ${h}" width="${w}" height="${h}">${parts.join("")}</svg>`;
 }
 
 /**
