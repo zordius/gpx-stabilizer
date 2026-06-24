@@ -124,35 +124,77 @@ function sDelta(x, y, shortHw, longHw) {
  *   wander       3D step-direction circular variance over +/-NET_WIN seconds (GPS jitter, 0..1)
  *   maDist       3D distance from the moving-average line (high-frequency jitter)
  *   carve        local S-arc density (swings / 100 m)
- *   outlier      GPS spike flag (detour or acceleration too large)
  *   paused       net speed below NETSTAY
  *
- * Every point also gets a `gpsStatus`: "ok" | "oversample" | "error" | "dupe" — graded against the
- * last kept ("ok") point, which also resamples the track to ~1 Hz. Only "ok" points (>= 1 s after
- * the previous kept point) feed the projection-centre mean and the time series and carry the full
- * signal set; "oversample" (within 1 s of the last kept point), "error" (no time, or same time +
- * moved) and "dupe" (same time + same position) carry only `x, y, gpsStatus`.
+ * There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops
+ * are recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`), contributed
+ * by modules in two phases:
+ *   - triage modules (run on raw points, before signals): noTime, dupe, resample. A point they drop
+ *     is excluded from the projection centre and the time series, so it carries only `x, y` and its
+ *     drop reasons — no signals.
+ *   - signal modules (run on the per-point context, after the blocks): outlier (GPS spike). These
+ *     flag points that DO carry signals.
+ * Built-in modules always run; caller modules are appended via `opts.modules`.
+ *
+ * @typedef {{ name: string, phase?: "triage" | "signal",
+ *             check?: (point: object, lastKept: object|null) => (null | any),
+ *             run?: (ctx: object) => Record<string, any> }} Module
+ *   A pluggable module — the standard export shape so a CLI can load a custom JS file
+ *   (`export default { name, phase, ... }`). A "triage" module implements `check(point, lastKept)`
+ *   returning null (keep) or a context (drop, under `name`). A "signal" module (default) implements
+ *   `run(ctx)`: non-`drop` keys attach as `point[name][key]`; a `drop` array (null | context per
+ *   point) becomes a drop reason under `name`.
  *
  * @param {TrackPoint[]} points  one track's points, in time order
- * @param {Partial<typeof PARAMS>} [opts]
- * @returns {Array<TrackPoint & Record<string, number|boolean>>}
+ * @param {Partial<typeof PARAMS> & { modules?: Module[] }} [opts]
+ * @returns {Array<TrackPoint & Record<string, number|boolean|object>>}
  */
 export function signals(points, opts = {}) {
-  const g = { ...PARAMS, ...opts };
+  const { modules = [], ...paramOpts } = opts;
+  const g = { ...PARAMS, ...paramOpts };
   if (points.length === 0) return [];
 
-  const gpsStatus = triage(points); //                            block 0
-  const valid = okIndices(gpsStatus);
+  // Modules come in two phases. Built-ins always run; caller modules are appended.
+  const all = [noTimeModule, dedupeModule, resampleModule, outlierModule, ...modules];
+  const triageMods = all.filter((m) => m.phase === "triage");
+  const signalMods = all.filter((m) => m.phase !== "triage");
+
+  const preDrops = triage(points, triageMods); //                 triage phase (pre-series drops)
+  const valid = keptIndices(preDrops);
   const { xAll, yAll, x, y, el, t } = project(points, valid); //  block 1
   const { dt, step } = deltas(x, y, t); //                        block 2
   const { hs, vs } = speeds(step, dt, el, g); //                  block 3
   const { straight, steady } = localShape(x, y, hs, g); //        block 4
-  const outlier = spikes(x, y, step, hs, dt, g); //               block 5
-  const { maDist, cu } = jitter(x, y, el, g); //                  block 6
-  const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 7
-  const carve = carveDensity(x, y, step, g); //                   block 8
+  const { maDist, cu } = jitter(x, y, el, g); //                  block 5
+  const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 6
+  const carve = carveDensity(x, y, step, g); //                   block 7
 
-  return assemble(points, gpsStatus, valid, {
+  // Signal-phase modules run on the per-point context after the blocks; each module's run(ctx)
+  // returns { [signalKey]: array, drop?: (null|context)[] } (see assemble).
+  const ctx = {
+    x,
+    y,
+    el,
+    t,
+    dt,
+    step,
+    hs,
+    vs,
+    straight,
+    steady,
+    netsp,
+    netd150,
+    wander,
+    maDist,
+    carve,
+    paused,
+    n: valid.length,
+    g,
+  };
+  const modData = {};
+  for (const mod of signalMods) modData[mod.name] = mod.run(ctx);
+
+  const sig = {
     xAll,
     yAll,
     hs,
@@ -164,50 +206,83 @@ export function signals(points, opts = {}) {
     wander,
     maDist,
     carve,
-    outlier,
     paused,
-  });
+  };
+  return assemble(points, preDrops, valid, sig, modData);
 }
 
 /**
- * Block 0 — triage each point against the LAST KEPT ("ok") point, which both grades GPS sampling
- * quality and resamples to ~1 Hz (points within 1 s of the last kept point are dropped):
- *   error      : no timestamp, OR same time as the reference but a different position
- *   dupe       : identical time AND position as the reference
- *   oversample : less than 1 s after the reference (denser than 1 Hz → resampled out)
- *   ok         : >= 1 s after the reference, or the first timed point → becomes the new reference
- * @returns {string[]} gpsStatus per point
+ * Record why a point might be dropped from the clean output. Maintains `point.dropReason`
+ * (`{ reasonKey: context }`) and `point.dropCount`; idempotent per key (re-adding a key updates its
+ * context without re-counting). Any module can call it.
  */
-export function triage(points) {
-  const N = points.length;
-  const gpsStatus = new Array(N);
-  let q = null; // the last point kept as "ok" — the running 1 Hz reference
-  for (let i = 0; i < N; i++) {
-    const p = points[i];
-    if (p.time == null) {
-      gpsStatus[i] = "error";
-    } else if (q == null) {
-      gpsStatus[i] = "ok";
-      q = p;
-    } else {
-      const dms = p.time - q.time;
-      if (dms === 0) {
-        gpsStatus[i] = p.lat === q.lat && p.lon === q.lon ? "dupe" : "error";
-      } else if (dms < 1000) {
-        gpsStatus[i] = "oversample";
-      } else {
-        gpsStatus[i] = "ok";
-        q = p;
-      }
-    }
-  }
-  return gpsStatus;
+export function addDrop(point, reasonKey, context = true) {
+  if (!point.dropReason) point.dropReason = {};
+  if (!(reasonKey in point.dropReason)) point.dropCount = (point.dropCount ?? 0) + 1;
+  point.dropReason[reasonKey] = context;
+  return point;
 }
 
-/** Original indices of the "ok" points (the time-series sub-sequence). */
-function okIndices(gpsStatus) {
+// ── Built-in triage modules (phase "triage"): run on raw points before signals, in one sequential
+//    sweep that shares a running "last kept" reference. A point that any of them flags is dropped
+//    from the time series; survivors become the reference for the points that follow. ──
+
+/** A point with no timestamp can't join the motion time series. */
+export const noTimeModule = {
+  name: "noTime",
+  phase: "triage",
+  check: (p) => (p.time == null ? true : null),
+};
+
+/** Drop points that share the last kept point's timestamp (exact duplicate, or a moved conflict). */
+export const dedupeModule = {
+  name: "dupe",
+  phase: "triage",
+  check: (p, q) => {
+    if (!q || p.time == null || p.time !== q.time) return null;
+    return { moved: p.lat !== q.lat || p.lon !== q.lon };
+  },
+};
+
+/** Resample to ~1 Hz: drop points less than 1 s after the last kept point. */
+export const resampleModule = {
+  name: "resample",
+  phase: "triage",
+  check: (p, q) => {
+    if (!q || p.time == null) return null;
+    const gap = p.time - q.time;
+    return gap > 0 && gap < 1000 ? { gap } : null;
+  },
+};
+
+/**
+ * Run the triage modules over the raw points in one sweep with a shared "last kept" reference.
+ * Returns, per point, `null` if it survives (enters the time series) or a `{ name: context }`
+ * object of the triage drop reasons it accumulated.
+ */
+export function triage(points, modules) {
+  const preDrops = new Array(points.length).fill(null);
+  let lastKept = null; // the last point that survived every triage module — the running reference
+  for (let i = 0; i < points.length; i++) {
+    const p = points[i];
+    let reasons = null;
+    for (const m of modules) {
+      const ctx = m.check(p, lastKept);
+      if (ctx != null) {
+        if (!reasons) reasons = {};
+        reasons[m.name] = ctx;
+      }
+    }
+    preDrops[i] = reasons;
+    if (!reasons) lastKept = p;
+  }
+  return preDrops;
+}
+
+/** Original indices of the kept points (survived triage → the time-series sub-sequence). */
+function keptIndices(preDrops) {
   const valid = [];
-  for (let i = 0; i < gpsStatus.length; i++) if (gpsStatus[i] === "ok") valid.push(i);
+  for (let i = 0; i < preDrops.length; i++) if (preDrops[i] == null) valid.push(i);
   return valid;
 }
 
@@ -281,25 +356,33 @@ export function localShape(x, y, hs, g) {
   return { straight, steady };
 }
 
-/** Block 5 — GPS spike flag: 3-point detour or acceleration too large. */
-export function spikes(x, y, step, hs, dt, g) {
-  const n = x.length;
-  const detour = new Array(n).fill(0);
-  for (let i = 1; i < n - 1; i++) {
-    const d02 = Math.hypot(x[i + 1] - x[i - 1], y[i + 1] - y[i - 1]);
-    detour[i] = step[i - 1] + step[i] - d02;
-  }
-  const outlier = new Array(n);
-  for (let i = 0; i < n; i++) {
-    const accel = i >= 1 ? Math.abs(hs[i] - hs[i - 1]) / dt[i - 1] : 0;
-    outlier[i] = detour[i] > g.D_JUMP || accel > g.A_MAX;
-  }
-  return outlier;
-}
+/**
+ * Built-in module — GPS spike detector (position 3-point detour, or impossible acceleration).
+ * Its `run` returns `{ drop }` where each entry is `{ detour, accel }` when flagged, else `null`,
+ * so spikes become the "outlier" drop reason. This is also the reference `Module` shape.
+ */
+export const outlierModule = {
+  name: "outlier",
+  phase: "signal",
+  run({ x, y, step, hs, dt, g }) {
+    const n = x.length;
+    const detour = new Array(n).fill(0);
+    for (let i = 1; i < n - 1; i++) {
+      const d02 = Math.hypot(x[i + 1] - x[i - 1], y[i + 1] - y[i - 1]);
+      detour[i] = step[i - 1] + step[i] - d02;
+    }
+    const drop = new Array(n).fill(null);
+    for (let i = 0; i < n; i++) {
+      const accel = i >= 1 ? Math.abs(hs[i] - hs[i - 1]) / dt[i - 1] : 0;
+      if (detour[i] > g.D_JUMP || accel > g.A_MAX) drop[i] = { detour: detour[i], accel };
+    }
+    return { drop };
+  },
+};
 
 /**
- * Block 6 — high-frequency jitter: distance from the moving-average line, plus the cumulative 3D
- * unit step vectors `cu` that block 7 differences for windowed wander.
+ * Block 5 — high-frequency jitter: distance from the moving-average line, plus the cumulative 3D
+ * unit step vectors `cu` that the windows block differences for windowed wander.
  */
 export function jitter(x, y, el, g) {
   const n = x.length;
@@ -329,7 +412,7 @@ export function jitter(x, y, el, g) {
 }
 
 /**
- * Block 7 — time-windowed net speed (+/-NET_WIN), wander (circular variance of `cu` over the same
+ * Block 6 — time-windowed net speed (+/-NET_WIN), wander (circular variance of `cu` over the same
  * window), net displacement (+/-NETD_WIN), and the `paused` flag.
  */
 export function windows(x, y, t, cu, g) {
@@ -356,7 +439,7 @@ export function windows(x, y, t, cu, g) {
   return { netsp, netd150, wander, paused };
 }
 
-/** Block 8 — local S-arc density (carve): signed swing crossings per 100 m over +/-SW. */
+/** Block 7 — local S-arc density (carve): signed swing crossings per 100 m over +/-SW. */
 export function carveDensity(x, y, step, g) {
   const n = x.length;
   const delta = sDelta(x, y, g.S_SHORT, g.S_LONG);
@@ -387,22 +470,25 @@ export function carveDensity(x, y, step, g) {
   return carve;
 }
 
-/** Merge the ok sub-sequence signals back onto every original point by index. */
-function assemble(points, gpsStatus, valid, sig) {
+/**
+ * Merge the ok sub-sequence signals back onto every original point by index. Each module's
+ * non-`drop` keys attach as a namespaced `point[modName] = { ...keys }`; a module's `drop` array
+ * (null | context per point) is applied as a drop reason under the module's name (via `addDrop`).
+ */
+function assemble(points, preDrops, valid, sig, modData) {
   const pos = new Array(points.length).fill(-1);
   valid.forEach((i, k) => {
     pos[i] = k;
   });
   return points.map((p, i) => {
-    if (gpsStatus[i] !== "ok") {
-      return { ...p, x: sig.xAll[i], y: sig.yAll[i], gpsStatus: gpsStatus[i] };
+    const out = { ...p, x: sig.xAll[i], y: sig.yAll[i] };
+    if (preDrops[i]) {
+      // dropped in triage: position + drop reasons only, no signals
+      for (const key in preDrops[i]) addDrop(out, key, preDrops[i][key]);
+      return out;
     }
     const k = pos[i];
-    return {
-      ...p,
-      x: sig.xAll[i],
-      y: sig.yAll[i],
-      gpsStatus: gpsStatus[i],
+    Object.assign(out, {
       hs: sig.hs[k],
       vs: sig.vs[k],
       straight: sig.straight[k],
@@ -412,8 +498,22 @@ function assemble(points, gpsStatus, valid, sig) {
       wander: sig.wander[k],
       maDist: sig.maDist[k],
       carve: sig.carve[k],
-      outlier: sig.outlier[k],
       paused: sig.paused[k],
-    };
+    });
+    for (const modName in modData) {
+      const merged = modData[modName];
+      const ns = {};
+      let hasSignal = false;
+      for (const key in merged) {
+        if (key === "drop") {
+          if (merged.drop[k]) addDrop(out, modName, merged.drop[k]);
+        } else {
+          ns[key] = merged[key][k];
+          hasSignal = true;
+        }
+      }
+      if (hasSignal) out[modName] = ns;
+    }
+    return out;
   });
 }
