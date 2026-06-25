@@ -32,8 +32,8 @@ test("each layer becomes a labelled <g> with an id", () => {
     { label: "track", lines: [pts([0, 0], [1, 1])] },
     { label: "noise points", points: pts([0.5, 0.5]) },
   ]);
-  assert.match(svg, /<g id="layer-track" class="layer"/);
-  assert.match(svg, /<g id="layer-noise-points" class="layer"/);
+  assert.match(svg, /<g id="layer-track" class="layer layer-track"/);
+  assert.match(svg, /<g id="layer-noise-points" class="layer layer-noise-points"/);
 });
 
 test("a line layer (width set) renders polylines; points render as one marker <path>", () => {
@@ -80,9 +80,12 @@ test("markers are a stroked dot path; square uses a square cap, size = stroke-wi
 
 test("line paint hoists onto the group; a markers-only layer keeps a bare group + own path", () => {
   const line = toSvg([{ label: "l", lines: [pts([0, 0], [1, 1])], color: "red", width: 3 }]);
-  assert.match(line, /<g id="layer-l" class="layer" fill="none" stroke="red" stroke-width="3">/);
+  assert.match(
+    line,
+    /<g id="layer-l" class="layer layer-l" fill="none" stroke="red" stroke-width="3">/,
+  );
   const dot = toSvg([{ label: "d", points: pts([0, 0]), color: "blue", opacity: 0.5 }]);
-  assert.match(dot, /<g id="layer-d" class="layer">/); // points-only: bare group
+  assert.match(dot, /<g id="layer-d" class="layer layer-d">/); // points-only: bare group
   assert.match(
     dot,
     /<path [^>]*stroke="blue" stroke-width="3" stroke-linecap="round" opacity="0.5"\/>/,
@@ -91,7 +94,10 @@ test("line paint hoists onto the group; a markers-only layer keeps a bare group 
 
 test("a line layer hoists its stroke to the group, leaving the polyline bare", () => {
   const svg = toSvg([{ label: "m", lines: [pts([0, 0], [1, 1])], color: "#c00", width: 1.5 }]);
-  assert.match(svg, /<g id="layer-m" class="layer" fill="none" stroke="#c00" stroke-width="1.5">/);
+  assert.match(
+    svg,
+    /<g id="layer-m" class="layer layer-m" fill="none" stroke="#c00" stroke-width="1.5">/,
+  );
   assert.match(svg, /<polyline points="[^"]+"\/>/); // bare, no per-element paint
 });
 
@@ -105,7 +111,10 @@ test("a layer with a line + markers: group stroke for the line, own stroke on th
       width: 1.5,
     },
   ]);
-  assert.match(svg, /<g id="layer-x" class="layer" fill="none" stroke="#06c" stroke-width="1.5">/);
+  assert.match(
+    svg,
+    /<g id="layer-x" class="layer layer-x" fill="none" stroke="#06c" stroke-width="1.5">/,
+  );
   assert.match(svg, /<polyline points="[^"]+"\/>/); // bare line, inherits the group stroke
   assert.match(svg, /<path [^>]*stroke="#06c" stroke-width="3"/); // markers carry their own (size 2 -> 3)
 });
@@ -114,7 +123,7 @@ test("polygon mode fills the shape via the hoisted group color", () => {
   const svg = toSvg([
     { label: "area", lines: [pts([0, 0], [1, 0], [1, 1], [0, 1])], polygon: true, color: "#eee" },
   ]);
-  assert.match(svg, /<g id="layer-area" class="layer" fill="#eee">/);
+  assert.match(svg, /<g id="layer-area" class="layer layer-area" fill="#eee">/);
   assert.match(svg, /<polygon points="[^"]+"\/>/);
   assert.doesNotMatch(svg, /<polyline/);
 });

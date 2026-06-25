@@ -30,7 +30,7 @@ test("toHtml: produces an HTML document with the gps layer (markers by default)"
   const html = toHtml(pts);
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /<g id="layer-gps"/);
-  assert.match(html, /<path d="M/); // no line width -> the track renders as markers
+  assert.match(html, /<path [^>]*d="M/); // no line width -> the track renders as markers
 });
 
 test("analyzedLayers: clean track line + activity (red circles) + outlier (red squares)", () => {

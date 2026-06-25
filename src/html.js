@@ -118,12 +118,23 @@ export function toSvg(layers = [], opts = {}) {
       `  <rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="${enc(background)}"/>`,
     );
   }
+  // `opts.ontop` (viewer only): also emit, at the END of the svg, a hidden <use> referencing each
+  // marker layer's <path> — it shares the geometry (no `d` copied) and paints last, so the legend's
+  // hover rule can reveal it on top. The marker id needs a document-unique `idPrefix` (the panel id).
+  const prefix = opts.ontop ? (opts.idPrefix ?? "p") : null;
+  const ontopCopies = [];
   for (const layer of layers) {
-    const { groupAttrs, body } = renderLayer(layer);
-    out.push(`  <g id="layer-${slug(layer.label)}" class="layer"${groupAttrs}>`);
+    const lslug = slug(layer.label);
+    const markerId = prefix && layer.label ? `${prefix}-m-${lslug}` : null;
+    const { groupAttrs, body, hasMarkers } = renderLayer(layer, markerId);
+    out.push(`  <g id="layer-${lslug}" class="layer layer-${lslug}"${groupAttrs}>`);
     out.push(...body);
     out.push("  </g>");
+    if (markerId && hasMarkers) {
+      ontopCopies.push(`  <g class="ontop ontop-${lslug}"><use href="#${markerId}"/></g>`);
+    }
   }
+  out.push(...ontopCopies);
   out.push("</svg>", "");
   return out.join("\n");
 }
@@ -134,7 +145,7 @@ export function toSvg(layers = [], opts = {}) {
  * stroked polylines with filled shapes keeps its attributes per-element to avoid a stroke leaking
  * onto markers. Returns the group's hoisted attribute string and the child element lines.
  */
-function renderLayer(layer) {
+function renderLayer(layer, markerId) {
   const color = layer.color ?? "#0a6";
   const fontSize = layer.fontSize ?? 12;
   const op = layer.opacity == null || layer.opacity === 1 ? "" : ` opacity="${layer.opacity}"`;
@@ -175,13 +186,15 @@ function renderLayer(layer) {
   // markers: one stroked <path> of zero-length dots — the dot diameter IS the stroke-width (size + 1),
   // so the `non-scaling-stroke` CSS rule keeps both line and marker size constant under zoom. round
   // cap = circle, square cap = square. `pointColor`/`size` style them independently of the line.
-  if (markerPts.length > 0) {
+  const hasMarkers = markerPts.length > 0;
+  if (hasMarkers) {
     const d = markerPts.map((p) => `M${round(p.x)},${round(p.y)} h0`).join(" ");
     const cap = layer.shape === "square" ? "square" : "round";
     const mColor = layer.pointColor ?? color;
     const mSize = layer.size ?? 2;
+    const idAttr = markerId ? ` id="${markerId}"` : ""; // unique id so an <use> can share this path
     body.push(
-      `    <path d="${d}" stroke="${enc(mColor)}" stroke-width="${round(mSize + 1)}" stroke-linecap="${cap}"${elOp}/>`,
+      `    <path${idAttr} d="${d}" stroke="${enc(mColor)}" stroke-width="${round(mSize + 1)}" stroke-linecap="${cap}"${elOp}/>`,
     );
   }
 
@@ -197,7 +210,7 @@ function renderLayer(layer) {
     body.push("    </g>");
   }
 
-  return { groupAttrs, body };
+  return { groupAttrs, body, hasMarkers };
 }
 
 /**
@@ -225,6 +238,12 @@ export function writeHtml(panels = [], opts = {}) {
   const title = enc(opts.title ?? "gpx-stabilizer");
   const heading = enc(opts.heading ?? "GPX Stabilizer");
   const summary = opts.summary == null ? "" : `<p>${enc(opts.summary)}</p>\n`;
+  // Index links in the intro: each titled panel becomes an anchor jump to its section.
+  const indexItems = panels
+    .filter((p) => p.title != null)
+    .map((p) => `<li><a href="#${slug(p.title)}">${enc(p.title)}</a></li>`)
+    .join("");
+  const nav = indexItems ? `<nav><ul>${indexItems}</ul></nav>\n` : "";
   // Drop empty layers entirely — a layer with no drawn points renders no <g>, no legend item, and
   // no toggle rule (so e.g. a "no outliers" run shows nothing for that layer).
   const panelLayers = panels.map((p) => (p.layers ?? []).filter((l) => countPoints(l) > 0));
@@ -233,15 +252,21 @@ export function writeHtml(panels = [], opts = {}) {
       const layers = panelLayers[i];
       const id = p.title != null ? slug(p.title) : null;
       const open = id ? `<section id="${id}">` : "<section>";
-      return `${open}\n${renderHead(p.title, layers, id)}${toSvg(layers, p.opts)}\n</section>`;
+      const svg = toSvg(layers, { ...p.opts, ontop: true, idPrefix: id ?? `p${i}` });
+      return `${open}\n${renderHead(p.title, layers, id)}${svg}\n</section>`;
     })
     .join("\n");
-  // One pure-CSS toggle rule per labelled layer slug: unchecking a panel's legend checkbox hides
-  // that panel's matching <g> (scoped to the section, so panels don't affect each other).
+  // Pure-CSS rules per labelled layer slug: unchecking a panel's legend checkbox dims that panel's
+  // matching <g> to opacity 0.1, and hovering the row enlarges its markers (scoped to the section).
   const slugs = new Set();
   for (const layers of panelLayers) for (const l of layers) if (l.label) slugs.add(slug(l.label));
   const toggles = [...slugs]
-    .map((s) => `section:has(.t-${s}:not(:checked)) #layer-${s} { display: none; }`)
+    .map(
+      (s) =>
+        `section:has(.t-${s} input:not(:checked)) .layer-${s} { opacity: 0.1; }\n` +
+        `section:has(.t-${s}:hover) .layer-${s} path { stroke-width: 12; }\n` +
+        `section:has(.t-${s}:hover) .ontop-${s} { opacity: 1; }`,
+    )
     .join("\n");
   return `<!doctype html>
 <html lang="en">
@@ -253,7 +278,9 @@ html { scroll-behavior: smooth; scroll-snap-type: y proximity; }
 html, body { margin: 0; padding: 0; }
 h1 { padding: 10px; }
 p { margin: 10px; padding: 0; }
-section { overflow: clip; display: grid; scroll-snap-align: start; }
+nav ul { list-style: none; margin: 0; padding: 0 10px 10px; font: 14px/1.8 sans-serif; }
+nav a { color: #06c; }
+section { overflow: clip; display: grid; scroll-snap-align: start; content-visibility: auto; contain-intrinsic-size: 100vw 100vh; }
 section > header { grid-area: 1 / 1; align-self: start; position: sticky; top: 0; z-index: 1; }
 section h2 { margin: 0; padding: 4px 8px; background: #aaa8; cursor: pointer; }
 section h2 a { color: inherit; text-decoration: none; display: block; }
@@ -268,7 +295,8 @@ section li input::before { content: ""; width: 11px; height: 11px; transform: sc
 section li input:checked::before { transform: scale(1); }
 section > svg { grid-area: 1 / 1; display: block; width: 100vw; height: 100vh; }
 section > svg polyline, section > svg path { vector-effect: non-scaling-stroke; }
-* { transition: opacity 0.7s ease, background-color 0.7s ease; }
+.ontop { opacity: 0; pointer-events: none; }
+* { transition: opacity 0.7s ease, background-color 0.7s ease, stroke-width 0.3s ease; }
 *:hover { transition-duration: 0.3s; }
 ${toggles}
 </style>
@@ -276,7 +304,7 @@ ${toggles}
 <body>
 <header>
 <h1>${heading}</h1>
-${summary}</header>
+${summary}${nav}</header>
 ${body}</body>
 </html>
 `;
@@ -299,8 +327,8 @@ function renderHead(title, layers, id) {
     .filter((l) => l.label)
     .map((l) => {
       const checked = l.visible === false ? "" : " checked";
-      const cls = `t-${slug(l.label)}`; // ties this checkbox to its `#layer-{slug}` group
-      return `<li><label><input type="checkbox" class="${cls}"${checked}/>${legendSwatch(l)}${enc(l.label)} (${countPoints(l)})</label></li>`;
+      const cls = `t-${slug(l.label)}`; // ties this legend row to its `#layer-{slug}` group
+      return `<li class="${cls}"><label><input type="checkbox"${checked}/>${legendSwatch(l)}${enc(l.label)} (${countPoints(l)})</label></li>`;
     })
     .join("");
   const legend = items ? `<ul>${items}</ul>` : "";
