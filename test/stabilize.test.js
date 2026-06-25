@@ -8,7 +8,7 @@ const STEP5 = 5 / MX; // ~5 m/s eastward in degrees of longitude
 test("stabilize: drops flagged points and reduces survivors to plain track points", () => {
   const pts = [
     { lat: 36, lon: 138, ele: 1000, time: 0 }, //                   kept
-    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                   sameTime -> dropped
+    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                   dup time -> smoothed -> dropped
     { lat: 36, lon: 138 + STEP5, ele: 1000, time: 1000 }, //        kept
     { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 2000 }, //    kept
   ];

@@ -75,12 +75,19 @@ test("drops the millisecond suffix for whole-second times", () => {
   assert.match(gpx, /<time>2026-01-17T09:00:00Z<\/time>/);
 });
 
-test("keeps sub-second precision when present", () => {
+test("outputs sub-second times at 0.1 s precision (one digit, rounded)", () => {
+  const t0 = Date.parse("2026-01-17T09:00:00Z");
   const gpx = writeGpx({
-    segments: [[{ lat: 1, lon: 2, ele: null, time: Date.parse("2026-01-17T09:00:00.5Z") }]],
+    segments: [
+      [
+        { lat: 1, lon: 2, ele: null, time: t0 + 500 }, // exact tenth -> .5
+        { lat: 1, lon: 2, ele: null, time: t0 + 167 }, // rounds to .2
+      ],
+    ],
     meta: {},
   });
-  assert.match(gpx, /<time>2026-01-17T09:00:00\.500Z<\/time>/);
+  assert.match(gpx, /<time>2026-01-17T09:00:00\.5Z<\/time>/);
+  assert.match(gpx, /<time>2026-01-17T09:00:00\.2Z<\/time>/);
 });
 
 test("caps coordinate precision and drops trailing zeros", () => {

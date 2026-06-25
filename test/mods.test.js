@@ -6,7 +6,7 @@ import { builtins, loadModule, validateModule } from "../src/mods/index.js";
 import { PARAMS } from "../src/profile.js";
 
 const outlier = builtins.find((m) => m.name === "outlier");
-const labelMods = builtins.filter((m) => m.label); // noTime, sameTime, oversample (in order)
+const labelMods = builtins.filter((m) => m.label); // noTime, oversample (in order)
 const ramp = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => f(i));
 
 // ── registry / contract / loader ──
@@ -14,20 +14,24 @@ const ramp = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => f(i));
 test("mods: builtins are the named modules, routed by callback", () => {
   assert.deepEqual(
     builtins.map((m) => m.name),
-    ["noTime", "sameTime", "oversample", "outlier", "activity", "drift", "kink"],
+    ["dequantizeTime", "noTime", "oversample", "outlier", "activity", "drift", "kink"],
   );
   assert.deepEqual(
     labelMods.map((m) => m.name),
-    ["noTime", "sameTime", "oversample"],
+    ["noTime", "oversample"],
+  );
+  assert.equal(
+    builtins.find((m) => m.name === "dequantizeTime").repair instanceof Function,
+    true, // dequantizeTime is repair-only
   );
   assert.equal(typeof outlier.compute, "function");
   assert.equal(outlier.label, undefined); // outlier is compute-only
 });
 
 test("validateModule: rejects a module with no callbacks", () => {
-  assert.throws(() => validateModule("bad", {}), /label and\/or compute/);
+  assert.throws(() => validateModule("bad", {}), /repair, label and\/or compute/);
   assert.throws(() => validateModule("", { compute: () => ({}) }), /non-empty string/);
-  const ok = validateModule("ok", { label: () => null });
+  const ok = validateModule("ok", { repair: () => {} });
   assert.equal(ok.name, "ok");
 });
 
@@ -41,27 +45,25 @@ test("loadModule: an unresolvable name throws", async () => {
   await assert.rejects(loadModule("definitely_not_a_module_xyz"), /cannot resolve module/);
 });
 
-// ── label-phase modules (noTime, sameTime, oversample) — drop via the reserved `drop` key ──
+// ── label-phase modules (noTime, oversample) — drop via the reserved `drop` key ──
 
-test("label: drops sameTime/oversample/noTime against the last kept point, keeps the rest", () => {
-  const at = (ms, lat = 36, lon = 138) => ({ lat, lon, ele: 0, time: ms });
+test("label: oversample drops sub-1 s points and noTime drops untimed, against the last kept", () => {
+  const at = (ms) => ({ lat: 36, lon: 138, ele: 0, time: ms });
   const bags = label(
     [
       at(0), //          kept (first timed)
-      at(0), //          sameTime (same time + position)
-      at(0, 36.1), //    sameTime conflict (same time, moved)
       at(500), //        oversample (< 1 s from the kept point)
       at(1500), //       kept (>= 1 s from the last kept point)
+      at(1800), //       oversample (< 1 s from the 1500 point)
       { lat: 36, lon: 138, ele: 0, time: null }, // noTime
     ],
     labelMods,
   );
   assert.equal(bags[0], null); // kept
-  assert.deepEqual(bags[1], { sameTime: { drop: { moved: false } } });
-  assert.deepEqual(bags[2], { sameTime: { drop: { moved: true } } });
-  assert.deepEqual(bags[3], { oversample: { drop: { gap: 500 } } });
-  assert.equal(bags[4], null); // kept (measured from the first point, not the dropped ones)
-  assert.deepEqual(bags[5], { noTime: { drop: true } });
+  assert.deepEqual(bags[1], { oversample: { drop: { gap: 500 } } });
+  assert.equal(bags[2], null); // kept (measured from the first point, not the dropped one)
+  assert.deepEqual(bags[3], { oversample: { drop: { gap: 300 } } });
+  assert.deepEqual(bags[4], { noTime: { drop: true } });
 });
 
 // ── compute-phase module (outlier) ──

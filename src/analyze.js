@@ -5,13 +5,16 @@
 // is the union of the measure and profile bundles.
 //
 // There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops are
-// recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`). Two symmetric
-// module phases, each producing ordinary outputs plus an optional reserved `drop`:
-//   - `label(point, lastKept)`: run on raw points before measurement (noTime, sameTime, oversample).
-//     A `drop` excludes the point from the projection centre and the time series (position + reasons
-//     only, no signals); any other keys ride on the point as namespaced labels.
-//   - `compute(ctx)`: run on the per-point context after the blocks (outlier, activity). Non-`drop`
-//     keys attach as `point[name][key]` (signals); `drop` flags a point that WAS measured.
+// recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`). Three module
+// phases:
+//   - `repair(points, edit)`: rewrite original values BEFORE anything reads them (dequantizeTime). Each
+//     `edit(point, field, value)` overwrites the field and logs provenance in `point.edited`
+//     (via `addEdit`); the new values flow through the whole pipeline and into the output.
+//   - `label(point, lastKept)`: run on the repaired raw points (noTime, oversample). A `drop` excludes
+//     the point from the projection centre and time series (position + reasons only, no signals);
+//     other keys ride on the point as namespaced labels.
+//   - `compute(ctx)`: run on the per-point context after the blocks (outlier, activity, drift, kink).
+//     Non-`drop` keys attach as `point[name][key]` (signals); `drop` flags a point that WAS measured.
 // Built-in modules (./mods) always run; caller modules are appended via `opts.modules`.
 
 import { measure } from "./measure.js";
@@ -29,19 +32,56 @@ export function analyze(points, opts = {}) {
   if (points.length === 0) return [];
 
   const all = [...builtins, ...modules];
-  const bags = label(
+  const pts = repairPoints(
     points,
+    all.filter((m) => m.repair),
+  ); // rewrite raw values before measuring
+  const bags = label(
+    pts,
     all.filter((m) => m.label),
   );
   const valid = keptIndices(bags);
-  const m = measure(points, valid); //           point-level primitives (positions, dt, planarStep)
+  const m = measure(pts, valid); //              point-level primitives (positions, dt, planarStep)
   const w = profile(m, paramOpts); //                   window-level descriptors (hs, straight, …)
   const ctx = { ...m, ...w }; //                        the per-point context: measure ∪ profile
 
   const modData = {};
   for (const mod of all.filter((mm) => mm.compute)) modData[mod.name] = mod.compute(ctx);
 
-  return assemble(points, bags, valid, ctx, modData);
+  return assemble(pts, bags, valid, ctx, modData);
+}
+
+/**
+ * Run the repair phase: copy the input (so the caller's points aren't mutated), then let each repair
+ * module rewrite values via an `edit` callback bound to its name. Returns the repaired copy.
+ * @param {object[]} points
+ * @param {import("./mods/index.js").Module[]} mods
+ * @returns {object[]}
+ */
+export function repairPoints(points, mods) {
+  const pts = points.map((p) => ({ ...p }));
+  for (const mod of mods)
+    mod.repair(pts, (point, field, value) => addEdit(point, field, value, mod.name));
+  return pts;
+}
+
+/**
+ * Overwrite `point[field]` and record the change centrally in `point.edited[field]` (capturing the
+ * original `from` once, the latest `to`, and the list of modules that touched it). Mirrors `addDrop`.
+ * @param {object} point
+ * @param {string} field
+ * @param {number} value
+ * @param {string} by  the editing module's name
+ * @returns {object} the same point
+ */
+export function addEdit(point, field, value, by) {
+  if (!point.edited) point.edited = {};
+  if (!point.edited[field]) point.edited[field] = { from: point[field], by: [] };
+  const e = point.edited[field];
+  e.to = value;
+  e.by.push(by);
+  point[field] = value;
+  return point;
 }
 
 /**

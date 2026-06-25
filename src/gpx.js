@@ -74,9 +74,10 @@ function fmt(n, digits) {
   return Number(n.toFixed(digits)).toString();
 }
 
-/** Epoch ms → ISO 8601, dropping the millisecond part when it is zero. */
+/** Epoch ms → ISO 8601 at 0.1 s precision (one sub-second digit); a whole second drops the fraction. */
 function isoTime(ms) {
-  return new Date(ms).toISOString().replace(/\.000Z$/, "Z");
+  const iso = new Date(Math.round(ms / 100) * 100).toISOString(); // round to a tenth of a second
+  return iso.replace(/\.(\d)\d\dZ$/, (_, d) => (d === "0" ? "Z" : `.${d}Z`));
 }
 
 /** Extract preserved file-level metadata. */

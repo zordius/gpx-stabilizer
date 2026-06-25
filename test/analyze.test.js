@@ -73,16 +73,19 @@ test("analyze: missing elevations are interpolated, never NaN", () => {
 test("analyze: kept points get full signals; dropped points get only position + drop reasons", () => {
   const out = analyze([
     { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  kept
-    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  sameTime
-    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 0 }, //          sameTime (moved)
+    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  dup time -> smoothed -> oversample
+    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 0 }, //          dup time -> smoothed -> oversample
     { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 500 }, //    oversample
     { lat: 36, lon: 138 + 3 * STEP5, ele: 1000, time: 1500 }, //   kept
     { lat: 36, lon: 138 + 4 * STEP5, ele: 1000, time: null }, //   noTime
   ]);
   assert.deepEqual(
     out.map((p) => (p.dropReason ? Object.keys(p.dropReason)[0] : "kept")),
-    ["kept", "sameTime", "sameTime", "oversample", "kept", "noTime"],
+    ["kept", "oversample", "oversample", "oversample", "kept", "noTime"],
   );
+  // the two duplicate-time points were re-timed by dequantizeTime (provenance kept centrally)
+  assert.ok(out[1].edited?.time && out[1].edited.time.by[0] === "dequantizeTime");
+  assert.equal(out[1].edited.time.from, 0); // original second preserved
   for (const p of out) assert.equal(typeof p.x, "number"); // every point projected
   for (const i of [1, 2, 3, 5]) assert.equal(out[i].hs, undefined, `dropped #${i} has no signals`);
   assert.equal(typeof out[0].hs, "number"); // kept points carry signals
@@ -174,13 +177,13 @@ test("analyze: excluded points get no module data", () => {
   const out = analyze(
     [
       { lat: 36, lon: 138, ele: 0, time: 0 }, //  kept
-      { lat: 36, lon: 138, ele: 0, time: 0 }, //  sameTime
+      { lat: 36, lon: 138, ele: 0, time: 0 }, //  dup time -> smoothed -> oversample dropped
     ],
     { modules: [m] },
   );
-  assert.ok(out[0].m); //                  kept point has the module
-  assert.ok(out[1].dropReason.sameTime); // dropped (sameTime)
-  assert.equal(out[1].m, undefined); //    dropped point has no module data
+  assert.ok(out[0].m); //                     kept point has the module
+  assert.ok(out[1].dropReason.oversample); // dropped (sub-1 s after re-timing)
+  assert.equal(out[1].m, undefined); //       dropped point has no module data
 });
 
 test("analyze: with no timed points the centre falls back to all points", () => {
