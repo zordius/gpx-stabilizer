@@ -51,16 +51,27 @@ export function toHtml(points, opts = {}) {
 const flipY = (p) => ({ ...p, y: -p.y });
 
 /**
- * Run the analysis pipeline and split the result into render layers: the clean track (kept points
- * as a line) plus one marker layer per drop reason of interest — `activity` (red circles) and
- * `outlier` (red squares). Every point already carries `x`/`y` (dropped ones too), so the drops plot
- * exactly where they were. `opts` flows to `analyze` (e.g. `activities`, param overrides).
+ * Run the analysis pipeline and split the result into render layers: the clean track (kept points as
+ * a line) plus one marker layer per drop reason — `drift`, `outlier`, `activity`. All drops render
+ * the same (red circles, 0.7 opacity); the separate layers exist only for the legend's per-reason
+ * count + toggle. Each dropped point lands in exactly ONE layer by priority drift > outlier >
+ * activity. Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
+ * `opts` flows to `analyze` (e.g. `activities`, param overrides).
  * @param {import("./measure.js").TrackPoint[]} points
  * @param {Parameters<typeof analyze>[1]} [opts]
  */
 export function analyzedLayers(points, opts = {}) {
   const out = analyze(points, opts);
-  const droppedBy = (mod) => out.filter((p) => p.dropReason?.[mod]).map(flipY);
+  // a dropped point goes to its highest-priority reason's layer (so it isn't drawn twice)
+  const droppedBy = (mod, not = []) =>
+    out.filter((p) => p.dropReason?.[mod] && !not.some((m) => p.dropReason?.[m])).map(flipY);
+  const dropLayer = (label, mod, not) => ({
+    label,
+    color: "#c00",
+    size: 4,
+    opacity: 0.7,
+    points: droppedBy(mod, not),
+  });
   return [
     {
       label: "clean",
@@ -68,22 +79,9 @@ export function analyzedLayers(points, opts = {}) {
       width: 1.5,
       lines: [out.filter((p) => !p.dropReason).map(flipY)],
     },
-    {
-      label: "activity drop",
-      color: "#c00",
-      shape: "circle",
-      size: 4,
-      opacity: 0.7,
-      points: droppedBy("activity"),
-    },
-    {
-      label: "outlier drop",
-      color: "#c00",
-      shape: "square",
-      size: 4,
-      opacity: 0.7,
-      points: droppedBy("outlier"),
-    },
+    dropLayer("drift", "drift", []),
+    dropLayer("outlier drop", "outlier", ["drift"]),
+    dropLayer("activity drop", "activity", ["drift", "outlier"]),
   ];
 }
 

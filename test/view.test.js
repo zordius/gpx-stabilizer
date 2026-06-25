@@ -33,7 +33,7 @@ test("toHtml: produces an HTML document with the gps layer (markers by default)"
   assert.match(html, /<path [^>]*d="M/); // no line width -> the track renders as markers
 });
 
-test("analyzedLayers: clean track line + activity (red circles) + outlier (red squares)", () => {
+test("analyzedLayers: clean track line + per-reason drop layers, unified red circles", () => {
   const mx = Math.cos((36 * Math.PI) / 180) * 111320;
   const step = 5 / mx; // ~5 m/s eastward
   const track = Array.from({ length: 30 }, (_, i) => ({
@@ -43,12 +43,18 @@ test("analyzedLayers: clean track line + activity (red circles) + outlier (red s
     time: i * 1000,
   }));
   track[15] = { ...track[15], lat: track[15].lat + 60 / 110540 }; // a ~60 m sideways spike
-  const [clean, activity, outlier] = analyzedLayers(track);
+  const layers = analyzedLayers(track);
+  const clean = layers[0];
   assert.equal(clean.label, "clean");
   assert.ok(clean.width > 0 && clean.lines[0].length > 0); // kept points as a line
-  assert.equal(activity.shape, "circle");
-  assert.equal(activity.color, "#c00");
-  assert.equal(outlier.shape, "square");
-  assert.ok(outlier.points.length >= 1, "the spike is flagged as an outlier drop");
   assert.ok(clean.lines[0].every((p) => typeof p.y === "number")); // y carried (flipped)
+
+  const byLabel = Object.fromEntries(layers.map((l) => [l.label, l]));
+  assert.ok(byLabel.drift && byLabel["outlier drop"] && byLabel["activity drop"]); // one layer/reason
+  for (const l of [byLabel.drift, byLabel["outlier drop"], byLabel["activity drop"]]) {
+    assert.equal(l.color, "#c00"); // all drops look the same…
+    assert.equal(l.opacity, 0.7);
+    assert.equal(l.shape, undefined); // …default circle, no per-reason shape
+  }
+  assert.ok(byLabel["outlier drop"].points.length >= 1, "the spike is an outlier drop");
 });

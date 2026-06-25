@@ -11,6 +11,7 @@
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as activity from "./activity.js";
+import * as drift from "./drift.js";
 import * as noTime from "./noTime.js";
 import * as outlier from "./outlier.js";
 import * as oversample from "./oversample.js";
@@ -47,6 +48,7 @@ export const builtins = [
   validateModule("oversample", oversample),
   validateModule("outlier", outlier),
   validateModule("activity", activity),
+  validateModule("drift", drift),
 ];
 
 /**
