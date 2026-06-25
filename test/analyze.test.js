@@ -58,9 +58,9 @@ test("analyze: a GPS spike becomes an outlier drop reason with high jitter", () 
   const pts = track({ n: 121, dlon: STEP5 });
   pts[60] = { ...pts[60], lat: pts[60].lat + 50 / 110540 }; // ~50 m sideways jump
   const out = analyze(pts);
-  assert.equal(out[60].dropCount, 1);
-  assert.ok(out[60].dropReason.outlier.detour > PARAMS.D_JUMP);
+  assert.ok(out[60].dropReason.outlier.detour > PARAMS.D_JUMP); // geometric detector
   assert.ok(out[60].maDist > 10, `maDist=${out[60].maDist}`);
+  assert.ok(out[60].dropReason.activity, "the envelope classifier also rejects it as implausible");
 });
 
 test("analyze: missing elevations are interpolated, never NaN", () => {

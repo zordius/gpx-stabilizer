@@ -1,7 +1,9 @@
 // Point-level measurement — the pure, parameter-free core (ported from the Python prototype's L1
 // CORE first step, gpx_stabilize.py 216–261). It projects each point to local meters and takes
-// adjacent-pair deltas; every value depends only on a point and its immediate neighbour (O(1)/point,
-// no window), so this layer needs no tuning params. Windowed descriptors live in ./profile.js;
+// adjacent-pair deltas plus the 3D kinematic derivatives (velocity, acceleration); every value
+// depends only on a point and its immediate neighbour (O(1)/point, no window), so this layer needs
+// no tuning params. `deltas` is planar (x/y); `kinematics` adds the 3D derivative tower. Windowed
+// descriptors live in ./profile.js;
 // screening/modules/labelling in ./analyze.js. `measure()` runs the numbered blocks below; each
 // block is its own exported pure function (unit-testable in isolation).
 
@@ -45,9 +47,13 @@ function interpEle(raw) {
 
 /**
  * Run the point-level blocks over `points`, treating `valid` (an index array) as the trusted time
- * series: the projection centre is their mean and the deltas run along them. Every point is still
- * projected (so excluded points get `xAll/yAll`). Returns the per-point primitive bundle that
- * profile.js turns into windowed descriptors and analyze.js assembles back onto the points.
+ * series: the projection centre is their mean and the deltas/directions run along them. Every point
+ * is still projected (so excluded points get `xAll/yAll`). Returns the per-point primitive bundle
+ * that profile.js turns into windowed descriptors and analyze.js assembles back onto the points.
+ *
+ * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `step`; and
+ * the 3D kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
+ * (vector, unit direction, magnitude). The per-step arrays have length `valid.length − 1`.
  *
  * @param {TrackPoint[]} points
  * @param {number[]} valid  indices of the trusted/timed points
@@ -55,7 +61,8 @@ function interpEle(raw) {
 export function measure(points, valid) {
   const { xAll, yAll, x, y, el, t } = project(points, valid); // block 1
   const { dt, step } = deltas(x, y, t); //                      block 2
-  return { xAll, yAll, x, y, el, t, dt, step, n: valid.length };
+  const { velocity, acceleration } = kinematics(x, y, el, dt); // block 3
+  return { xAll, yAll, x, y, el, t, dt, step, velocity, acceleration, n: valid.length };
 }
 
 /**
@@ -77,14 +84,63 @@ export function project(points, valid) {
   return { xAll, yAll, x, y, el, t };
 }
 
-/** Block 2 — per-step distance and time delta (dt floored at 1 s against duplicate timestamps). */
+/** Block 2 — per-step planar distance and time delta (dt floored at 1 s against duplicate stamps). */
 export function deltas(x, y, t) {
   const n = x.length;
   const dt = new Array(Math.max(0, n - 1));
   const step = new Array(Math.max(0, n - 1));
   for (let i = 0; i < n - 1; i++) {
     dt[i] = Math.max(t[i + 1] - t[i], 1.0);
-    step[i] = Math.hypot(x[i + 1] - x[i], y[i + 1] - y[i]);
+    step[i] = Math.hypot(x[i + 1] - x[i], y[i + 1] - y[i]); // planar (x/y only)
   }
   return { dt, step };
+}
+
+/**
+ * Block 3 — the 3D kinematic derivative tower of position (the first 3D quantities here; deltas
+ * above is planar). `velocity` = Δposition / Δt (m/s); `acceleration` = Δvelocity / Δt (m/s², the
+ * second derivative of position) — its [0] is the zero vector (no previous step). Each order is the
+ * same shape `{ vec, dir, mag }`: the vector, its 3D unit direction, and its magnitude — so
+ * `velocity.mag` is the 3D speed and `velocity.dir` the heading. Add a `jerk` order the same way if
+ * ever needed — but 3rd-order differences of 1 Hz GPS are dominated by noise.
+ */
+export function kinematics(x, y, el, dt) {
+  const s = Math.max(0, x.length - 1); // one value per step
+  // order 1 — velocity = Δposition / Δt
+  const velocity = derivOrder(s, (i) => {
+    const h = dt[i] || 1;
+    return [(x[i + 1] - x[i]) / h, (y[i + 1] - y[i]) / h, (el[i + 1] - el[i]) / h];
+  });
+  // order 2 — acceleration = Δvelocity / Δt (zero at the first step)
+  const v = velocity.vec;
+  const acceleration = derivOrder(s, (i) => {
+    if (i === 0) return [0, 0, 0];
+    const h = dt[i] || 1;
+    return [(v.x[i] - v.x[i - 1]) / h, (v.y[i] - v.y[i - 1]) / h, (v.z[i] - v.z[i - 1]) / h];
+  });
+  return { velocity, acceleration };
+}
+
+/** Build one derivative-order record `{ vec, dir, mag }` from a per-step vector function. */
+function derivOrder(s, vecAt) {
+  const vx = new Array(s);
+  const vy = new Array(s);
+  const vz = new Array(s);
+  const dx = new Array(s);
+  const dy = new Array(s);
+  const dz = new Array(s);
+  const mag = new Array(s);
+  for (let i = 0; i < s; i++) {
+    const [ax, ay, az] = vecAt(i);
+    vx[i] = ax;
+    vy[i] = ay;
+    vz[i] = az;
+    const m = Math.hypot(ax, ay, az);
+    mag[i] = m;
+    const inv = m > 1e-9 ? 1 / m : 0; // a zero vector has no direction
+    dx[i] = ax * inv;
+    dy[i] = ay * inv;
+    dz[i] = az * inv;
+  }
+  return { vec: { x: vx, y: vy, z: vz }, dir: { x: dx, y: dy, z: dz }, mag };
 }
