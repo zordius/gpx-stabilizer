@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { toHtml, toLayers, withXY } from "../src/view.js";
+import { analyzedLayers, toHtml, toLayers, withXY } from "../src/view.js";
 
 const pts = [
   { lat: 0, lon: 0 },
@@ -31,4 +31,24 @@ test("toHtml: produces an HTML document with the gps layer (markers by default)"
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /<g id="layer-gps"/);
   assert.match(html, /<path d="M/); // no line width -> the track renders as markers
+});
+
+test("analyzedLayers: clean track line + activity (red circles) + outlier (red squares)", () => {
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx; // ~5 m/s eastward
+  const track = Array.from({ length: 30 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  track[15] = { ...track[15], lat: track[15].lat + 60 / 110540 }; // a ~60 m sideways spike
+  const [clean, activity, outlier] = analyzedLayers(track);
+  assert.equal(clean.label, "clean");
+  assert.ok(clean.width > 0 && clean.lines[0].length > 0); // kept points as a line
+  assert.equal(activity.shape, "circle");
+  assert.equal(activity.color, "#c00");
+  assert.equal(outlier.shape, "square");
+  assert.ok(outlier.points.length >= 1, "the spike is flagged as an outlier drop");
+  assert.ok(clean.lines[0].every((p) => typeof p.y === "number")); // y carried (flipped)
 });

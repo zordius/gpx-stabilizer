@@ -1,8 +1,9 @@
 // Render adapter — turn GPS points into the Layer shapes html.js draws. Projection happens HERE
-// (lat/lon → local-meter x/y, SVG y-down so north is up); html.js then plots x/y directly and a
-// top-level <g> transform zooms to fit. Basic version: every input point in one "gps" track layer.
-// (Future: split by dropReason, colour kept vs. dropped, mark outliers, etc.)
+// (lat/lon → local-meter x/y, y flipped so north is up); html.js sizes/zooms via CSS. `toLayers`
+// plots the raw points in one layer; `analyzedLayers` runs the pipeline and splits the result into
+// a clean track plus per-reason drop markers.
 
+import { analyze } from "./analyze.js";
 import { writeHtml } from "./html.js";
 import { project } from "./measure.js";
 
@@ -44,6 +45,44 @@ export function toLayers(points, opts = {}) {
 export function toHtml(points, opts = {}) {
   const title = opts.title ?? "GPX Stabilizer Viewer";
   return writeHtml([{ layers: toLayers(points, opts) }], { title });
+}
+
+/** analyze stores raw (south-down) y; flip it for north-up SVG, keeping every field. */
+const flipY = (p) => ({ ...p, y: -p.y });
+
+/**
+ * Run the analysis pipeline and split the result into render layers: the clean track (kept points
+ * as a line) plus one marker layer per drop reason of interest — `activity` (red circles) and
+ * `outlier` (red squares). Every point already carries `x`/`y` (dropped ones too), so the drops plot
+ * exactly where they were. `opts` flows to `analyze` (e.g. `activities`, param overrides).
+ * @param {import("./measure.js").TrackPoint[]} points
+ * @param {Parameters<typeof analyze>[1]} [opts]
+ */
+export function analyzedLayers(points, opts = {}) {
+  const out = analyze(points, opts);
+  const droppedBy = (mod) => out.filter((p) => p.dropReason?.[mod]).map(flipY);
+  return [
+    {
+      label: "clean",
+      color: "#06c",
+      width: 1.5,
+      lines: [out.filter((p) => !p.dropReason).map(flipY)],
+    },
+    {
+      label: "activity drop",
+      color: "#c00",
+      shape: "circle",
+      size: 4,
+      points: droppedBy("activity"),
+    },
+    {
+      label: "outlier drop",
+      color: "#c00",
+      shape: "square",
+      size: 4,
+      points: droppedBy("outlier"),
+    },
+  ];
 }
 
 /** Min/max of an array via reduce (avoids spread-arg limits on long tracks). */
@@ -95,6 +134,21 @@ export function toHtmlFiles(files, opts = {}) {
   return writeHtml(panels, {
     title: opts.title ?? "GPX Stabilizer",
     heading: opts.heading ?? "GPX Stabilizer",
+    summary: summarize(files),
+  });
+}
+
+/**
+ * Like `toHtmlFiles`, but each panel shows the analysed result — the clean track plus drop markers
+ * via `analyzedLayers`. `opts` flows to `analyze`.
+ * @param {Array<{ name: string, points: import("./measure.js").TrackPoint[] }>} files
+ * @param {Parameters<typeof analyze>[1] & { title?: string, heading?: string }} [opts]
+ */
+export function toHtmlAnalyzedFiles(files, opts = {}) {
+  const panels = files.map((f) => ({ title: f.name, layers: analyzedLayers(f.points, opts) }));
+  return writeHtml(panels, {
+    title: opts.title ?? "GPX Stabilizer",
+    heading: opts.heading ?? "GPX Stabilizer — analyzed",
     summary: summarize(files),
   });
 }
