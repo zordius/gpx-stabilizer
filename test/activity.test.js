@@ -60,6 +60,14 @@ test("activity: flight needs the coupled box; skydive must be opted in", () => {
   );
 });
 
+test("activity: uses device <speed> for hspeed when present (overrides position-derived)", () => {
+  // computed horizontal velocity is ~0 (stationary geometry), but the device says 80 m/s
+  const ctx = ctxFor({ hspeed: 0, accel: 2 });
+  ctx.speed = [80, 80]; // device <speed> per valid point
+  const { modes } = compute(ctx);
+  assert.ok(modes[0].includes("flight")); // classified by the device speed (80 m/s), not the 0
+});
+
 test("activity: integrates as a core builtin — a clean ski-speed track keeps every point", () => {
   const mx = Math.cos((36 * Math.PI) / 180) * 111320;
   const step = 15 / mx; // ~15 m/s eastward

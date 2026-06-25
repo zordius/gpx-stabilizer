@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deltas, kinematics, measure, project } from "../src/measure.js";
+import { deltas, kinematics, measure, project, speedOf } from "../src/measure.js";
 
 // ════════════════════════════════════════════════════════════════════════════════════════
 // Point-level blocks — projection + adjacent deltas, the parameter-free core. Tested directly
@@ -87,4 +87,15 @@ test("measure: projects all points and takes adjacent deltas over the valid sub-
   assert.equal(m.acceleration.mag.length, 120);
   assert.ok(Math.abs(m.velocity.mag[60] - 5) < 0.1, `speed=${m.velocity.mag[60]}`);
   assert.ok(m.acceleration.mag[60] < 1e-6, `accMag=${m.acceleration.mag[60]}`);
+  assert.equal(m.speed.length, 121); // device speed carried per valid point
+  assert.equal(m.speed[60], null); // these synthetic points have no <speed>
+});
+
+test("speedOf: device speed when present, else the planar velocity magnitude", () => {
+  const ctx = {
+    speed: [null, 7, null],
+    velocity: { vec: { x: [3, 3, 3], y: [4, 4, 4], z: [0, 0, 0] }, mag: [5, 5, 5] },
+  };
+  assert.equal(speedOf(ctx, 1), 7); // device <speed> present -> use it
+  assert.ok(Math.abs(speedOf(ctx, 0) - 5) < 1e-9); // absent -> hypot(3, 4) = 5
 });

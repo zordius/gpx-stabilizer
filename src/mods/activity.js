@@ -13,6 +13,8 @@
 // (vspeed signed, + up), accel m/s², turn rad. Numbers are tunable heuristics from the
 // human-movement envelope table, not hard facts.
 
+import { speedOf } from "../measure.js";
+
 const PI = Math.PI;
 
 export const ACTIVITIES = {
@@ -76,7 +78,7 @@ export const compute = (ctx) => {
     const k = Math.min(p, s - 1); // each point uses its leaving step (last point reuses the last)
     const f = {
       alt: el[p],
-      hspeed: Math.hypot(velocity.vec.x[k], velocity.vec.y[k]),
+      hspeed: speedOf(ctx, p), // device <speed> if present, else |horizontal velocity|
       vspeed: velocity.vec.z[k],
       accel: acceleration.mag[k],
       turn: turnAt(velocity.dir, k),

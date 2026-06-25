@@ -53,7 +53,8 @@ function interpEle(raw) {
  *
  * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `planarStep`; and
  * the 3D kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
- * (vector, unit direction, magnitude). The per-step arrays have length `valid.length − 1`.
+ * (vector, unit direction, magnitude); and `speed` = the device `<speed>` per valid point (or null).
+ * The per-step arrays have length `valid.length − 1`.
  *
  * @param {TrackPoint[]} points
  * @param {number[]} valid  indices of the trusted/timed points
@@ -62,7 +63,24 @@ export function measure(points, valid) {
   const { xAll, yAll, x, y, el, t } = project(points, valid); // block 1
   const { dt, planarStep } = deltas(x, y, t); //                block 2
   const { velocity, acceleration } = kinematics(x, y, el, dt); // block 3
-  return { xAll, yAll, x, y, el, t, dt, planarStep, velocity, acceleration, n: valid.length };
+  const speed = valid.map((i) => points[i].speed ?? null); //   device <speed> per valid point, or null
+  return { xAll, yAll, x, y, el, t, dt, planarStep, velocity, acceleration, speed, n: valid.length };
+}
+
+/**
+ * Canonical horizontal speed at valid-point `p` (m/s): the device `<speed>` if the source GPX gave
+ * one, else the magnitude of the planar (x/y) velocity. The single place this rule lives — consumers
+ * that want "the best speed we have" call this rather than re-deriving it. (Device Doppler speed is
+ * cleaner; position-differenced speed runs ~5 % high from jitter.)
+ * @param {ReturnType<typeof measure>} ctx  a measure bundle (needs `speed`, `velocity`)
+ * @param {number} p  valid-point index
+ */
+export function speedOf(ctx, p) {
+  if (ctx.speed?.[p] != null) return ctx.speed[p];
+  const s = ctx.velocity.mag.length; // per-step count; the last point reuses the last step
+  if (s === 0) return 0;
+  const k = Math.min(p, s - 1);
+  return Math.hypot(ctx.velocity.vec.x[k], ctx.velocity.vec.y[k]);
 }
 
 /**
