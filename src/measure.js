@@ -100,8 +100,13 @@ function padOrder(o) {
 /**
  * Canonical horizontal speed at valid-point `p` (m/s): the device `<speed>` if the source GPX gave
  * one, else the magnitude of the planar (x/y) velocity. The single place this rule lives — consumers
- * that want "the best speed we have" call this rather than re-deriving it. (Device Doppler speed is
- * cleaner; position-differenced speed runs ~5 % high from jitter.)
+ * that want "the best speed we have" call this rather than re-deriving it.
+ *
+ * Caveat: the device `<speed>` is NOT an independent Doppler reading on this data. Measured against the
+ * position-derived speed it moves in lockstep — e.g. ~2.4 m/s while the receiver sits physically still
+ * during indoor drift — so it inherits the same GPS jitter and gives NO edge when stationary. Don't
+ * trust it (or any horizontal speed) to detect a stop; the only honest "not moving" signal during
+ * drift is the vertical axis (`vs ≈ 0`, barometric).
  * @param {ReturnType<typeof measure>} ctx  a measure bundle (needs `speed`, `velocity`)
  * @param {number} p  valid-point index
  */
