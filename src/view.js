@@ -57,16 +57,18 @@ export function toHtml(points, opts = {}) {
 const flipY = (p) => ({ ...p, y: -p.y });
 
 /**
- * Run the analysis pipeline and split the result into render layers: the clean track (kept points as
- * a line) plus one marker layer per drop reason — `drift`, `outlier`, `activity`. All drops render
+ * Run the analysis pipeline and split the result into render layers: a faint `raw` line of every
+ * input point (background reference), the clean track (kept points as a line), plus one marker layer
+ * per drop reason — `drift`, `outlier`, `activity`. All drops render
  * the same (red circles, 0.7 opacity); the separate layers exist only for the legend's per-reason
  * count + toggle. Each dropped point lands in exactly ONE layer by priority drift > outlier >
  * activity. Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
  * `opts` flows to `analyze` (e.g. `activities`, param overrides).
- * `opts.breakLine` (kept → segments) splits the clean track into separate polylines; the default
- * keeps it whole (one segment). This is the seam the upcoming `斷開` function plugs into.
+ * The clean track is split into separate polylines by `opts.breakLine(out) → runs`; the default
+ * cuts it at every dropped point (a drop = a break, no line across the gap). This is the seam the
+ * fuller `斷開` function (time/distance-gap cuts) plugs into.
  * @param {import("./measure.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { breakLine?: (kept: object[]) => object[][] }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { breakLine?: (out: object[]) => object[][] }} [opts]
  */
 export function analyzedLayers(points, opts = {}) {
   const out = analyze(points, opts);
@@ -80,15 +82,34 @@ export function analyzedLayers(points, opts = {}) {
     opacity: 0.7,
     points: droppedBy(mod, not),
   });
-  const kept = out.filter((p) => !p.dropReason);
-  const breakLine = opts.breakLine ?? ((pts) => [pts]); // `斷開` (next) splits kept into runs
+  // default `斷開`: cut the clean line at every dropped point — accumulate kept points into a run,
+  // and close the run whenever a drop interrupts it, so no line is drawn across a removed point.
+  // opts.breakLine(out) can override with richer cut rules (time/distance gaps); it receives the
+  // full ordered point list (drops included) and returns the runs of points to draw.
+  const splitAtDrops = (pts) => {
+    const runs = [];
+    let cur = [];
+    for (const p of pts) {
+      if (p.dropReason) {
+        if (cur.length) runs.push(cur);
+        cur = [];
+      } else {
+        cur.push(p);
+      }
+    }
+    if (cur.length) runs.push(cur);
+    return runs;
+  };
+  const breakLine = opts.breakLine ?? splitAtDrops;
+  const cleanLayer = {
+    label: "clean",
+    color: "#06c",
+    width: 1.5,
+    lines: breakLine(out).map((run) => run.map(flipY)),
+  };
+  // Layers render back-to-front: drops + kink first, then the raw track, then the clean line LAST so
+  // it sits on top of raw. `out` is every point in order (drops included) → the full raw line.
   return [
-    {
-      label: "clean",
-      color: "#06c",
-      width: 1.5,
-      lines: breakLine(kept).map((run) => run.map(flipY)),
-    },
     dropLayer("drift", "drift", []),
     dropLayer("outlier drop", "outlier", ["drift"]),
     dropLayer("activity drop", "activity", ["drift", "outlier"]),
@@ -100,6 +121,8 @@ export function analyzedLayers(points, opts = {}) {
       opacity: 0.7,
       points: out.filter((p) => p.kink?.at).map(flipY),
     },
+    { label: "raw", color: "#888", width: 1, opacity: 0.7, lines: [out.map(flipY)] },
+    cleanLayer,
   ];
 }
 

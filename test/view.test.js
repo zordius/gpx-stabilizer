@@ -64,12 +64,16 @@ test("analyzedLayers: clean track line + per-reason drop layers, unified red cir
   }));
   track[15] = { ...track[15], lat: track[15].lat + 60 / 110540 }; // a ~60 m sideways spike
   const layers = analyzedLayers(track);
-  const clean = layers[0];
-  assert.equal(clean.label, "clean");
-  assert.ok(clean.width > 0 && clean.lines[0].length > 0); // kept points as a line
+  const clean = layers.find((l) => l.label === "clean");
+  assert.equal(layers[layers.length - 1].label, "clean"); // clean renders LAST = on top
+  assert.ok(clean.width > 0);
+  // a drop = a break: the outlier spike at 15 cuts the clean line into two runs
+  assert.equal(clean.lines.length, 2);
+  assert.ok(clean.lines.every((run) => run.length > 0)); // both runs hold kept points
   assert.ok(clean.lines[0].every((p) => typeof p.y === "number")); // y carried (flipped)
 
   const byLabel = Object.fromEntries(layers.map((l) => [l.label, l]));
+  assert.ok(byLabel.raw && byLabel.raw.lines[0].length === track.length); // raw = every input point
   assert.ok(byLabel.drift && byLabel["outlier drop"] && byLabel["activity drop"]); // one layer/reason
   for (const l of [byLabel.drift, byLabel["outlier drop"], byLabel["activity drop"]]) {
     assert.equal(l.color, "#c00"); // all drops look the same…
