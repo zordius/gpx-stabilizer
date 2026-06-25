@@ -70,18 +70,17 @@ function turnAt(dir, k) {
 export const compute = (ctx) => {
   const { el, velocity, acceleration, n, g } = ctx;
   const enabled = (g.activities ?? CORE_DEFAULT).filter((name) => ACTIVITIES[name]);
-  const s = velocity.mag.length; // per-step count (n-1)
   const modes = new Array(n).fill(null);
   const drop = new Array(n).fill(null);
-  if (s === 0) return { modes, drop }; // fewer than 2 points: nothing to classify
+  if (velocity.mag.length === 0) return { modes, drop }; // fewer than 2 points: nothing to classify
   for (let p = 0; p < n; p++) {
-    const k = Math.min(p, s - 1); // each point uses its leaving step (last point reuses the last)
+    // every bundle array is per-point length n (the last point reuses its neighbour), so index by p
     const f = {
       alt: el[p],
       hspeed: speedOf(ctx, p), // device <speed> if present, else |horizontal velocity|
-      vspeed: velocity.vec.z[k],
-      accel: acceleration.mag[k],
-      turn: turnAt(velocity.dir, k),
+      vspeed: velocity.vec.z[p],
+      accel: acceleration.mag[p],
+      turn: turnAt(velocity.dir, p),
     };
     const matched = enabled.filter((name) => fits(ACTIVITIES[name], f));
     if (matched.length > 0) modes[p] = matched;

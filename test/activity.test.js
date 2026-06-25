@@ -3,20 +3,21 @@ import { test } from "node:test";
 import { analyze } from "../src/analyze.js";
 import { ACTIVITIES, CORE_DEFAULT, compute } from "../src/mods/activity.js";
 
-// One step's worth of kinematics carrying the features under test (point 0 reads step 0).
+// Two per-point points carrying the features under test (measure bundles are padded to length n).
 function ctxFor({ alt = 1000, hspeed = 0, vspeed = 0, accel = 0 }, g = {}) {
+  const dup = (v) => [v, v];
   return {
     el: [alt, alt],
     n: 2,
     velocity: {
-      vec: { x: [hspeed], y: [0], z: [vspeed] },
-      dir: { x: [1], y: [0], z: [0] },
-      mag: [Math.hypot(hspeed, vspeed)],
+      vec: { x: dup(hspeed), y: dup(0), z: dup(vspeed) },
+      dir: { x: dup(1), y: dup(0), z: dup(0) },
+      mag: dup(Math.hypot(hspeed, vspeed)),
     },
     acceleration: {
-      vec: { x: [accel], y: [0], z: [0] },
-      dir: { x: [1], y: [0], z: [0] },
-      mag: [accel],
+      vec: { x: dup(accel), y: dup(0), z: dup(0) },
+      dir: { x: dup(1), y: dup(0), z: dup(0) },
+      mag: dup(accel),
     },
     g,
   };

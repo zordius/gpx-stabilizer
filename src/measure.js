@@ -54,7 +54,8 @@ function interpEle(raw) {
  * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `planarStep`; and
  * the 3D kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
  * (vector, unit direction, magnitude); and `speed` = the device `<speed>` per valid point (or null).
- * The per-step arrays have length `valid.length − 1`.
+ * Every array is per-point length `valid.length` — the per-step quantities are padded so the last
+ * point reuses the previous step's value, so consumers index directly by point (no n−1 offset).
  *
  * @param {TrackPoint[]} points
  * @param {number[]} valid  indices of the trusted/timed points
@@ -64,7 +65,36 @@ export function measure(points, valid) {
   const { dt, planarStep } = deltas(x, y, t); //                block 2
   const { velocity, acceleration } = kinematics(x, y, el, dt); // block 3
   const speed = valid.map((i) => points[i].speed ?? null); //   device <speed> per valid point, or null
-  return { xAll, yAll, x, y, el, t, dt, planarStep, velocity, acceleration, speed, n: valid.length };
+  // Align every per-step array to per-point length n: the last point reuses the previous step's
+  // value ("same as its neighbour"), so all bundle arrays index directly by point — no n-1 offset.
+  return {
+    xAll,
+    yAll,
+    x,
+    y,
+    el,
+    t,
+    dt: padLast(dt),
+    planarStep: padLast(planarStep),
+    velocity: padOrder(velocity),
+    acceleration: padOrder(acceleration),
+    speed,
+    n: valid.length,
+  };
+}
+
+/** Pad a per-step array (length n−1) to per-point length n by repeating the last value. */
+function padLast(a) {
+  return a.length ? [...a, a[a.length - 1]] : a;
+}
+
+/** padLast applied to a derivative-order record's component arrays. */
+function padOrder(o) {
+  return {
+    vec: { x: padLast(o.vec.x), y: padLast(o.vec.y), z: padLast(o.vec.z) },
+    dir: { x: padLast(o.dir.x), y: padLast(o.dir.y), z: padLast(o.dir.z) },
+    mag: padLast(o.mag),
+  };
 }
 
 /**
@@ -77,10 +107,8 @@ export function measure(points, valid) {
  */
 export function speedOf(ctx, p) {
   if (ctx.speed?.[p] != null) return ctx.speed[p];
-  const s = ctx.velocity.mag.length; // per-step count; the last point reuses the last step
-  if (s === 0) return 0;
-  const k = Math.min(p, s - 1);
-  return Math.hypot(ctx.velocity.vec.x[k], ctx.velocity.vec.y[k]);
+  const v = ctx.velocity.vec;
+  return v.x.length ? Math.hypot(v.x[p], v.y[p]) : 0;
 }
 
 /**

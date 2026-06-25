@@ -77,14 +77,16 @@ test("measure: projects all points and takes adjacent deltas over the valid sub-
   const m = measure(points, [...points.keys()]);
   assert.equal(m.xAll.length, 121); // every point projected
   assert.equal(m.n, 121);
-  assert.equal(m.planarStep.length, 120); // adjacent-pair deltas over the sub-sequence
-  assert.equal(m.dt.length, 120);
+  // per-step arrays are padded to per-point length n (the last point reuses the previous step)
+  assert.equal(m.planarStep.length, 121);
+  assert.equal(m.dt.length, 121);
   assert.ok(Math.abs(m.planarStep[60] - 5) < 0.1, `planarStep=${m.planarStep[60]}`); // ~5 m/step
   assert.equal(m.dt[60], 1); // 1 s between samples
+  assert.equal(m.planarStep[120], m.planarStep[119]); // last point reuses its neighbour
   // 3D kinematics: flat eastward constant-speed run -> speed == planar step, no acceleration
-  assert.equal(m.velocity.dir.x.length, 120);
-  assert.equal(m.velocity.mag.length, 120);
-  assert.equal(m.acceleration.mag.length, 120);
+  assert.equal(m.velocity.dir.x.length, 121);
+  assert.equal(m.velocity.mag.length, 121);
+  assert.equal(m.acceleration.mag.length, 121);
   assert.ok(Math.abs(m.velocity.mag[60] - 5) < 0.1, `speed=${m.velocity.mag[60]}`);
   assert.ok(m.acceleration.mag[60] < 1e-6, `accMag=${m.acceleration.mag[60]}`);
   assert.equal(m.speed.length, 121); // device speed carried per valid point
