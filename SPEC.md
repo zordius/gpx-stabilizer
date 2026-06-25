@@ -50,7 +50,7 @@ projects **every** point so dropped points still get a position.
 - **block 1 `project`** — lat/lon → local meters (`x/y`, centre = mean of valid; longitude
   compressed by `cos(lat0)`), elevation interpolated (`el`), time (`t`). **Planar x/y never uses
   altitude.**
-- **block 2 `deltas`** — per-step **planar** distance `step = hypot(Δx, Δy)` and `dt` (floored at 1 s).
+- **block 2 `deltas`** — per-step **planar** distance `planarStep = hypot(Δx, Δy)` and `dt` (floored at 1 s).
 - **block 3 `kinematics`** — the 3D **derivative tower** of position. Physics-named, each order the
   same shape `{ vec, dir, mag }` (vector, 3D unit direction, magnitude):
   - `velocity` = Δposition / Δt (m/s) — `mag` is 3D speed, `dir` the heading.
@@ -163,6 +163,32 @@ Beyond the base + the eval viewer, still to come:
 - OSM validation
 - CLI wiring (`gpx-stabilize`) — currently a stub
 - temporal activity segmentation (smooth per-point `activity.modes` into activity runs)
+
+## Design notes — per-stage roadmap & open reviews
+
+Working notes on where each pipeline stage is headed. "review" = revisit the design before adding to
+it. (Stage numbers match the pipeline diagram: ① screen → ② measure → ③ profile → ⑤ compute → ⑥
+assemble.)
+
+- **① screen → a raw-point `label` phase (planned)** — candidate modules that need only the raw point
+  (so they fit pre-measurement): **`country`**, and various **OSM-provided polygons** (region / area /
+  piste membership, e.g. drop-outside-resort). Resolved direction: reframe the phase as **labelling
+  raw points**, with **`drop` as one reserved, core-level label** — its immediate effect is to exclude
+  the point from the valid series and record a `dropReason`. Non-drop labels (`country`, `inResort`,
+  …) ride on the point for later stages to branch on, so a region filter can either `drop` early
+  (saves measuring points it would discard) or just label and let downstream decide. This makes the
+  two phases **symmetric**: pre-measure emits **labels + drop**; post-measure (`compute`) already emits
+  **signals + drop**. Rename `screen` → `label(point, lastKept)`; still sequential (a `drop` label
+  updates `lastKept`, other labels don't). The name `label` is provisional.
+- **② measure** — future modules: **not yet known; to discuss.**
+- **③ profile** — **to review again.** The window-level descriptor set is inherited from the
+  prototype; re-examine which descriptors earn their place.
+- **⑤ compute + ⑥ assemble** — **to review again.** Module I/O shape, the per-point vs per-step
+  alignment (today each compute module re-aligns itself, e.g. `k = min(p, s-1)`), and the unified
+  **label / signal / drop** data model: `drop` is a reserved output of *both* phases; labels (pre-
+  measure) and signals (post-measure) are the ordinary outputs; assemble merges all three onto points.
+- **Viewer** — still to connect to `analyze`: colour kept vs dropped points, mark `activity.modes`,
+  shade by a signal (e.g. `hs`). This is the last mile that makes every signal above visible.
 
 ## Reference
 
