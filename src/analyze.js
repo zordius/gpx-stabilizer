@@ -1,17 +1,17 @@
-// Analyze a track: screen raw points (drop bad ones), measure the survivors, profile their
-// neighbourhoods, run compute modules, and assemble everything back onto the original points. This
-// is the orchestration/policy layer on top of the point-level engine (./measure.js), the
-// window-level descriptors (./profile.js), and the pluggable modules (./mods). The per-point context
-// modules see is the union of the measure and profile bundles.
+// Analyze a track: label raw points, measure the survivors, profile their neighbourhoods, run
+// compute modules, and assemble everything back onto the original points. This is the
+// orchestration/policy layer on top of the point-level engine (./measure.js), the window-level
+// descriptors (./profile.js), and the pluggable modules (./mods). The per-point context modules see
+// is the union of the measure and profile bundles.
 //
-// There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops
-// are recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`), contributed
-// by modules in two phases — a module joins a phase by exposing that phase's callback:
-//   - `screen(point, lastKept)`: run on raw points before measurement (noTime, sameTime,
-//     oversample). A point it drops is excluded from the projection centre and the time series, so
-//     it carries only `x, y` and its drop reasons — no signals.
-//   - `compute(ctx)`: run on the per-point context after the blocks (outlier). These flag points
-//     that DO carry signals; non-`drop` keys attach as `point[name][key]`.
+// There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops are
+// recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`). Two symmetric
+// module phases, each producing ordinary outputs plus an optional reserved `drop`:
+//   - `label(point, lastKept)`: run on raw points before measurement (noTime, sameTime, oversample).
+//     A `drop` excludes the point from the projection centre and the time series (position + reasons
+//     only, no signals); any other keys ride on the point as namespaced labels.
+//   - `compute(ctx)`: run on the per-point context after the blocks (outlier, activity). Non-`drop`
+//     keys attach as `point[name][key]` (signals); `drop` flags a point that WAS measured.
 // Built-in modules (./mods) always run; caller modules are appended via `opts.modules`.
 
 import { measure } from "./measure.js";
@@ -29,11 +29,11 @@ export function analyze(points, opts = {}) {
   if (points.length === 0) return [];
 
   const all = [...builtins, ...modules];
-  const preDrops = screen(
+  const bags = label(
     points,
-    all.filter((m) => m.screen),
+    all.filter((m) => m.label),
   );
-  const valid = keptIndices(preDrops);
+  const valid = keptIndices(bags);
   const m = measure(points, valid); //           point-level primitives (positions, dt, planarStep)
   const w = profile(m, paramOpts); //                   window-level descriptors (hs, straight, …)
   const ctx = { ...m, ...w }; //                        the per-point context: measure ∪ profile
@@ -41,37 +41,47 @@ export function analyze(points, opts = {}) {
   const modData = {};
   for (const mod of all.filter((mm) => mm.compute)) modData[mod.name] = mod.compute(ctx);
 
-  return assemble(points, preDrops, valid, ctx, modData);
+  return assemble(points, bags, valid, ctx, modData);
 }
 
 /**
- * Run the screen modules over the raw points in one sweep with a shared "last kept" reference.
- * Returns, per point, `null` if it survives (enters the time series) or a `{ name: context }`
- * object of the screen-phase drop reasons it accumulated.
+ * Run the label modules over the raw points in one sweep with a shared "last kept" reference.
+ * Returns, per point, `null` or a `{ [name]: bag }` object of each module's per-point bag (a bag may
+ * carry the reserved `drop` key and/or other labels). A point with any `drop` is excluded from the
+ * time series, so the running reference only advances past points no module dropped.
  */
-export function screen(points, modules) {
-  const preDrops = new Array(points.length).fill(null);
-  let lastKept = null; // the last point that survived every screen module — the running reference
+export function label(points, modules) {
+  const bags = new Array(points.length).fill(null);
+  let lastKept = null; // the last point no label module dropped — the running reference
   for (let i = 0; i < points.length; i++) {
     const p = points[i];
-    let reasons = null;
+    let bag = null;
+    let dropped = false;
     for (const m of modules) {
-      const ctx = m.screen(p, lastKept);
-      if (ctx != null) {
-        if (!reasons) reasons = {};
-        reasons[m.name] = ctx;
+      const out = m.label(p, lastKept);
+      if (out != null) {
+        if (!bag) bag = {};
+        bag[m.name] = out;
+        if (out.drop != null) dropped = true;
       }
     }
-    preDrops[i] = reasons;
-    if (!reasons) lastKept = p;
+    bags[i] = bag;
+    if (!dropped) lastKept = p; // labelled-but-kept points still advance the reference
   }
-  return preDrops;
+  return bags;
 }
 
-/** Original indices of the kept points (survived screening → the time-series sub-sequence). */
-function keptIndices(preDrops) {
+/** True if any label module dropped this point (its bag carries the reserved `drop` key). */
+function isDropped(bag) {
+  if (bag == null) return false;
+  for (const name in bag) if (bag[name].drop != null) return true;
+  return false;
+}
+
+/** Original indices of the kept points (not dropped by the label phase → the time-series). */
+function keptIndices(bags) {
   const valid = [];
-  for (let i = 0; i < preDrops.length; i++) if (preDrops[i] == null) valid.push(i);
+  for (let i = 0; i < bags.length; i++) if (!isDropped(bags[i])) valid.push(i);
   return valid;
 }
 
@@ -87,23 +97,46 @@ export function addDrop(point, reasonKey, context = true) {
   return point;
 }
 
+/** Attach a module's non-`drop` keys as a namespaced `point[modName] = { ...keys }` (merging). */
+function attachLabels(out, modName, source, valueAt) {
+  const ns = {};
+  let any = false;
+  for (const key in source) {
+    if (key === "drop") continue;
+    ns[key] = valueAt(source[key]);
+    any = true;
+  }
+  if (any) out[modName] = { ...(out[modName] ?? {}), ...ns };
+}
+
 /**
- * Merge the measured sub-sequence signals back onto every original point by index. Each module's
- * non-`drop` keys attach as a namespaced `point[modName] = { ...keys }`; a module's `drop` array
- * (null | context per point) is applied as a drop reason under the module's name (via `addDrop`).
+ * Merge the label bags and the measured signals back onto every original point by index. For both
+ * phases a module's `drop` becomes a drop reason under its name (via `addDrop`) and its other keys
+ * attach as a namespaced label/signal. Dropped points carry position + reasons (+ labels) but no
+ * signals; kept points additionally carry the measure/profile signals and compute-module output.
  */
-function assemble(points, preDrops, valid, sig, modData) {
+function assemble(points, bags, valid, sig, modData) {
   const pos = new Array(points.length).fill(-1);
   valid.forEach((i, k) => {
     pos[i] = k;
   });
   return points.map((p, i) => {
     const out = { ...p, x: sig.xAll[i], y: sig.yAll[i] };
-    if (preDrops[i]) {
-      // dropped in the screen phase: position + drop reasons only, no signals
-      for (const key in preDrops[i]) addDrop(out, key, preDrops[i][key]);
-      return out;
+    // label phase: per-point bags — `drop` → reason; other keys → namespaced labels
+    const bag = bags[i];
+    let dropped = false;
+    if (bag) {
+      for (const modName in bag) {
+        const b = bag[modName];
+        if (b.drop != null) {
+          addDrop(out, modName, b.drop);
+          dropped = true;
+        }
+        attachLabels(out, modName, b, (v) => v);
+      }
     }
+    if (dropped) return out; // excluded from measurement: position + reasons (+ labels), no signals
+
     const k = pos[i];
     Object.assign(out, {
       hs: sig.hs[k],
@@ -117,19 +150,11 @@ function assemble(points, preDrops, valid, sig, modData) {
       carve: sig.carve[k],
       paused: sig.paused[k],
     });
+    // compute phase: per-array signals — `drop` → reason; other keys → namespaced signals
     for (const modName in modData) {
       const merged = modData[modName];
-      const ns = {};
-      let hasSignal = false;
-      for (const key in merged) {
-        if (key === "drop") {
-          if (merged.drop[k]) addDrop(out, modName, merged.drop[k]);
-        } else {
-          ns[key] = merged[key][k];
-          hasSignal = true;
-        }
-      }
-      if (hasSignal) out[modName] = ns;
+      if (merged.drop?.[k]) addDrop(out, modName, merged.drop[k]);
+      attachLabels(out, modName, merged, (arr) => arr[k]);
     }
     return out;
   });

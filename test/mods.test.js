@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { screen } from "../src/analyze.js";
+import { label } from "../src/analyze.js";
 import { deltas } from "../src/measure.js";
 import { builtins, loadModule, validateModule } from "../src/mods/index.js";
 import { PARAMS } from "../src/profile.js";
 
 const outlier = builtins.find((m) => m.name === "outlier");
-const screenMods = builtins.filter((m) => m.screen); // noTime, sameTime, oversample (in order)
+const labelMods = builtins.filter((m) => m.label); // noTime, sameTime, oversample (in order)
 const ramp = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => f(i));
 
 // ── registry / contract / loader ──
@@ -17,35 +17,35 @@ test("mods: builtins are the named modules, routed by callback", () => {
     ["noTime", "sameTime", "oversample", "outlier", "activity"],
   );
   assert.deepEqual(
-    screenMods.map((m) => m.name),
+    labelMods.map((m) => m.name),
     ["noTime", "sameTime", "oversample"],
   );
   assert.equal(typeof outlier.compute, "function");
-  assert.equal(outlier.screen, undefined); // outlier is compute-only
+  assert.equal(outlier.label, undefined); // outlier is compute-only
 });
 
 test("validateModule: rejects a module with no callbacks", () => {
-  assert.throws(() => validateModule("bad", {}), /screen and\/or compute/);
+  assert.throws(() => validateModule("bad", {}), /label and\/or compute/);
   assert.throws(() => validateModule("", { compute: () => ({}) }), /non-empty string/);
-  const ok = validateModule("ok", { screen: () => null });
+  const ok = validateModule("ok", { label: () => null });
   assert.equal(ok.name, "ok");
 });
 
 test("loadModule: a bare name falls back to the internal mods file", async () => {
   const m = await loadModule("noTime"); // no cwd file / npm pkg → resolves ./mods/noTime.js
   assert.equal(m.name, "noTime");
-  assert.equal(typeof m.screen, "function");
+  assert.equal(typeof m.label, "function");
 });
 
 test("loadModule: an unresolvable name throws", async () => {
   await assert.rejects(loadModule("definitely_not_a_module_xyz"), /cannot resolve module/);
 });
 
-// ── screen-phase modules (noTime, sameTime, oversample) ──
+// ── label-phase modules (noTime, sameTime, oversample) — drop via the reserved `drop` key ──
 
-test("screen: drops sameTime/oversample/noTime against the last kept point, keeps the rest", () => {
+test("label: drops sameTime/oversample/noTime against the last kept point, keeps the rest", () => {
   const at = (ms, lat = 36, lon = 138) => ({ lat, lon, ele: 0, time: ms });
-  const pre = screen(
+  const bags = label(
     [
       at(0), //          kept (first timed)
       at(0), //          sameTime (same time + position)
@@ -54,14 +54,14 @@ test("screen: drops sameTime/oversample/noTime against the last kept point, keep
       at(1500), //       kept (>= 1 s from the last kept point)
       { lat: 36, lon: 138, ele: 0, time: null }, // noTime
     ],
-    screenMods,
+    labelMods,
   );
-  assert.equal(pre[0], null); // kept
-  assert.deepEqual(pre[1], { sameTime: { moved: false } });
-  assert.deepEqual(pre[2], { sameTime: { moved: true } });
-  assert.deepEqual(pre[3], { oversample: { gap: 500 } });
-  assert.equal(pre[4], null); // kept (measured from the first point, not the dropped ones)
-  assert.deepEqual(pre[5], { noTime: true });
+  assert.equal(bags[0], null); // kept
+  assert.deepEqual(bags[1], { sameTime: { drop: { moved: false } } });
+  assert.deepEqual(bags[2], { sameTime: { drop: { moved: true } } });
+  assert.deepEqual(bags[3], { oversample: { drop: { gap: 500 } } });
+  assert.equal(bags[4], null); // kept (measured from the first point, not the dropped ones)
+  assert.deepEqual(bags[5], { noTime: { drop: true } });
 });
 
 // ── compute-phase module (outlier) ──

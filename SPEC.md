@@ -28,7 +28,7 @@ Both are built on a layered pipeline:
 
 ```
 gpx.js ──▶ analyze.js ───────────────────────────────────▶ enriched points ──▶ stabilize.js ──▶ out.gpx
-parse      screen → measure → profile → compute-modules       (+ dropReason)     keep un-dropped
+parse      label → measure → profile → compute-modules        (+ dropReason)     keep un-dropped
                        │         │            │
                   point-level  window-level   noTime · sameTime · oversample · outlier · activity
 
@@ -44,7 +44,7 @@ epoch ms).
 ### Layer 2 — `measure.js` (point-level, parameter-free)
 
 The pure core: every value depends only on a point and its immediate neighbour (O(1)/point, **no
-window**, **no tuning params**). Runs over the `valid` sub-sequence (the screened time series), but
+window**, **no tuning params**). Runs over the `valid` sub-sequence (the kept time series), but
 projects **every** point so dropped points still get a position.
 
 - **block 1 `project`** — lat/lon → local meters (`x/y`, centre = mean of valid; longitude
@@ -74,29 +74,30 @@ For each point, summarise its ±window neighbourhood. **Owns all tuning `PARAMS`
 
 ### Layer 4 — `analyze.js` (orchestrator / policy)
 
-`analyze(points, opts)` = **screen → measure → profile → compute-modules → assemble**. The per-point
+`analyze(points, opts)` = **label → measure → profile → compute-modules → assemble**. The per-point
 context modules see is the union of the measure and profile bundles. There is **no status field**: a
 point belongs to the clean track iff it has **no `dropReason`**.
 
 - **Drop-reason channel**: a dropped point carries `dropReason = { reasonKey: context }` + `dropCount`
   (via `addDrop`). Multiple modules may flag the same point (defense in depth).
-- **Two module phases** (a module joins a phase by exposing that callback):
-  - `screen(point, lastKept)` — pre-measurement, sequential; a dropped point is excluded from the
-    projection centre and the time series (carries position + reasons only, no signals).
+- **Two symmetric module phases** — each produces ordinary outputs plus an optional reserved `drop`:
+  - `label(point, lastKept)` — pre-measurement, sequential; returns `null | { drop?, ...labels }`. A
+    `drop` excludes the point from the projection centre and the time series (position + reasons
+    only, no signals); other keys ride on the point as namespaced labels (kept or dropped).
   - `compute(ctx)` — post-measurement, batch; returns `{ [signalKey]: array, drop?: array }`.
     Non-`drop` keys attach as `point[modName][key]`.
 
 ### Modules (`mods/`)
 
-A module file exports `screen` and/or `compute` (name = filename). Built-ins always run; callers
+A module file exports `label` and/or `compute` (name = filename). Built-ins always run; callers
 append via `opts.modules`; `loadModule` resolves a bare name (cwd → npm → internal). Current
 built-ins, in order:
 
 | module | phase | drops |
 |---|---|---|
-| `noTime` | screen | points with no timestamp |
-| `sameTime` | screen | duplicate timestamps |
-| `oversample` | screen | sub-1 s points → survivors land at ~1 Hz |
+| `noTime` | label | points with no timestamp |
+| `sameTime` | label | duplicate timestamps |
+| `oversample` | label | sub-1 s points → survivors land at ~1 Hz |
 | `outlier` | compute | GPS spikes: 3-point geometric detour, or speed-change spike |
 | `activity` | compute | physically-implausible motion (see below) |
 
@@ -167,19 +168,19 @@ Beyond the base + the eval viewer, still to come:
 ## Design notes — per-stage roadmap & open reviews
 
 Working notes on where each pipeline stage is headed. "review" = revisit the design before adding to
-it. (Stage numbers match the pipeline diagram: ① screen → ② measure → ③ profile → ⑤ compute → ⑥
+it. (Stage numbers match the pipeline diagram: ① label → ② measure → ③ profile → ⑤ compute → ⑥
 assemble.)
 
-- **① screen → a raw-point `label` phase (planned)** — candidate modules that need only the raw point
-  (so they fit pre-measurement): **`country`**, and various **OSM-provided polygons** (region / area /
-  piste membership, e.g. drop-outside-resort). Resolved direction: reframe the phase as **labelling
-  raw points**, with **`drop` as one reserved, core-level label** — its immediate effect is to exclude
-  the point from the valid series and record a `dropReason`. Non-drop labels (`country`, `inResort`,
-  …) ride on the point for later stages to branch on, so a region filter can either `drop` early
-  (saves measuring points it would discard) or just label and let downstream decide. This makes the
-  two phases **symmetric**: pre-measure emits **labels + drop**; post-measure (`compute`) already emits
-  **signals + drop**. Rename `screen` → `label(point, lastKept)`; still sequential (a `drop` label
-  updates `lastKept`, other labels don't). The name `label` is provisional.
+- **① label phase (done)** — `screen` is now the raw-point **`label`** phase: a module's
+  `label(point, lastKept)` returns `null | { drop?, ...labels }`. **`drop` is one reserved,
+  core-level label** — it excludes the point from the projection centre and the valid series and
+  records a `dropReason`; non-drop keys ride on the point as namespaced labels (kept or dropped), so
+  a region filter can either `drop` early (saves measuring points it would discard) or just label and
+  let downstream branch. The two phases are now **symmetric**: pre-measure emits **labels + drop**,
+  post-measure (`compute`) emits **signals + drop**. Candidate future label modules that need only the
+  raw point: **`country`**, and **OSM-provided polygons** (region / area / piste membership). Name
+  `label` is settled; flat-vs-namespaced label attachment chose **namespaced under module name** (to
+  match `compute`).
 - **② measure** — future modules: **not yet known; to discuss.**
 - **③ profile** — **to review again.** The window-level descriptor set is inherited from the
   prototype; re-examine which descriptors earn their place.

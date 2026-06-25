@@ -1,10 +1,12 @@
 // Module registry — the Module contract, a validator, a loader, and the built-in modules.
 //
-// A module FILE exports `screen` and/or `compute` (no name — the name is the filename):
-//   - screen(point, lastKept) → null (keep) | context (drop, recorded under the module's name).
-//   - compute(ctx)            → { [signalKey]: array, drop?: (null|context)[] }.
-// A module joins the screen phase by exposing `screen`, the compute phase by exposing `compute`,
-// and both phases by exposing both.
+// A module FILE exports `label` and/or `compute` (no name — the name is the filename):
+//   - label(point, lastKept) → null | { drop?: context, [labelKey]: value }. The reserved `drop`
+//     key excludes the point from the time series (recorded as a drop reason under the module's
+//     name); other keys ride on the point as namespaced labels. Runs per raw point, pre-measurement.
+//   - compute(ctx)           → { [signalKey]: array, drop?: (null|context)[] }. Runs post-measurement.
+// Symmetric: both phases produce ordinary outputs (labels / signals) plus an optional reserved
+// `drop`. A module joins a phase by exposing that phase's callback, or both by exposing both.
 
 import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -15,8 +17,8 @@ import * as oversample from "./oversample.js";
 import * as sameTime from "./sameTime.js";
 
 /**
- * @typedef {{ screen?: Function, compute?: Function }} ModuleDef  a module file's exports
- * @typedef {{ name: string, screen?: Function, compute?: Function }} Module  a named, loaded module
+ * @typedef {{ label?: Function, compute?: Function }} ModuleDef  a module file's exports
+ * @typedef {{ name: string, label?: Function, compute?: Function }} Module  a named, loaded module
  */
 
 /**
@@ -27,15 +29,15 @@ import * as sameTime from "./sameTime.js";
  */
 export function validateModule(name, def) {
   if (!name || typeof name !== "string") throw new Error("module name must be a non-empty string");
-  if (typeof def.screen !== "function" && typeof def.compute !== "function") {
-    throw new Error(`module "${name}" must export screen and/or compute`);
+  if (typeof def.label !== "function" && typeof def.compute !== "function") {
+    throw new Error(`module "${name}" must export label and/or compute`);
   }
-  for (const k of ["screen", "compute"]) {
+  for (const k of ["label", "compute"]) {
     if (def[k] != null && typeof def[k] !== "function") {
       throw new Error(`module "${name}".${k} must be a function`);
     }
   }
-  return { name, screen: def.screen, compute: def.compute };
+  return { name, label: def.label, compute: def.compute };
 }
 
 /** The built-in modules, named after their files and validated. */

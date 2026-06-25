@@ -4,7 +4,7 @@ import { addDrop, analyze } from "../src/analyze.js";
 import { PARAMS } from "../src/profile.js";
 
 // ════════════════════════════════════════════════════════════════════════════════════════
-// analyze() integration — screen → measure → compute → assemble: wiring, drop reasons, the
+// analyze() integration — label → measure → compute → assemble: wiring, drop reasons, the
 // 1 Hz resample, centre exclusion, modules, and edges. Tracks use real lat/lon so projection
 // is exercised end to end.
 // ════════════════════════════════════════════════════════════════════════════════════════
@@ -141,23 +141,32 @@ test("analyze: a module adds a drop reason via a drop array under its name", () 
   assert.equal(out[0].dropReason, undefined); // other points untouched
 });
 
-test("analyze: a module exposing both screen and compute is used in both phases", () => {
+test("analyze: a module exposing both label and compute is used in both phases", () => {
   const both = {
     name: "both",
-    screen: (p, q) => (q && p.lon === q.lon ? { dup: true } : null), // screen: drop a repeat lon
-    compute: (ctx) => ({ doubled: ctx.hs.map((v) => v * 2) }), //      compute: a namespaced signal
+    label: (p, q) => (q && p.lon === q.lon ? { drop: { dup: true } } : null), // label: drop a repeat lon
+    compute: (ctx) => ({ doubled: ctx.hs.map((v) => v * 2) }), //              compute: a signal
   };
   const out = analyze(
     [
       { lat: 36, lon: 138, ele: 0, time: 0 }, //                kept
-      { lat: 36, lon: 138, ele: 0, time: 2000 }, //             screen drops (same lon as last kept)
+      { lat: 36, lon: 138, ele: 0, time: 2000 }, //             label drops (same lon as last kept)
       { lat: 36, lon: 138 + STEP5, ele: 0, time: 4000 }, //     kept
     ],
     { modules: [both] },
   );
-  assert.deepEqual(out[1].dropReason.both, { dup: true }); // screen fired
+  assert.deepEqual(out[1].dropReason.both, { dup: true }); // label phase fired
   assert.equal(typeof out[0].both.doubled, "number"); // compute fired on a kept point
   assert.equal(out[1].both, undefined); // dropped point has no compute-phase data
+});
+
+test("analyze: a label module's non-drop key rides on the point (kept) as a namespaced label", () => {
+  const geo = { name: "geo", label: () => ({ country: "JP" }) }; // a pure label, never drops
+  const out = analyze(track({ n: 5, dlon: STEP5 }), { modules: [geo] });
+  assert.equal(out[0].geo.country, "JP"); // labelled, namespaced under the module
+  assert.equal(out[0].country, undefined); // not flattened onto the point
+  assert.equal(out[0].dropReason, undefined); // a pure label does not drop
+  assert.equal(typeof out[0].hs, "number"); // and the point is kept, with full signals
 });
 
 test("analyze: excluded points get no module data", () => {
