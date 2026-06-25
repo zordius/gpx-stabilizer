@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { compute } from "../src/mods/drift.js";
 
-// ctx with per-point arrays at 1 Hz; `flags[k]` = drift-like point (random heading + flat altitude)
+// ctx with per-point arrays at 1 Hz; `flags[k]` = drift-like (random heading + flat + compact)
 function ctxFor(flags) {
   const n = flags.length;
   return {
@@ -12,6 +12,7 @@ function ctxFor(flags) {
     y: new Array(n).fill(0),
     wander: flags.map((f) => (f ? 0.8 : 0.1)), // drift -> high circular variance
     vs: flags.map((f) => (f ? 0.05 : 0.5)), //    drift -> flat (low |vs|)
+    netd150: flags.map((f) => (f ? 20 : 500)), // drift -> compact (went nowhere)
     g: {},
   };
 }
@@ -31,7 +32,7 @@ test("drift: a run shorter than the minimum duration is not dropped", () => {
   assert.ok(compute(ctxFor(flags)).drop.every((d) => d === null));
 });
 
-test("drift: needs BOTH random heading and flat altitude", () => {
+test("drift: needs random heading AND flat altitude AND compactness", () => {
   const n = 200;
   const base = {
     n,
@@ -40,10 +41,15 @@ test("drift: needs BOTH random heading and flat altitude", () => {
     y: new Array(n).fill(0),
     g: {},
   };
-  // high wander but climbing (|vs| high) -> not drift
-  const climbing = compute({ ...base, wander: new Array(n).fill(0.8), vs: new Array(n).fill(0.6) });
-  assert.ok(climbing.drop.every((d) => d === null));
-  // flat but steady heading (a glide) -> not drift
-  const glide = compute({ ...base, wander: new Array(n).fill(0.1), vs: new Array(n).fill(0.05) });
-  assert.ok(glide.drop.every((d) => d === null));
+  const run = (w, v, d) =>
+    compute({
+      ...base,
+      wander: new Array(n).fill(w),
+      vs: new Array(n).fill(v),
+      netd150: new Array(n).fill(d),
+    });
+  assert.ok(run(0.8, 0.6, 20).drop.every((x) => x === null)); // climbing -> |vs| fails
+  assert.ok(run(0.1, 0.05, 20).drop.every((x) => x === null)); // steady heading -> wander fails
+  assert.ok(run(0.8, 0.05, 500).drop.every((x) => x === null)); // moving away -> netd150 fails
+  assert.ok(run(0.8, 0.05, 20).drop.some((x) => x !== null)); // all three hold -> drift
 });

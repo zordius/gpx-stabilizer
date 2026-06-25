@@ -1,19 +1,22 @@
 // Compute module "drift" — detect stationary satellite-signal drift (typically a person stopped
-// indoors): a contiguous time run where the heading is random (`wander` high) but the altitude is
-// flat (`|vs|` low). The receiver isn't going anywhere, yet the reported position scatters — so the
-// horizontal speed lies (drift fakes it) while the vertical axis stays honest. Those points are not
-// real positions, so the whole run is dropped; the drop context carries the SEGMENT (id, time span,
-// point count, centroid) so a later stage can collapse it into one `stay` marker rather than just
-// discarding it. Thresholds are tunable via opts (flow through `g.DRIFT_*`).
+// indoors): the heading is random (`wander` high), the altitude is flat (`|vs|` low), AND the
+// receiver didn't go anywhere (net displacement `netd150` small) — a SPATIALLY-COMPACT stay whose
+// reported position merely scatters. The horizontal speed lies (drift fakes it); the vertical axis
+// and the net-displacement stay honest. Compactness (`netd150`) is the scale-free tell — it does the
+// "really a stay" work that duration used to, so a low duration floor now catches both long and short
+// stays in ONE pass. Such points aren't real positions, so the run is dropped; the drop context
+// carries the SEGMENT (id, time span, point count, centroid) so a later stage can collapse it into
+// one `stay` marker. Thresholds are tunable via opts (flow through `g.DRIFT_*`).
 
 export const compute = (ctx) => {
-  const { n, t, x, y, wander, vs, g } = ctx;
+  const { n, t, x, y, wander, vs, netd150, g } = ctx;
   const wHi = g.DRIFT_WANDER ?? 0.5; //   random heading (circular variance)
   const vLo = g.DRIFT_VS ?? 0.2; //       flat altitude (m/s) — the clean tell, drift can't fake it
+  const dLo = g.DRIFT_NETD ?? 100; //     net displacement over +/-150 s (m): small = went nowhere
   const gap = g.DRIFT_GAP ?? 60; //       merge rest-like points within this many seconds
-  const minDur = g.DRIFT_MIN ?? 120; //   a drift segment must last at least this long (s)
+  const minDur = g.DRIFT_MIN ?? 30; //    low floor — compactness does the work, not duration
 
-  const isDrift = (k) => wander[k] > wHi && Math.abs(vs[k]) < vLo;
+  const isDrift = (k) => wander[k] > wHi && Math.abs(vs[k]) < vLo && netd150[k] < dLo;
   const drift = new Array(n).fill(null);
   const drop = new Array(n).fill(null);
 
