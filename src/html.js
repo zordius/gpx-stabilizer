@@ -303,7 +303,7 @@ section li input { appearance: none; -webkit-appearance: none; margin: 0; width:
 section li input:checked { border-color: #06c; }
 section li input::before { content: ""; width: 11px; height: 11px; transform: scale(0); background: #06c; clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); }
 section li input:checked::before { transform: scale(1); }
-section > svg { grid-area: 1 / 1; display: block; width: 100vw; height: 100vh; }
+section > svg { grid-area: 1 / 1; display: block; width: 100vw; height: 100vh; cursor: zoom-in; }
 section > svg polyline, section > svg path { vector-effect: non-scaling-stroke; }
 .ontop { opacity: 0; pointer-events: none; }
 * { transition: opacity 0.7s ease, background-color 0.7s ease, stroke-width 0.3s ease; }
@@ -315,7 +315,61 @@ ${toggles}
 <header>
 <h1>${heading}</h1>
 ${summary}${nav}</header>
-${body}</body>
+${body}
+<script>
+// click an unzoomed chart to zoom to that point at a fixed 1 m = 5 px, then DRAG to pan. A
+// bottom-right "zoom out" button restores. One panel zoomed at a time; legend/header clicks ignored.
+let zoomed = null;
+let drag = null;
+const btn = document.createElement("button");
+btn.textContent = "zoom out";
+btn.style.cssText =
+  "position:fixed;right:12px;bottom:12px;z-index:9;display:none;padding:6px 12px;cursor:pointer;font:14px sans-serif";
+document.body.appendChild(btn);
+const restore = () => {
+  if (zoomed) {
+    zoomed.setAttribute("viewBox", zoomed.dataset.orig);
+    zoomed.style.cursor = "";
+  }
+  zoomed = null;
+  btn.style.display = "none";
+};
+document.body.addEventListener("pointerdown", (e) => {
+  if (!zoomed || e.target.closest("section > svg") !== zoomed) return; // drag only the zoomed panel
+  drag = { x: e.clientX, y: e.clientY, vb: zoomed.getAttribute("viewBox").split(" ").map(Number) };
+  zoomed.style.cursor = "grabbing";
+  zoomed.setPointerCapture?.(e.pointerId);
+});
+document.body.addEventListener("pointermove", (e) => {
+  if (!drag) return;
+  const r = zoomed.getBoundingClientRect();
+  const [vx, vy, vw, vh] = drag.vb; // pan so the content follows the cursor (1 px = vw/width metres)
+  const nx = vx - ((e.clientX - drag.x) * vw) / r.width;
+  const ny = vy - ((e.clientY - drag.y) * vh) / r.height;
+  zoomed.setAttribute("viewBox", nx + " " + ny + " " + vw + " " + vh);
+});
+document.body.addEventListener("pointerup", () => {
+  if (drag) {
+    drag = null;
+    if (zoomed) zoomed.style.cursor = "grab";
+  }
+});
+document.body.addEventListener("click", (e) => {
+  if (e.target === btn) return restore();
+  const svg = e.target.closest("section > svg");
+  if (!svg || svg === zoomed) return; // already zoomed -> drag pans, click does nothing
+  if (zoomed) restore(); // un-zoom the previous panel
+  if (!svg.dataset.orig) svg.dataset.orig = svg.getAttribute("viewBox");
+  const u = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
+  const r = svg.getBoundingClientRect();
+  const w = r.width / 5, h = r.height / 5; // viewBox span (metres) so 1 m maps to 5 px
+  svg.setAttribute("viewBox", (u.x - w / 2) + " " + (u.y - h / 2) + " " + w + " " + h);
+  svg.style.cursor = "grab";
+  zoomed = svg;
+  btn.style.display = "block";
+});
+</script>
+</body>
 </html>
 `;
 }

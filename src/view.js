@@ -82,6 +82,14 @@ export function analyzedLayers(points, opts = {}) {
     dropLayer("drift", "drift", []),
     dropLayer("outlier drop", "outlier", ["drift"]),
     dropLayer("activity drop", "activity", ["drift", "outlier"]),
+    // kink is a label, not a drop — yellow overlay on points that stay in the clean track
+    {
+      label: "kink",
+      color: "#fc0",
+      size: 4,
+      opacity: 0.7,
+      points: out.filter((p) => p.kink?.at).map(flipY),
+    },
   ];
 }
 
