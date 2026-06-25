@@ -275,16 +275,28 @@ export function writeHtml(panels = [], opts = {}) {
     })
     .join("\n");
   // Pure-CSS rules per labelled layer slug: unchecking a panel's legend checkbox dims that panel's
-  // matching <g> to opacity 0.1, and hovering the row enlarges its markers (scoped to the section).
+  // matching <g> to opacity 0.1, and hovering the row enlarges its paths (scoped to the section). A
+  // pure-point layer gets the full marker enlarge (10 px); a layer that also draws a line/polygon only
+  // goes to 4 px so the stroke isn't ballooned.
   const slugs = new Set();
-  for (const layers of panelLayers) for (const l of layers) if (l.label) slugs.add(slug(l.label));
+  const lineSlugs = new Set(); // slugs whose layer draws a line/polygon (not pure points)
+  for (const layers of panelLayers)
+    for (const l of layers) {
+      if (!l.label) continue;
+      const s = slug(l.label);
+      slugs.add(s);
+      const hasLines = (l.lines ?? []).some((line) => line.length > 0);
+      if (hasLines && (l.polygon || l.width != null)) lineSlugs.add(s);
+    }
   const toggles = [...slugs]
-    .map(
-      (s) =>
+    .map((s) => {
+      const sw = lineSlugs.has(s) ? 4 : 10;
+      return (
         `section:has(.t-${s} input:not(:checked)) .layer-${s} { opacity: 0.1; }\n` +
-        `section:has(.t-${s}:hover) .layer-${s} path { stroke-width: 12; }\n` +
-        `section:has(.t-${s}:hover) .ontop-${s} { opacity: 1; }`,
-    )
+        `section:has(.t-${s}:hover) .layer-${s} path { stroke-width: ${sw}; }\n` +
+        `section:has(.t-${s}:hover) .ontop-${s} { opacity: 1; }`
+      );
+    })
     .join("\n");
   return `<!doctype html>
 <html lang="en">
@@ -292,13 +304,13 @@ export function writeHtml(panels = [], opts = {}) {
 <meta charset="utf-8"/>
 <title>${title}</title>
 <style>
-html { scroll-behavior: smooth; scroll-snap-type: y proximity; }
+html { scroll-behavior: smooth; }
 html, body { margin: 0; padding: 0; }
 h1 { padding: 10px; }
 p { margin: 10px; padding: 0; }
 nav ul { list-style: none; margin: 0; padding: 0 10px 10px; font: 14px/1.8 sans-serif; }
 nav a { color: #06c; }
-section { overflow: clip; display: grid; scroll-snap-align: start; content-visibility: auto; contain-intrinsic-size: 100vw 100vh; }
+section { overflow: clip; display: grid; content-visibility: auto; contain-intrinsic-size: 100vw 100vh; }
 section > header { grid-area: 1 / 1; align-self: start; position: sticky; top: 0; z-index: 1; }
 section h2 { margin: 0; padding: 4px 8px; background: #aaa8; cursor: pointer; }
 section h2 a { color: inherit; text-decoration: none; display: block; }
@@ -364,9 +376,17 @@ document.body.addEventListener("pointerup", () => {
   }
 });
 document.body.addEventListener("contextmenu", (e) => {
-  if (!zoomed) return; // not zoomed -> leave the normal right-click menu alone
-  e.preventDefault(); // zoomed -> right-click means "zoom out", not the system menu
-  restore();
+  if (zoomed) {
+    e.preventDefault(); // zoomed -> right-click zooms out, then keeps the panel in view
+    const svg = zoomed;
+    restore();
+    svg.scrollIntoView({ behavior: "smooth", block: "start" });
+    return;
+  }
+  const svg = e.target.closest("section > svg");
+  if (!svg) return; // not over a panel (header/legend/nav) -> leave the normal menu alone
+  e.preventDefault(); // over a panel -> right-click scrolls it into view (so block the menu)
+  svg.scrollIntoView({ behavior: "smooth", block: "start" });
 });
 document.body.addEventListener("click", (e) => {
   if (e.target === btn) return restore();
@@ -381,6 +401,7 @@ document.body.addEventListener("click", (e) => {
   svg.style.cursor = "grab";
   zoomed = svg;
   btn.style.display = "block";
+  svg.scrollIntoView({ behavior: "smooth", block: "start" }); // bring the zoomed panel fully into view
 });
 </script>
 </body>

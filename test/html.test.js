@@ -211,3 +211,16 @@ test("writeHtml sets and escapes the document title", () => {
   assert.match(writeHtml([], { title: "A & B" }), /<title>A &amp; B<\/title>/);
   assert.match(writeHtml([]), /<title>gpx-stabilizer<\/title>/);
 });
+
+test("writeHtml hover enlarge: 10 px for pure-point layers, 4 px for line layers", () => {
+  const html = writeHtml([
+    {
+      layers: [
+        { label: "clean", lines: [pts([0, 0], [1, 1])], width: 1.5 }, // draws a line
+        { label: "drift", points: pts([0.5, 0.5]) }, //                   pure points
+      ],
+    },
+  ]);
+  assert.match(html, /section:has\(\.t-clean:hover\) \.layer-clean path \{ stroke-width: 4; \}/);
+  assert.match(html, /section:has\(\.t-drift:hover\) \.layer-drift path \{ stroke-width: 10; \}/);
+});
