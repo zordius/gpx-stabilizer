@@ -36,20 +36,22 @@ test("each layer becomes a labelled <g> with an id", () => {
   assert.match(svg, /<g id="layer-noise-points" class="layer layer-noise-points"/);
 });
 
-test("a line layer (width set) renders polylines; points render as one marker <path>", () => {
+test("a line layer (width set) renders one line <path>; points render as one marker <path>", () => {
   const svg = toSvg([
     { label: "a", lines: [pts([0, 0], [1, 1])], width: 1.5 },
     { label: "b", points: pts([0.5, 0.5]) },
   ]);
-  assert.equal([...svg.matchAll(/<polyline/g)].length, 1);
-  assert.equal([...svg.matchAll(/<path /g)].length, 1);
+  assert.doesNotMatch(svg, /<polyline/); // lines are <path> now, not <polyline>
+  assert.match(svg, /<path d="M0,0 1,1"\/>/); // the line: one bare path
+  assert.equal([...svg.matchAll(/<path /g)].length, 2); // line path + marker path
 });
 
-test("multiple lines in one layer", () => {
+test("multiple lines in one layer: one <path>, each segment its own M sub-path", () => {
   const svg = toSvg([
     { label: "t", lines: [pts([0, 0], [1, 1]), pts([2, 2], [3, 3])], width: 1.5 },
   ]);
-  assert.equal([...svg.matchAll(/<polyline/g)].length, 2);
+  assert.match(svg, /<path d="M0,0 1,1 M2,2 3,3"\/>/); // M per segment = break, no line across the gap
+  assert.equal([...svg.matchAll(/<path /g)].length, 1); // both segments in ONE element
 });
 
 test("no line width: the line's points render as markers (dots)", () => {
@@ -62,14 +64,18 @@ test("line + point style: the line's points are reused as markers, drawn on top"
   const svg = toSvg([
     { label: "g", lines: [pts([0, 0], [1, 1])], width: 2, pointColor: "#c00", size: 3 },
   ]);
-  assert.ok(svg.indexOf("<polyline") < svg.indexOf("<path "), "markers come after the line");
+  // line path first, marker path after (markers on top)
+  assert.ok(
+    svg.indexOf('<path d="M0,0 1,1"') < svg.indexOf('stroke="#c00"'),
+    "markers after the line",
+  );
   assert.match(svg, /<path d="M0,0 h0 M1,1 h0" stroke="#c00" stroke-width="4"/); // size 3 -> 3+1
 });
 
 test("no baked-in zoom transform; coords are raw and the viewBox does the framing", () => {
   const svg = toSvg([{ label: "t", lines: [pts([0, 0], [100, 50])], width: 1.5 }], { padding: 0 });
   assert.doesNotMatch(svg, /<g transform=/); // no JS zoom — CSS + preserveAspectRatio fit it
-  assert.match(svg, /<polyline points="0,0 100,50"/); // raw x/y, framed by the data-bbox viewBox
+  assert.match(svg, /<path d="M0,0 100,50"\/>/); // raw x/y, framed by the data-bbox viewBox
 });
 
 test("markers are a stroked dot path; square uses a square cap, size = stroke-width", () => {
@@ -92,13 +98,13 @@ test("line paint hoists onto the group; a markers-only layer keeps a bare group 
   );
 });
 
-test("a line layer hoists its stroke to the group, leaving the polyline bare", () => {
+test("a line layer hoists its stroke to the group, leaving the line <path> bare", () => {
   const svg = toSvg([{ label: "m", lines: [pts([0, 0], [1, 1])], color: "#c00", width: 1.5 }]);
   assert.match(
     svg,
     /<g id="layer-m" class="layer layer-m" fill="none" stroke="#c00" stroke-width="1.5">/,
   );
-  assert.match(svg, /<polyline points="[^"]+"\/>/); // bare, no per-element paint
+  assert.match(svg, /<path d="M[^"]+"\/>/); // bare, no per-element paint
 });
 
 test("a layer with a line + markers: group stroke for the line, own stroke on the marker path", () => {
@@ -115,7 +121,7 @@ test("a layer with a line + markers: group stroke for the line, own stroke on th
     svg,
     /<g id="layer-x" class="layer layer-x" fill="none" stroke="#06c" stroke-width="1.5">/,
   );
-  assert.match(svg, /<polyline points="[^"]+"\/>/); // bare line, inherits the group stroke
+  assert.match(svg, /<path d="M[^"]+"\/>/); // bare line path, inherits the group stroke
   assert.match(svg, /<path [^>]*stroke="#06c" stroke-width="3"/); // markers carry their own (size 2 -> 3)
 });
 

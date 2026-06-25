@@ -186,11 +186,19 @@ function renderLayer(layer, markerId) {
 
   const body = [];
   // line/polygon first, so the markers land on top of it
-  if (drawPolygon || drawLine) {
+  if (drawPolygon) {
     for (const line of lines) {
       const pts = line.map((p) => `${round(p.x)},${round(p.y)}`).join(" ");
-      body.push(drawPolygon ? `    <polygon points="${pts}"/>` : `    <polyline points="${pts}"/>`);
+      body.push(`    <polygon points="${pts}"/>`);
     }
+  } else if (drawLine) {
+    // ONE <path> for every segment; each segment starts with M (pen up) so a broken-up track stays
+    // broken — no line drawn across the gap. One element keeps the DOM small when `斷開` cuts the
+    // track into many runs, and inherits the group's stroke just like the old per-segment polylines.
+    const d = lines
+      .map((line) => `M${line.map((p) => `${round(p.x)},${round(p.y)}`).join(" ")}`)
+      .join(" ");
+    body.push(`    <path d="${d}"/>`);
   }
 
   // markers: one stroked <path> of zero-length dots — the dot diameter IS the stroke-width (size + 1),

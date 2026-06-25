@@ -17,13 +17,33 @@ test("withXY: adds x/y to each point and keeps the original fields", () => {
   assert.notEqual(out[0], pts[0]); // not mutated
 });
 
-test("toLayers: every point goes into one gps layer as a polyline", () => {
+test("toLayers: one track becomes a single line segment holding every point", () => {
   const layers = toLayers(pts);
   assert.equal(layers.length, 1);
   assert.equal(layers[0].label, "gps");
-  assert.equal(layers[0].lines.length, 1); // one line...
+  assert.equal(layers[0].lines.length, 1); // one segment...
   assert.equal(layers[0].lines[0].length, 3); // ...holding every point
   assert.equal(typeof layers[0].lines[0][0].x, "number"); // points carry x/y
+});
+
+test("toLayers: several tracks become separate segments sharing ONE projection centre", () => {
+  const a = [
+    { lat: 0, lon: 0 },
+    { lat: 1, lon: 1 },
+  ];
+  const b = [
+    { lat: 0.5, lon: 2 },
+    { lat: 0.6, lon: 3 },
+  ];
+  const layers = toLayers([a, b], { width: 1.5 });
+  assert.equal(layers[0].lines.length, 2); // one segment per track — stays broken across the gap
+  assert.deepEqual([layers[0].lines[0].length, layers[0].lines[1].length], [2, 2]);
+  // shared projection: projecting all four together must match the per-segment x/y exactly
+  const all = withXY([...a, ...b]);
+  assert.deepEqual(
+    [...layers[0].lines[0], ...layers[0].lines[1]].map((p) => [p.x, p.y]),
+    all.map((p) => [p.x, p.y]),
+  );
 });
 
 test("toHtml: produces an HTML document with the gps layer (markers by default)", () => {

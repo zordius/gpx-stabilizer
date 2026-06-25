@@ -23,21 +23,27 @@ export function withXY(points) {
 }
 
 /**
- * Build render layers from a point array — one "gps" layer holding every (projected) point. The
- * geometry goes in `lines`; html.js draws a connected line when a line `width` is given, and/or
- * markers (dots) when there's no line or a point style (`pointColor`/`size`) is set. Points need
- * `lat`/`lon`; their other fields ride along.
- * @param {Array<{ lat: number, lon: number }>} points
+ * Build render layers from points — one "gps" layer whose `lines` holds the geometry. `points` is
+ * either ONE track (`Point[]`) or SEVERAL segments/tracks (`Point[][]`); each track becomes its own
+ * entry in `lines`, so a broken-up track draws as separate polylines (no line across the gap). All
+ * tracks share ONE projection centre so they stay aligned in the chart. html.js draws a connected
+ * line per segment when a line `width` is given, and/or markers (dots) when there's no line or a
+ * point style (`pointColor`/`size`) is set. Points need `lat`/`lon`; their other fields ride along.
+ * @param {Array<{ lat: number, lon: number }> | Array<Array<{ lat: number, lon: number }>>} points
  * @param {{ label?: string, color?: string, width?: number, pointColor?: string, size?: number, opacity?: number }} [opts]
  */
 export function toLayers(points, opts = {}) {
-  const layer = {
-    label: opts.label ?? "gps",
-    color: opts.color ?? "#06c",
-    lines: [withXY(points)],
-  };
-  for (const k of ["width", "pointColor", "size", "opacity"])
-    if (opts[k] != null) layer[k] = opts[k];
+  const tracks = Array.isArray(points[0]) ? points : [points];
+  const xy = withXY(tracks.flat()); // shared projection centre across all tracks
+  const lines = [];
+  let k = 0;
+  for (const t of tracks) {
+    lines.push(xy.slice(k, k + t.length));
+    k += t.length;
+  }
+  const layer = { label: opts.label ?? "gps", color: opts.color ?? "#06c", lines };
+  for (const key of ["width", "pointColor", "size", "opacity"])
+    if (opts[key] != null) layer[key] = opts[key];
   return [layer];
 }
 
@@ -57,8 +63,10 @@ const flipY = (p) => ({ ...p, y: -p.y });
  * count + toggle. Each dropped point lands in exactly ONE layer by priority drift > outlier >
  * activity. Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
  * `opts` flows to `analyze` (e.g. `activities`, param overrides).
+ * `opts.breakLine` (kept → segments) splits the clean track into separate polylines; the default
+ * keeps it whole (one segment). This is the seam the upcoming `斷開` function plugs into.
  * @param {import("./measure.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1]} [opts]
+ * @param {Parameters<typeof analyze>[1] & { breakLine?: (kept: object[]) => object[][] }} [opts]
  */
 export function analyzedLayers(points, opts = {}) {
   const out = analyze(points, opts);
@@ -72,12 +80,14 @@ export function analyzedLayers(points, opts = {}) {
     opacity: 0.7,
     points: droppedBy(mod, not),
   });
+  const kept = out.filter((p) => !p.dropReason);
+  const breakLine = opts.breakLine ?? ((pts) => [pts]); // `斷開` (next) splits kept into runs
   return [
     {
       label: "clean",
       color: "#06c",
       width: 1.5,
-      lines: [out.filter((p) => !p.dropReason).map(flipY)],
+      lines: breakLine(kept).map((run) => run.map(flipY)),
     },
     dropLayer("drift", "drift", []),
     dropLayer("outlier drop", "outlier", ["drift"]),
