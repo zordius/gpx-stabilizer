@@ -73,6 +73,7 @@ export function analyzedLayers(points, opts = {}) {
       color: "#c00",
       shape: "circle",
       size: 4,
+      opacity: 0.7,
       points: droppedBy("activity"),
     },
     {
@@ -80,6 +81,7 @@ export function analyzedLayers(points, opts = {}) {
       color: "#c00",
       shape: "square",
       size: 4,
+      opacity: 0.7,
       points: droppedBy("outlier"),
     },
   ];

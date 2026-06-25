@@ -63,7 +63,7 @@ test("line + point style: the line's points are reused as markers, drawn on top"
     { label: "g", lines: [pts([0, 0], [1, 1])], width: 2, pointColor: "#c00", size: 3 },
   ]);
   assert.ok(svg.indexOf("<polyline") < svg.indexOf("<path "), "markers come after the line");
-  assert.match(svg, /<path d="M0,0 h0 M1,1 h0" stroke="#c00" stroke-width="6"/);
+  assert.match(svg, /<path d="M0,0 h0 M1,1 h0" stroke="#c00" stroke-width="4"/); // size 3 -> 3+1
 });
 
 test("no baked-in zoom transform; coords are raw and the viewBox does the framing", () => {
@@ -74,7 +74,7 @@ test("no baked-in zoom transform; coords are raw and the viewBox does the framin
 
 test("markers are a stroked dot path; square uses a square cap, size = stroke-width", () => {
   const svg = toSvg([{ label: "p", points: pts([0, 0]), shape: "square", size: 4 }]);
-  assert.match(svg, /<path d="M0,0 h0" stroke="[^"]*" stroke-width="8" stroke-linecap="square"\/>/);
+  assert.match(svg, /<path d="M0,0 h0" stroke="[^"]*" stroke-width="5" stroke-linecap="square"\/>/);
   assert.doesNotMatch(svg, /<circle|<rect/);
 });
 
@@ -85,7 +85,7 @@ test("line paint hoists onto the group; a markers-only layer keeps a bare group 
   assert.match(dot, /<g id="layer-d" class="layer">/); // points-only: bare group
   assert.match(
     dot,
-    /<path [^>]*stroke="blue" stroke-width="4" stroke-linecap="round" opacity="0.5"\/>/,
+    /<path [^>]*stroke="blue" stroke-width="3" stroke-linecap="round" opacity="0.5"\/>/,
   );
 });
 
@@ -107,7 +107,7 @@ test("a layer with a line + markers: group stroke for the line, own stroke on th
   ]);
   assert.match(svg, /<g id="layer-x" class="layer" fill="none" stroke="#06c" stroke-width="1.5">/);
   assert.match(svg, /<polyline points="[^"]+"\/>/); // bare line, inherits the group stroke
-  assert.match(svg, /<path [^>]*stroke="#06c" stroke-width="4"/); // markers carry their own
+  assert.match(svg, /<path [^>]*stroke="#06c" stroke-width="3"/); // markers carry their own (size 2 -> 3)
 });
 
 test("polygon mode fills the shape via the hoisted group color", () => {

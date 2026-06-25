@@ -20,11 +20,12 @@ const SVG_NS = "http://www.w3.org/2000/svg";
  * @property {string} [color]            line stroke + default marker stroke; polygon/text fill (default "#0a6")
  * @property {number} [width]            line stroke-width; its presence is what draws the line
  * @property {string} [pointColor]       marker stroke; its presence also draws the line's points as markers
- * @property {number} [size]             marker radius (dot diameter = 2*size, default 2); its presence also
- *                                       draws the line's points as markers
+ * @property {number} [size]             marker size; dot diameter = size + 1 (default 2 → 3px); its
+ *                                       presence also draws the line's points as markers
  * @property {"circle" | "square"} [shape] marker shape via stroke-linecap: round | square (default "circle")
  * @property {number} [fontSize]         label font-size in user units (default 12)
  * @property {number} [opacity]          element opacity 0..1
+ * @property {boolean} [visible]         legend checkbox starts checked (default true) — future show/hide hook
  */
 
 /** Round to 2 decimals for compact output. */
@@ -54,6 +55,13 @@ function* layerPoints(layer) {
   for (const line of layer.lines ?? []) yield* line;
   yield* layer.points ?? [];
   yield* layer.labels ?? [];
+}
+
+/** Count a layer's drawn points (line vertices + explicit markers; labels don't count). */
+function countPoints(layer) {
+  let n = layer.points?.length ?? 0;
+  for (const line of layer.lines ?? []) n += line.length;
+  return n;
 }
 
 /**
@@ -164,16 +172,16 @@ function renderLayer(layer) {
     }
   }
 
-  // markers: one stroked <path> of zero-length dots — the dot size IS the stroke-width, so the
-  // `non-scaling-stroke` CSS rule keeps both line and marker size constant under zoom. round cap =
-  // circle, square cap = square. `pointColor`/`size` style them independently of the line.
+  // markers: one stroked <path> of zero-length dots — the dot diameter IS the stroke-width (size + 1),
+  // so the `non-scaling-stroke` CSS rule keeps both line and marker size constant under zoom. round
+  // cap = circle, square cap = square. `pointColor`/`size` style them independently of the line.
   if (markerPts.length > 0) {
     const d = markerPts.map((p) => `M${round(p.x)},${round(p.y)} h0`).join(" ");
     const cap = layer.shape === "square" ? "square" : "round";
     const mColor = layer.pointColor ?? color;
     const mSize = layer.size ?? 2;
     body.push(
-      `    <path d="${d}" stroke="${enc(mColor)}" stroke-width="${round(mSize * 2)}" stroke-linecap="${cap}"${elOp}/>`,
+      `    <path d="${d}" stroke="${enc(mColor)}" stroke-width="${round(mSize + 1)}" stroke-linecap="${cap}"${elOp}/>`,
     );
   }
 
@@ -217,13 +225,23 @@ export function writeHtml(panels = [], opts = {}) {
   const title = enc(opts.title ?? "gpx-stabilizer");
   const heading = enc(opts.heading ?? "GPX Stabilizer");
   const summary = opts.summary == null ? "" : `<p>${enc(opts.summary)}</p>\n`;
+  // Drop empty layers entirely — a layer with no drawn points renders no <g>, no legend item, and
+  // no toggle rule (so e.g. a "no outliers" run shows nothing for that layer).
+  const panelLayers = panels.map((p) => (p.layers ?? []).filter((l) => countPoints(l) > 0));
   const body = panels
-    .map((p) => {
-      const layers = p.layers ?? [];
+    .map((p, i) => {
+      const layers = panelLayers[i];
       const id = p.title != null ? slug(p.title) : null;
       const open = id ? `<section id="${id}">` : "<section>";
       return `${open}\n${renderHead(p.title, layers, id)}${toSvg(layers, p.opts)}\n</section>`;
     })
+    .join("\n");
+  // One pure-CSS toggle rule per labelled layer slug: unchecking a panel's legend checkbox hides
+  // that panel's matching <g> (scoped to the section, so panels don't affect each other).
+  const slugs = new Set();
+  for (const layers of panelLayers) for (const l of layers) if (l.label) slugs.add(slug(l.label));
+  const toggles = [...slugs]
+    .map((s) => `section:has(.t-${s}:not(:checked)) #layer-${s} { display: none; }`)
     .join("\n");
   return `<!doctype html>
 <html lang="en">
@@ -231,24 +249,28 @@ export function writeHtml(panels = [], opts = {}) {
 <meta charset="utf-8"/>
 <title>${title}</title>
 <style>
-html { scroll-behavior: smooth; }
+html { scroll-behavior: smooth; scroll-snap-type: y proximity; }
 html, body { margin: 0; padding: 0; }
 h1 { padding: 10px; }
 p { margin: 10px; padding: 0; }
-section { overflow: clip; } /* clip this section's legend so it can't bleed into the next section */
-section > header { position: sticky; top: 0; z-index: 1; }
+section { overflow: clip; display: grid; scroll-snap-align: start; }
+section > header { grid-area: 1 / 1; align-self: start; position: sticky; top: 0; z-index: 1; }
 section h2 { margin: 0; padding: 4px 8px; background: #aaa8; cursor: pointer; }
 section h2 a { color: inherit; text-decoration: none; display: block; }
 section h2:hover { background: #aaa3; }
-section ul { position: absolute; top: 100%; left: 0; margin: 10px; padding: 10px; list-style: none; font: 12px/1.5 sans-serif; background: #fff; border: 1px solid #000; }
-section li { display: flex; align-items: center; gap: 5px; cursor: pointer; padding: 10px; }
+section ul { position: absolute; top: 100%; left: 0; margin: 10px; padding: 5px; list-style: none; font: 12px/1.5 sans-serif; background: #fffa; border: 1px solid #000; }
+section li { padding: 5px; cursor: pointer; }
 section li:hover { background: #ffffaa; }
-/* Size the <svg> to the largest box of the data's aspect ratio (--ar, set per-svg) that fits the
-   real viewport — the zoom-to-max is computed here in CSS from --ar and vw/vh, then centred. */
-section > svg { display: block; margin: auto; width: min(100vw, calc(100vh * var(--ar))); height: min(100vh, calc(100vw / var(--ar))); }
+section li label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+section li input { appearance: none; -webkit-appearance: none; margin: 0; width: 18px; height: 18px; border: 2px solid #888; border-radius: 4px; display: grid; place-content: center; cursor: pointer; }
+section li input:checked { border-color: #06c; }
+section li input::before { content: ""; width: 11px; height: 11px; transform: scale(0); background: #06c; clip-path: polygon(14% 44%, 0 65%, 50% 100%, 100% 16%, 80% 0%, 43% 62%); }
+section li input:checked::before { transform: scale(1); }
+section > svg { grid-area: 1 / 1; display: block; width: 100vw; height: 100vh; }
 section > svg polyline, section > svg path { vector-effect: non-scaling-stroke; }
-* { transition: opacity 0.7s ease, background-color 0.7s ease; } /* hover-out: slow fade back */
-*:hover { transition-duration: 0.3s; }      /* hover-in: quick fade */
+* { transition: opacity 0.7s ease, background-color 0.7s ease; }
+*:hover { transition-duration: 0.3s; }
+${toggles}
 </style>
 </head>
 <body>
@@ -275,7 +297,11 @@ function renderHead(title, layers, id) {
   const h2 = title == null ? "" : `<h2><a href="#${id}">${enc(title)}</a></h2>`;
   const items = layers
     .filter((l) => l.label)
-    .map((l) => `<li>${legendSwatch(l)}${enc(l.label)}</li>`)
+    .map((l) => {
+      const checked = l.visible === false ? "" : " checked";
+      const cls = `t-${slug(l.label)}`; // ties this checkbox to its `#layer-{slug}` group
+      return `<li><label><input type="checkbox" class="${cls}"${checked}/>${legendSwatch(l)}${enc(l.label)} (${countPoints(l)})</label></li>`;
+    })
     .join("");
   const legend = items ? `<ul>${items}</ul>` : "";
   if (!h2 && !legend) return "";
@@ -315,7 +341,7 @@ function legendSwatch(layer) {
   }
   if (drawMarker) {
     const mColor = enc(layer.pointColor ?? color);
-    const r = Math.min(layer.size ?? 2, cy - 1); // dot radius = size (diameter 2*size, as rendered)
+    const r = Math.min(((layer.size ?? 2) + 1) / 2, cy - 1); // radius = (size+1)/2 (diameter = size+1)
     if ((layer.shape ?? "circle") === "square") {
       const side = round(2 * r);
       parts.push(
