@@ -325,8 +325,9 @@ ${toggles}
 ${summary}${nav}</header>
 ${body}
 <script>
-// click an unzoomed chart to zoom to that point at a fixed 1 m = 5 px, then DRAG to pan. A
-// bottom-right "zoom out" button restores. One panel zoomed at a time; legend/header clicks ignored.
+// click an unzoomed chart to zoom to that point at a fixed 1 m = 5 px, then DRAG to pan. Zoom out
+// with a RIGHT-CLICK or the bottom-right "zoom out" button. One panel zoomed at a time; legend/header
+// clicks ignored.
 let zoomed = null;
 let drag = null;
 const btn = document.createElement("button");
@@ -361,6 +362,11 @@ document.body.addEventListener("pointerup", () => {
     drag = null;
     if (zoomed) zoomed.style.cursor = "grab";
   }
+});
+document.body.addEventListener("contextmenu", (e) => {
+  if (!zoomed) return; // not zoomed -> leave the normal right-click menu alone
+  e.preventDefault(); // zoomed -> right-click means "zoom out", not the system menu
+  restore();
 });
 document.body.addEventListener("click", (e) => {
   if (e.target === btn) return restore();
