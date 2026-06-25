@@ -5,8 +5,8 @@ import { parseGpx, writeGpx } from "../src/gpx.js";
 const sample = {
   segments: [
     [
-      { lat: 35.1, lon: 138.2, ele: 1200.5, time: Date.parse("2026-01-17T09:00:00Z") },
-      { lat: 35.2, lon: 138.3, ele: 1199, time: Date.parse("2026-01-17T09:00:01Z") },
+      { lat: 35.1, lon: 138.2, ele: 1200.5, time: Date.parse("2026-01-17T09:00:00Z"), speed: null },
+      { lat: 35.2, lon: 138.3, ele: 1199, time: Date.parse("2026-01-17T09:00:01Z"), speed: null },
     ],
   ],
   meta: { creator: "FitoTrack", name: "Morning Ski", time: "2026-01-17T00:00:18Z", type: "ski" },

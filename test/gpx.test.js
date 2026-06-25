@@ -15,8 +15,21 @@ test("parses a segment with lat/lon/ele/time", () => {
     lon: 138.2,
     ele: 1200.5,
     time: Date.parse("2026-01-17T09:00:00Z"),
+    speed: null,
   });
   assert.equal(segments[0][1].lat, 35.2);
+});
+
+test("reads device <speed> (m/s) from extensions, null when absent", () => {
+  const gpx = `<gpx><trk><trkseg>
+    <trkpt lat="35.1" lon="138.2"><ele>1200</ele>
+      <extensions><speed>3.29</speed></extensions>
+      <time>2026-01-17T09:00:00Z</time></trkpt>
+    <trkpt lat="35.2" lon="138.3"><time>2026-01-17T09:00:01Z</time></trkpt>
+  </trkseg></trk></gpx>`;
+  const { segments } = parseGpx(gpx);
+  assert.equal(segments[0][0].speed, 3.29); // read from <extensions>
+  assert.equal(segments[0][1].speed, null); // absent → null
 });
 
 test("splits multiple trksegs into separate segments", () => {
@@ -38,7 +51,7 @@ test("missing ele/time become null", () => {
 
 test("self-closing trkpt", () => {
   const { segments } = parseGpx(`<trkseg><trkpt lat="1.5" lon="2.5" /></trkseg>`);
-  assert.deepEqual(segments[0][0], { lat: 1.5, lon: 2.5, ele: null, time: null });
+  assert.deepEqual(segments[0][0], { lat: 1.5, lon: 2.5, ele: null, time: null, speed: null });
 });
 
 test("attribute order lon-before-lat and single quotes", () => {

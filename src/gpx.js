@@ -6,6 +6,7 @@ import { readFileSync, writeFileSync } from "node:fs";
  * @property {number} lon        longitude in degrees
  * @property {number | null} ele  elevation in metres, or null if absent
  * @property {number | null} time milliseconds since the Unix epoch (UTC), or null if absent
+ * @property {number | null} speed device-reported speed in m/s (GPX `<speed>`), or null if absent
  */
 
 /**
@@ -28,6 +29,7 @@ const LAT_RE = /\blat\s*=\s*["']([^"']+)["']/;
 const LON_RE = /\blon\s*=\s*["']([^"']+)["']/;
 const ELE_RE = /<ele>\s*([^<]*?)\s*<\/ele>/;
 const TIME_RE = /<time>\s*([^<]*?)\s*<\/time>/;
+const SPEED_RE = /<speed>\s*([^<]*?)\s*<\/speed>/; // device speed (m/s), often inside <extensions>
 const TRKSEG_RE = /<trkseg\b[^>]*>([\s\S]*?)<\/trkseg>/gi;
 const TRKPT_RE = /<trkpt\b([^>]*?)(?:\/>|>([\s\S]*?)<\/trkpt>)/gi;
 
@@ -121,13 +123,16 @@ export function parseGpx(xml) {
       if (Number.isNaN(latN) || Number.isNaN(lonN)) continue;
       const eleM = ELE_RE.exec(inner);
       const timeM = TIME_RE.exec(inner);
+      const speedM = SPEED_RE.exec(inner);
       const ele = eleM ? Number.parseFloat(eleM[1]) : Number.NaN;
       const time = timeM ? Date.parse(timeM[1]) : Number.NaN;
+      const speed = speedM ? Number.parseFloat(speedM[1]) : Number.NaN;
       points.push({
         lat: latN,
         lon: lonN,
         ele: Number.isNaN(ele) ? null : ele,
         time: Number.isNaN(time) ? null : time,
+        speed: Number.isNaN(speed) ? null : speed,
       });
     }
     if (points.length > 0) segments.push(points);
