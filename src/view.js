@@ -4,7 +4,7 @@
 // a clean track plus per-reason drop markers.
 
 import { analyze } from "./analyze.js";
-import { writeHtml } from "./html.js";
+import { toSvg, writeHtml } from "./html.js";
 import { project } from "./measure.js";
 
 /**
@@ -150,5 +150,20 @@ export function toHtmlAnalyzedFiles(files, opts = {}) {
     title: opts.title ?? "GPX Stabilizer",
     heading: opts.heading ?? "GPX Stabilizer — analyzed",
     summary: summarize(files),
+  });
+}
+
+/**
+ * One file's analysed view as a standalone SVG string (clean track + drop markers), sized for PNG
+ * rasterization. `width`/`height` are the output pixels (default 1280×720); other `opts` flow to
+ * `analyze`. Pair with png.js's `savePng` to write a PNG.
+ * @param {import("./measure.js").TrackPoint[]} points
+ * @param {Parameters<typeof analyze>[1] & { width?: number, height?: number }} [opts]
+ */
+export function analyzedSvg(points, opts = {}) {
+  return toSvg(analyzedLayers(points, opts), {
+    standalone: true,
+    width: opts.width ?? 1280,
+    height: opts.height ?? 720,
   });
 }

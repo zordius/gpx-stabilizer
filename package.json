@@ -32,6 +32,7 @@
     "url": "git+https://github.com/zordius/gpx-stabilizer.git"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1"
+    "@biomejs/biome": "^2.5.1",
+    "@resvg/resvg-js": "^2.6.2"
   }
 }

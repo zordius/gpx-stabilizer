@@ -73,13 +73,17 @@ function countPoints(layer) {
  * aspect ratio — the fit is pure CSS, not baked-in JS. Each layer is a toggleable `<g id="layer-…">`;
  * every `<text>` carries `class="label"`; no `<style>` is emitted, so embedding HTML can restyle.
  *
+ * `standalone` mode (for rasterizing to PNG, where there's no host CSS) instead emits explicit pixel
+ * `width`/`height` and an internal `<style>` so markers/lines keep a constant stroke under the fit.
+ *
  * @param {Layer[]} layers  points carry `x`, `y` (and `text` for labels)
- * @param {{ padding?: number, background?: string }} [opts]  padding is a fraction of the data size
+ * @param {{ padding?: number, background?: string, standalone?: boolean, width?: number, height?: number }} [opts]
  * @returns {string}
  */
 export function toSvg(layers = [], opts = {}) {
   const pad = opts.padding ?? 0.02;
   const background = opts.background ?? null;
+  const standalone = opts.standalone ?? false;
 
   let minX = Number.POSITIVE_INFINITY;
   let maxX = Number.NEGATIVE_INFINITY;
@@ -110,9 +114,15 @@ export function toSvg(layers = [], opts = {}) {
   // <svg> element to the largest box of this ratio that fits the real viewport — the zoom-to-fit is
   // computed in CSS from `--ar` and vw/vh, not baked in here.
   const ar = Math.round((vbW / vbH) * 1e6) / 1e6;
-  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" style="--ar:${ar}">`;
+  // HTML-embed: no fixed size, expose `--ar` for the host CSS. Standalone (PNG): fixed px size.
+  const sizeAttr = standalone
+    ? ` width="${opts.width ?? 1280}" height="${opts.height ?? 720}"`
+    : ` style="--ar:${ar}"`;
+  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet"${sizeAttr}>`;
 
   const out = [head];
+  // standalone has no host CSS, so carry the non-scaling-stroke rule inline (constant marker/line px)
+  if (standalone) out.push("  <style>polyline,path,line{vector-effect:non-scaling-stroke}</style>");
   if (background) {
     out.push(
       `  <rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="${enc(background)}"/>`,
