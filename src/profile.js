@@ -81,25 +81,25 @@ function sDelta(x, y, shortHw, longHw) {
  * netd150, wander (time-windowed); carve (S-arc density); paused. `cu` is the cumulative-unit-vector
  * scan the windows block differences (exposed for modules).
  *
- * @param {ReturnType<import("./measure.js").measure>} m  point bundle (x, y, el, t, dt, step)
+ * @param {ReturnType<import("./measure.js").measure>} m  point bundle (x, y, el, t, dt, planarStep)
  * @param {Partial<typeof PARAMS>} [opts]
  */
 export function profile(m, opts = {}) {
   const g = { ...PARAMS, ...opts };
-  const { x, y, el, t, dt, step } = m;
-  const { hs, vs } = speeds(step, dt, el, g); //                 block 3
+  const { x, y, el, t, dt, planarStep } = m;
+  const { hs, vs } = speeds(planarStep, dt, el, g); //           block 3
   const { straight, steady } = localShape(x, y, hs, g); //       block 4
   const { maDist, cu } = jitter(x, y, el, g); //                 block 5
   const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 6
-  const carve = carveDensity(x, y, step, g); //                  block 7
+  const carve = carveDensity(x, y, planarStep, g); //            block 7
   return { hs, vs, straight, steady, maDist, cu, netsp, netd150, wander, paused, carve, g };
 }
 
 /** Block 3 — horizontal and vertical speed (m/s), each smoothed; ele is pre-smoothed for vs. */
-export function speeds(step, dt, el, g) {
+export function speeds(planarStep, dt, el, g) {
   const n = el.length;
   const hsRaw = new Array(n).fill(0);
-  for (let i = 1; i < n; i++) hsRaw[i] = step[i - 1] / dt[i - 1];
+  for (let i = 1; i < n; i++) hsRaw[i] = planarStep[i - 1] / dt[i - 1];
   const hs = smooth(hsRaw, g.SW);
   const elS = smooth(el, g.ELE_SMOOTH);
   const vsRaw = new Array(n).fill(0);
@@ -194,7 +194,7 @@ export function windows(x, y, t, cu, g) {
 }
 
 /** Block 7 — local S-arc density (carve): signed swing crossings per 100 m over +/-SW. */
-export function carveDensity(x, y, step, g) {
+export function carveDensity(x, y, planarStep, g) {
   const n = x.length;
   const delta = sDelta(x, y, g.S_SHORT, g.S_LONG);
   const cp = new Array(n).fill(false);
@@ -213,7 +213,7 @@ export function carveDensity(x, y, step, g) {
   for (let i = 0; i < n; i++) cps[i + 1] = cps[i] + (cp[i] ? 1 : 0);
   const cpath = new Array(n);
   cpath[0] = 0;
-  for (let i = 1; i < n; i++) cpath[i] = cpath[i - 1] + step[i - 1];
+  for (let i = 1; i < n; i++) cpath[i] = cpath[i - 1] + planarStep[i - 1];
   const carve = new Array(n).fill(0);
   for (let k = 0; k < n; k++) {
     const lo = Math.max(0, k - g.SW);

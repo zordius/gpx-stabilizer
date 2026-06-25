@@ -34,7 +34,7 @@ export function analyze(points, opts = {}) {
     all.filter((m) => m.screen),
   );
   const valid = keptIndices(preDrops);
-  const m = measure(points, valid); //                  point-level primitives (positions, dt, step)
+  const m = measure(points, valid); //           point-level primitives (positions, dt, planarStep)
   const w = profile(m, paramOpts); //                   window-level descriptors (hs, straight, …)
   const ctx = { ...m, ...w }; //                        the per-point context: measure ∪ profile
 

@@ -51,7 +51,7 @@ function interpEle(raw) {
  * is still projected (so excluded points get `xAll/yAll`). Returns the per-point primitive bundle
  * that profile.js turns into windowed descriptors and analyze.js assembles back onto the points.
  *
- * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `step`; and
+ * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `planarStep`; and
  * the 3D kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
  * (vector, unit direction, magnitude). The per-step arrays have length `valid.length − 1`.
  *
@@ -60,9 +60,9 @@ function interpEle(raw) {
  */
 export function measure(points, valid) {
   const { xAll, yAll, x, y, el, t } = project(points, valid); // block 1
-  const { dt, step } = deltas(x, y, t); //                      block 2
+  const { dt, planarStep } = deltas(x, y, t); //                block 2
   const { velocity, acceleration } = kinematics(x, y, el, dt); // block 3
-  return { xAll, yAll, x, y, el, t, dt, step, velocity, acceleration, n: valid.length };
+  return { xAll, yAll, x, y, el, t, dt, planarStep, velocity, acceleration, n: valid.length };
 }
 
 /**
@@ -88,12 +88,12 @@ export function project(points, valid) {
 export function deltas(x, y, t) {
   const n = x.length;
   const dt = new Array(Math.max(0, n - 1));
-  const step = new Array(Math.max(0, n - 1));
+  const planarStep = new Array(Math.max(0, n - 1));
   for (let i = 0; i < n - 1; i++) {
     dt[i] = Math.max(t[i + 1] - t[i], 1.0);
-    step[i] = Math.hypot(x[i + 1] - x[i], y[i + 1] - y[i]); // planar (x/y only)
+    planarStep[i] = Math.hypot(x[i + 1] - x[i], y[i + 1] - y[i]); // planar (x/y only, no elevation)
   }
-  return { dt, step };
+  return { dt, planarStep };
 }
 
 /**

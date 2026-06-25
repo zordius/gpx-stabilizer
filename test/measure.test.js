@@ -23,10 +23,10 @@ test("project: valid-only centre, projects all points, east=+x north=+y", () => 
   assert.deepEqual(el, [100, 110]); //            elevation carried through
 });
 
-test("deltas: step distance and dt floored at 1 second", () => {
-  const { dt, step } = deltas([0, 3, 3], [0, 4, 4], [0, 2, 2.5]); // t in seconds
+test("deltas: planar step distance and dt floored at 1 second", () => {
+  const { dt, planarStep } = deltas([0, 3, 3], [0, 4, 4], [0, 2, 2.5]); // t in seconds
   assert.deepEqual(
-    step.map((v) => Math.round(v)),
+    planarStep.map((v) => Math.round(v)),
     [5, 0], //   3-4-5 triangle, then no movement
   );
   assert.deepEqual(dt, [2, 1]); // 2 s, then 0.5 s floored to 1
@@ -77,9 +77,9 @@ test("measure: projects all points and takes adjacent deltas over the valid sub-
   const m = measure(points, [...points.keys()]);
   assert.equal(m.xAll.length, 121); // every point projected
   assert.equal(m.n, 121);
-  assert.equal(m.step.length, 120); // adjacent-pair deltas over the sub-sequence
+  assert.equal(m.planarStep.length, 120); // adjacent-pair deltas over the sub-sequence
   assert.equal(m.dt.length, 120);
-  assert.ok(Math.abs(m.step[60] - 5) < 0.1, `step=${m.step[60]}`); // ~5 m between samples
+  assert.ok(Math.abs(m.planarStep[60] - 5) < 0.1, `planarStep=${m.planarStep[60]}`); // ~5 m/step
   assert.equal(m.dt[60], 1); // 1 s between samples
   // 3D kinematics: flat eastward constant-speed run -> speed == planar step, no acceleration
   assert.equal(m.velocity.dir.x.length, 120);

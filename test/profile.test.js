@@ -20,14 +20,14 @@ const ramp = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => f(i));
 
 test("speeds: hs ~ step/dt; vs signs with elevation change", () => {
   const n = 40;
-  const step = new Array(n - 1).fill(5); // 5 m per step
+  const planarStep = new Array(n - 1).fill(5); // 5 m per step
   const dt = new Array(n - 1).fill(1); //  1 s per step
   const flat = new Array(n).fill(1000);
   const climb = ramp(n, (i) => 1000 + i); // +1 m/s
   const drop = ramp(n, (i) => 1000 - i); // -1 m/s
-  assert.ok(Math.abs(speeds(step, dt, flat, PARAMS).hs[20] - 5) < 0.01);
-  assert.ok(speeds(step, dt, climb, PARAMS).vs[20] > 0.5);
-  assert.ok(speeds(step, dt, drop, PARAMS).vs[20] < -0.5);
+  assert.ok(Math.abs(speeds(planarStep, dt, flat, PARAMS).hs[20] - 5) < 0.01);
+  assert.ok(speeds(planarStep, dt, climb, PARAMS).vs[20] > 0.5);
+  assert.ok(speeds(planarStep, dt, drop, PARAMS).vs[20] < -0.5);
 });
 
 test("localShape: straight ~ 1, zigzag < 1; steady ~ 0 for constant speed", () => {
@@ -77,9 +77,9 @@ test("carveDensity: zero for a straight line, positive for an S-curve", () => {
   const n = 60;
   const xs = ramp(n);
   const straightY = new Array(n).fill(0);
-  assert.equal(carveDensity(xs, straightY, deltas(xs, straightY, xs).step, PARAMS)[30], 0);
+  assert.equal(carveDensity(xs, straightY, deltas(xs, straightY, xs).planarStep, PARAMS)[30], 0);
   const sineY = ramp(n, (i) => 10 * Math.sin(i / 3)); // sweeping S -> repeated crossings
-  assert.ok(carveDensity(xs, sineY, deltas(xs, sineY, xs).step, PARAMS)[30] > 0);
+  assert.ok(carveDensity(xs, sineY, deltas(xs, sineY, xs).planarStep, PARAMS)[30] > 0);
 });
 
 test("profile: turns a measure bundle into the windowed descriptors", () => {

@@ -72,7 +72,8 @@ test("outlier module: flags a perpendicular jump, clears a straight line", () =>
   const t = ramp(n);
   const hs = new Array(n).fill(1);
   const flat = new Array(n).fill(0);
-  const run = (y, d) => outlier.compute({ x: xs, y, step: d.step, hs, dt: d.dt, g: PARAMS }).drop;
+  const run = (y, d) =>
+    outlier.compute({ x: xs, y, planarStep: d.planarStep, hs, dt: d.dt, g: PARAMS }).drop;
   assert.equal(run(flat, deltas(xs, flat, t))[20], null); // clean -> no context
   const bumped = flat.slice();
   bumped[20] = 100; // one point jumps 100 m sideways
@@ -84,10 +85,10 @@ test("outlier module: an acceleration spike alone flags an outlier", () => {
   const n = 40;
   const xs = ramp(n); // straight line -> detour ~ 0
   const ys = new Array(n).fill(0);
-  const { step, dt } = deltas(xs, ys, ramp(n));
+  const { planarStep, dt } = deltas(xs, ys, ramp(n));
   const hs = new Array(n).fill(1);
   hs[20] = 70; // sudden speed spike -> accel ~ 69 > A_MAX, but the path stays straight
-  const drop = outlier.compute({ x: xs, y: ys, step, hs, dt, g: PARAMS }).drop;
+  const drop = outlier.compute({ x: xs, y: ys, planarStep, hs, dt, g: PARAMS }).drop;
   assert.ok(drop[20] && drop[20].accel > PARAMS.A_MAX, `accel=${drop[20]?.accel}`);
   assert.ok(drop[20].detour <= PARAMS.D_JUMP); // not the detour trigger
   assert.equal(drop[19], null); // neighbour before the spike is clean

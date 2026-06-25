@@ -1,12 +1,12 @@
 // Compute module "outlier" — GPS spike detector (position 3-point detour, or impossible
 // acceleration). Returns { drop } where each entry is { detour, accel } when flagged, else null,
 // so spikes become the "outlier" drop reason. This is also the reference compute-module shape.
-export const compute = ({ x, y, step, hs, dt, g }) => {
+export const compute = ({ x, y, planarStep, hs, dt, g }) => {
   const n = x.length;
   const detour = new Array(n).fill(0);
   for (let i = 1; i < n - 1; i++) {
     const d02 = Math.hypot(x[i + 1] - x[i - 1], y[i + 1] - y[i - 1]);
-    detour[i] = step[i - 1] + step[i] - d02;
+    detour[i] = planarStep[i - 1] + planarStep[i] - d02;
   }
   const drop = new Array(n).fill(null);
   for (let i = 0; i < n; i++) {
