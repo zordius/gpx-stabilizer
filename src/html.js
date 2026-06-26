@@ -366,9 +366,13 @@ document.body.addEventListener("pointerdown", (e) => {
 document.body.addEventListener("pointermove", (e) => {
   if (!drag) return;
   const r = zoomed.getBoundingClientRect();
-  const [vx, vy, vw, vh] = drag.vb; // pan so the content follows the cursor (1 px = vw/width metres)
-  const nx = vx - ((e.clientX - drag.x) * vw) / r.width;
-  const ny = vy - ((e.clientY - drag.y) * vh) / r.height;
+  const [vx, vy, vw, vh] = drag.vb;
+  // preserveAspectRatio="meet" scales the viewBox UNIFORMLY (the smaller-axis fit), so one screen px
+  // is the same metres on BOTH axes. Use that single scale, not vw/width & vh/height separately
+  // (those only agree when the viewBox and element share an aspect ratio) so the content tracks 1:1.
+  const mPerPx = Math.max(vw / r.width, vh / r.height); // = 1 / min(width/vw, height/vh)
+  const nx = vx - (e.clientX - drag.x) * mPerPx;
+  const ny = vy - (e.clientY - drag.y) * mPerPx;
   zoomed.setAttribute("viewBox", nx + " " + ny + " " + vw + " " + vh);
 });
 document.body.addEventListener("pointerup", () => {
