@@ -14,7 +14,8 @@
   "author": "zordius",
   "type": "module",
   "bin": {
-    "gpx-stabilize": "src/cli.js"
+    "gpx-stabilize": "src/cli.js",
+    "gpx-from-gopro": "src/gopro-cli.js"
   },
   "exports": "./src/index.js",
   "scripts": {
