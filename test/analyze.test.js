@@ -70,41 +70,41 @@ test("analyze: missing elevations are interpolated, never NaN", () => {
   for (const p of analyze(pts)) assert.ok(Number.isFinite(p.vs) && Number.isFinite(p.maDist));
 });
 
-test("analyze: kept points get full signals; dropped points get only position + drop reasons", () => {
+test("analyze: a re-timed duplicate is kept; dropped points get only position + drop reasons", () => {
   const out = analyze([
     { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  kept
-    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  dup time -> smoothed -> oversample
-    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 0 }, //          dup time -> smoothed -> oversample
-    { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 500 }, //    oversample
-    { lat: 36, lon: 138 + 3 * STEP5, ele: 1000, time: 1500 }, //   kept
-    { lat: 36, lon: 138 + 4 * STEP5, ele: 1000, time: null }, //   noTime
+    { lat: 36, lon: 138, ele: 1000, time: 0 }, //                  dup -> dequantize re-times to 0.5 s, KEPT
+    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 1000 }, //       kept (real 1 Hz, 0.5 s after the dup)
+    { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 2000 }, //   kept
+    { lat: 36, lon: 138 + 3 * STEP5, ele: 1000, time: null }, //   noTime
   ]);
   assert.deepEqual(
     out.map((p) => (p.dropReason ? Object.keys(p.dropReason)[0] : "kept")),
-    ["kept", "oversample", "oversample", "oversample", "kept", "noTime"],
+    ["kept", "kept", "kept", "kept", "noTime"],
   );
-  // the two duplicate-time points were re-timed by dequantizeTime (provenance kept centrally)
+  // the duplicate was re-timed by dequantizeTime and KEPT (oversample only drops < 0.5 s bursts)
   assert.ok(out[1].edited?.time && out[1].edited.time.by[0] === "dequantizeTime");
   assert.equal(out[1].edited.time.from, 0); // original second preserved
+  assert.equal(typeof out[1].hs, "number"); // kept -> carries signals
   for (const p of out) assert.equal(typeof p.x, "number"); // every point projected
-  for (const i of [1, 2, 3, 5]) assert.equal(out[i].hs, undefined, `dropped #${i} has no signals`);
+  assert.equal(out[4].hs, undefined); // the dropped (noTime) point carries no signals
   assert.equal(typeof out[0].hs, "number"); // kept points carry signals
-  assert.equal(typeof out[4].hs, "number");
 });
 
-test("analyze: resamples dense input to ~1 kept point per second", () => {
+test("analyze: resamples dense input to ~2 kept points per second (0.5 s gate)", () => {
   const pts = Array.from({ length: 21 }, (_, i) => ({
     lat: 36,
     lon: 138 + i * 1e-5,
     ele: 1000,
     time: i * 100, // 10 Hz
   }));
-  assert.equal(analyze(pts).filter((p) => !p.dropReason).length, 3); // t = 0, 1000, 2000 ms
+  // 0.5 s gate keeps t = 0, 500, 1000, 1500, 2000 ms
+  assert.equal(analyze(pts).filter((p) => !p.dropReason).length, 5);
 });
 
 test("analyze: a dropped point does not shift the projection centre", () => {
   const pts = track({ n: 121, dlon: STEP5 });
-  pts.splice(61, 0, { lat: 80, lon: 200, ele: 0, time: 60500 }); // wild, < 1 s after a kept point
+  pts.splice(61, 0, { lat: 80, lon: 200, ele: 0, time: 60300 }); // wild, < 0.5 s after a kept point
   const out = analyze(pts);
   assert.ok(out[61].dropReason.oversample); // resampled out
   assert.ok(Math.abs(out[60].x) < 1, "centre unaffected by the dropped point");
@@ -176,13 +176,13 @@ test("analyze: excluded points get no module data", () => {
   const m = { name: "m", compute: (ctx) => ({ a: ctx.hs }) };
   const out = analyze(
     [
-      { lat: 36, lon: 138, ele: 0, time: 0 }, //  kept
-      { lat: 36, lon: 138, ele: 0, time: 0 }, //  dup time -> smoothed -> oversample dropped
+      { lat: 36, lon: 138, ele: 0, time: 0 }, //    kept
+      { lat: 36, lon: 138, ele: 0, time: 200 }, //  raw < 0.5 s burst (not a duplicate) -> oversample
     ],
     { modules: [m] },
   );
   assert.ok(out[0].m); //                     kept point has the module
-  assert.ok(out[1].dropReason.oversample); // dropped (sub-1 s after re-timing)
+  assert.ok(out[1].dropReason.oversample); // dropped (raw < 0.5 s, not repair-touched)
   assert.equal(out[1].m, undefined); //       dropped point has no module data
 });
 

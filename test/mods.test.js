@@ -47,22 +47,22 @@ test("loadModule: an unresolvable name throws", async () => {
 
 // ── label-phase modules (noTime, oversample) — drop via the reserved `drop` key ──
 
-test("label: oversample drops sub-1 s points and noTime drops untimed, against the last kept", () => {
+test("label: oversample drops sub-0.5 s points and noTime drops untimed, against the last kept", () => {
   const at = (ms) => ({ lat: 36, lon: 138, ele: 0, time: ms });
   const bags = label(
     [
       at(0), //          kept (first timed)
-      at(500), //        oversample (< 1 s from the kept point)
-      at(1500), //       kept (>= 1 s from the last kept point)
-      at(1800), //       oversample (< 1 s from the 1500 point)
+      at(300), //        oversample (< 0.5 s from the kept point)
+      at(1300), //       kept (>= 0.5 s from the last kept point)
+      at(1500), //       oversample (0.2 s from the 1300 point)
       { lat: 36, lon: 138, ele: 0, time: null }, // noTime
     ],
     labelMods,
   );
   assert.equal(bags[0], null); // kept
-  assert.deepEqual(bags[1], { oversample: { drop: { gap: 500 } } });
+  assert.deepEqual(bags[1], { oversample: { drop: { gap: 300 } } });
   assert.equal(bags[2], null); // kept (measured from the first point, not the dropped one)
-  assert.deepEqual(bags[3], { oversample: { drop: { gap: 300 } } });
+  assert.deepEqual(bags[3], { oversample: { drop: { gap: 200 } } });
   assert.deepEqual(bags[4], { noTime: { drop: true } });
 });
 
