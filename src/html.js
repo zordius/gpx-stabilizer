@@ -337,9 +337,11 @@ ${toggles}
 ${summary}${nav}</header>
 ${body}
 <script>
-// click an unzoomed chart to zoom to that point at a fixed 1 m = 5 px, then DRAG to pan. Zoom out
-// with a RIGHT-CLICK or the bottom-right "zoom out" button. One panel zoomed at a time; legend/header
-// clicks ignored.
+// click a chart — three-way on whether its panel fills the viewport and whether it's the # anchor:
+//  - not in the viewport, # is NOT it -> click its title (navigate: the # change scrolls it in)
+//  - not in the viewport, # IS it      -> scrollIntoView (# unchanged, so a title click wouldn't move)
+//  - fills the viewport                -> zoom to the clicked point at 1 m = 5 px, then DRAG to pan
+// Zoom out with a RIGHT-CLICK or the bottom-right "zoom out" button. One panel zoomed; legend/header ignored.
 let zoomed = null;
 let drag = null;
 const btn = document.createElement("button");
@@ -392,7 +394,17 @@ document.body.addEventListener("click", (e) => {
   if (e.target === btn) return restore();
   const svg = e.target.closest("section > svg");
   if (!svg || svg === zoomed) return; // already zoomed -> drag pans, click does nothing
-  if (zoomed) restore(); // un-zoom the previous panel
+  if (zoomed) restore(); // clicking another panel un-zooms the previous one
+  const section = svg.closest("section");
+  const rect = svg.getBoundingClientRect();
+  const mid = innerHeight / 2;
+  if (rect.top >= mid || rect.bottom <= mid) {
+    // not the viewport panel: navigate here if # differs (title click scrolls it in), else just scroll
+    const a = section && section.querySelector("h2 a");
+    if (a && section.id && location.hash !== "#" + section.id) return a.click();
+    return svg.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
+  // fills the viewport -> zoom to the clicked point at 1 m = 5 px
   if (!svg.dataset.orig) svg.dataset.orig = svg.getAttribute("viewBox");
   const u = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
   const r = svg.getBoundingClientRect();
@@ -401,7 +413,6 @@ document.body.addEventListener("click", (e) => {
   svg.style.cursor = "grab";
   zoomed = svg;
   btn.style.display = "block";
-  svg.scrollIntoView({ behavior: "smooth", block: "start" }); // bring the zoomed panel fully into view
 });
 </script>
 </body>
