@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // gpx-from-gopro — extract GoPro GPS into merged GPX, grouped by camera family + local date.
-//   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]
+//   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
 //
 // - Recurses directories for video files (mp4/mov/m4v/360); skips .LRV/.THM and ._ AppleDouble.
 // - Groups by (filename family, local date): GOPR/GP = old camera, GX/GH = new camera; a session's
@@ -9,10 +9,15 @@
 //   snapped to the machine's local timezone when within 1 hour; override with --tz.
 // - One merged <YYYYMMDD>-<family>.gpx per group, written to --out (default ".").
 // - Tolerant: a file that fails to extract is logged and skipped, the run continues.
-import { mkdirSync, readdirSync, statSync } from "node:fs";
-import { basename, join } from "node:path";
+// - Caches each file's extracted points (sidecar <file>.gpxcache.json by default, or --cache-dir),
+//   keyed by size+mtime+rate+version, so a killed run resumes without re-extracting done files.
+import { createHash } from "node:crypto";
+import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { basename, join, resolve } from "node:path";
 import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
 import { saveGpx } from "./gpx.js";
+
+const CACHE_V = 1; // bump when extraction output shape/logic changes (invalidates old caches)
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
 const MEDIAN_N = 30;
@@ -20,7 +25,7 @@ const LOCAL_TZ = -new Date().getTimezoneOffset() / 60; // hours, may be fraction
 
 // ---- args ----
 const argv = process.argv.slice(2);
-const WITH_VALUE = new Set(["out", "tz", "rate"]);
+const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir"]);
 const inputs = [];
 const opts = {};
 for (let i = 0; i < argv.length; i++) {
@@ -32,7 +37,9 @@ for (let i = 0; i < argv.length; i++) {
   } else inputs.push(a);
 }
 if (inputs.length === 0) {
-  console.error("usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]");
+  console.error(
+    "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]",
+  );
   process.exit(1);
 }
 const outDir = opts.out ?? ".";
@@ -43,6 +50,9 @@ if (manualTZ != null && Number.isNaN(manualTZ)) {
 }
 // --rate HZ -> group samples to that rate; omit for native (~18 Hz)
 const groupTimes = opts.rate ? Math.round(1000 / Number(opts.rate)) : undefined;
+// per-file extraction cache: sidecar next to source by default, or --cache-dir; --no-cache disables
+const cacheEnabled = !opts["no-cache"];
+const cacheDir = opts["cache-dir"] ?? null;
 
 // ---- camera family from filename ----
 function family(file) {
@@ -77,6 +87,40 @@ function decideTZ(lon) {
 // epoch ms + tz offset -> YYYYMMDD local date
 function localDate(ms, tz) {
   return new Date(ms + tz * 3600e3).toISOString().slice(0, 10).replaceAll("-", "");
+}
+
+// ---- per-file extraction cache (resume a killed run cheaply) ----
+// Keyed by size + mtime + rate + version; sidecar by default, central via --cache-dir.
+function cachePath(file) {
+  if (cacheDir) {
+    const h = createHash("sha1").update(resolve(file)).digest("hex").slice(0, 16);
+    return join(cacheDir, `${basename(file)}.${h}.json`);
+  }
+  return `${file}.gpxcache.json`;
+}
+function readCache(path, ident) {
+  let rec;
+  try {
+    rec = JSON.parse(readFileSync(path, "utf8"));
+  } catch {
+    return null; // missing or unreadable -> miss
+  }
+  const fresh =
+    rec.v === ident.v &&
+    rec.size === ident.size &&
+    rec.mtime === ident.mtime &&
+    rec.rate === ident.rate;
+  return fresh ? rec : null;
+}
+function writeCache(path, record) {
+  try {
+    if (cacheDir) mkdirSync(cacheDir, { recursive: true });
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, JSON.stringify(record));
+    renameSync(tmp, path); // atomic: a crash mid-write never leaves a half-written cache
+  } catch (e) {
+    console.error(`  (cache write skipped: ${e.message})`); // cache is an optimization, never fatal
+  }
 }
 
 // ---- collect video files ----
@@ -122,35 +166,63 @@ let ok = 0;
 let skipped = 0;
 let failed = 0;
 for (const file of videos) {
-  // Cheap moov probe first: skip files with no GPMF GPS track without the
-  // (slow) full extraction. Catches stitched products and non-GoPro videos.
-  let meta;
+  const ident = { v: CACHE_V, size: 0, mtime: 0, rate: groupTimes ?? null };
   try {
-    meta = await probeGoproMeta(file);
+    const st = statSync(file);
+    ident.size = st.size;
+    ident.mtime = Math.round(st.mtimeMs);
   } catch (e) {
-    console.error(`  FAILED probe ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`);
+    console.error(`  FAILED stat ${basename(file)}: ${e.message}`);
     failed++;
     continue;
   }
-  if (!meta.hasGps) {
-    const dim = meta.width && meta.height ? `${meta.width}x${meta.height}` : "?";
-    console.error(`  no GPS track, skip: ${basename(file)} (${dim} ${meta.codec ?? "?"})`);
-    skipped++;
-    continue;
-  }
+  const cp = cacheEnabled ? cachePath(file) : null;
+  const cached = cp ? readCache(cp, ident) : null;
+
   let points;
-  try {
-    points = await extractGoproPoints(file, groupTimes ? { groupTimes } : {});
-  } catch (e) {
-    console.error(`  FAILED ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`);
-    failed++;
-    continue;
+  if (cached) {
+    if (!cached.hasGps) {
+      console.error(`  no GPS track, skip (cached): ${basename(file)}`);
+      skipped++;
+      continue;
+    }
+    points = cached.points;
+  } else {
+    // Cheap moov probe first: skip files with no GPMF GPS track without the
+    // (slow) full extraction. Catches stitched products and non-GoPro videos.
+    let meta;
+    try {
+      meta = await probeGoproMeta(file);
+    } catch (e) {
+      console.error(
+        `  FAILED probe ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`,
+      );
+      failed++;
+      continue;
+    }
+    if (!meta.hasGps) {
+      if (cp) writeCache(cp, { ...ident, hasGps: false, meta });
+      const dim = meta.width && meta.height ? `${meta.width}x${meta.height}` : "?";
+      console.error(`  no GPS track, skip: ${basename(file)} (${dim} ${meta.codec ?? "?"})`);
+      skipped++;
+      continue;
+    }
+    try {
+      points = await extractGoproPoints(file, groupTimes ? { groupTimes } : {});
+    } catch (e) {
+      console.error(`  FAILED ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`);
+      failed++;
+      continue;
+    }
+    if (points.length === 0) {
+      if (cp) writeCache(cp, { ...ident, hasGps: false, meta });
+      console.error(`  no GPS, skip: ${basename(file)}`);
+      skipped++;
+      continue;
+    }
+    if (cp) writeCache(cp, { ...ident, hasGps: true, meta, points });
   }
-  if (points.length === 0) {
-    console.error(`  no GPS, skip: ${basename(file)}`);
-    skipped++;
-    continue;
-  }
+
   const fam = family(file);
   const fix = points.find((p) => !(p.lat === 0 && p.lon === 0)) ?? points[0];
   const tz = decideTZ(medianLon(points));
@@ -163,7 +235,7 @@ for (const file of videos) {
   const key = `${date}-${fam}`;
   if (!groups.has(key)) groups.set(key, { points: [], family: fam, date });
   groups.get(key).points.push(...points);
-  console.log(`  ${basename(file)}: ${points.length} pts -> ${key}`);
+  console.log(`  ${basename(file)}: ${points.length} pts -> ${key}${cached ? " (cached)" : ""}`);
   ok++;
 }
 
