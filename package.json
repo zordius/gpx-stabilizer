@@ -34,5 +34,10 @@
   "devDependencies": {
     "@biomejs/biome": "^2.5.1",
     "@resvg/resvg-js": "^2.6.2"
+  },
+  "dependencies": {
+    "egm96-universal": "^1.1.1",
+    "gopro-telemetry": "^1.2.11",
+    "gpmf-extract": "^0.3.3"
   }
 }
