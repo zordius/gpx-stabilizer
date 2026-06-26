@@ -97,3 +97,21 @@ test("caps coordinate precision and drops trailing zeros", () => {
   });
   assert.match(gpx, /lat="40\.0023109" lon="-122\.6"/);
 });
+
+test("writes device <speed> inside <extensions>, round-trips", () => {
+  const t = {
+    segments: [[{ lat: 1, lon: 2, ele: null, time: null, speed: 3.29 }]],
+    meta: {},
+  };
+  const gpx = writeGpx(t);
+  assert.match(gpx, /<extensions><speed>3\.29<\/speed><\/extensions>/);
+  assert.equal(parseGpx(gpx).segments[0][0].speed, 3.29);
+});
+
+test("omits <speed> when absent", () => {
+  const gpx = writeGpx({
+    segments: [[{ lat: 1, lon: 2, ele: null, time: null, speed: null }]],
+    meta: {},
+  });
+  assert.doesNotMatch(gpx, /<speed>/);
+});

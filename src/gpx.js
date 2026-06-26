@@ -155,7 +155,7 @@ export function readGpx(path) {
  * The output `creator` defaults to the source's (so provenance is kept); override via opts.
  *
  * @param {Track} track
- * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number }} [opts]
+ * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number, speedDigits?: number }} [opts]
  * @returns {string}
  */
 export function writeGpx(track, opts = {}) {
@@ -163,6 +163,7 @@ export function writeGpx(track, opts = {}) {
   const creator = opts.creator ?? meta.creator ?? "gpx-stabilizer";
   const llDigits = opts.latlonDigits ?? 7;
   const eleDigits = opts.eleDigits ?? 2;
+  const speedDigits = opts.speedDigits ?? 2;
 
   const out = ['<?xml version="1.0" encoding="UTF-8"?>'];
   out.push(`<gpx version="1.1" creator="${xmlEncode(creator)}" xmlns="${GPX_NS}">`);
@@ -181,6 +182,9 @@ export function writeGpx(track, opts = {}) {
       let pt = `      <trkpt lat="${fmt(p.lat, llDigits)}" lon="${fmt(p.lon, llDigits)}">`;
       if (p.ele != null) pt += `<ele>${fmt(p.ele, eleDigits)}</ele>`;
       if (p.time != null) pt += `<time>${isoTime(p.time)}</time>`;
+      // Device speed (m/s) goes in <extensions> (not a standard GPX 1.1 trkpt child); parseGpx reads it back.
+      if (p.speed != null)
+        pt += `<extensions><speed>${fmt(p.speed, speedDigits)}</speed></extensions>`;
       out.push(`${pt}</trkpt>`);
     }
     out.push("    </trkseg>");
@@ -193,7 +197,7 @@ export function writeGpx(track, opts = {}) {
  * Serialize a parsed track and write it to a GPX file.
  * @param {Track} track
  * @param {string} path
- * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number }} [opts]
+ * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number, speedDigits?: number }} [opts]
  */
 export function saveGpx(track, path, opts) {
   writeFileSync(path, writeGpx(track, opts));
