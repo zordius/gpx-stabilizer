@@ -7,6 +7,8 @@ import { readFileSync, writeFileSync } from "node:fs";
  * @property {number | null} ele  elevation in metres, or null if absent
  * @property {number | null} time milliseconds since the Unix epoch (UTC), or null if absent
  * @property {number | null} speed device-reported speed in m/s (GPX `<speed>`), or null if absent
+ * @property {string | null} fix  GPS fix type: "none" | "2d" | "3d" (GPX `<fix>`), or null if absent
+ * @property {number | null} hdop horizontal dilution of precision (GPX `<hdop>`), or null if absent
  */
 
 /**
@@ -30,6 +32,8 @@ const LON_RE = /\blon\s*=\s*["']([^"']+)["']/;
 const ELE_RE = /<ele>\s*([^<]*?)\s*<\/ele>/;
 const TIME_RE = /<time>\s*([^<]*?)\s*<\/time>/;
 const SPEED_RE = /<speed>\s*([^<]*?)\s*<\/speed>/; // device speed (m/s), often inside <extensions>
+const FIX_RE = /<fix>\s*([^<]*?)\s*<\/fix>/; // GPS fix type: none|2d|3d
+const HDOP_RE = /<hdop>\s*([^<]*?)\s*<\/hdop>/; // horizontal dilution of precision
 const TRKSEG_RE = /<trkseg\b[^>]*>([\s\S]*?)<\/trkseg>/gi;
 const TRKPT_RE = /<trkpt\b([^>]*?)(?:\/>|>([\s\S]*?)<\/trkpt>)/gi;
 
@@ -125,15 +129,20 @@ export function parseGpx(xml) {
       const eleM = ELE_RE.exec(inner);
       const timeM = TIME_RE.exec(inner);
       const speedM = SPEED_RE.exec(inner);
+      const fixM = FIX_RE.exec(inner);
+      const hdopM = HDOP_RE.exec(inner);
       const ele = eleM ? Number.parseFloat(eleM[1]) : Number.NaN;
       const time = timeM ? Date.parse(timeM[1]) : Number.NaN;
       const speed = speedM ? Number.parseFloat(speedM[1]) : Number.NaN;
+      const hdop = hdopM ? Number.parseFloat(hdopM[1]) : Number.NaN;
       points.push({
         lat: latN,
         lon: lonN,
         ele: Number.isNaN(ele) ? null : ele,
         time: Number.isNaN(time) ? null : time,
         speed: Number.isNaN(speed) ? null : speed,
+        fix: fixM ? fixM[1] : null,
+        hdop: Number.isNaN(hdop) ? null : hdop,
       });
     }
     if (points.length > 0) segments.push(points);
@@ -155,7 +164,7 @@ export function readGpx(path) {
  * The output `creator` defaults to the source's (so provenance is kept); override via opts.
  *
  * @param {Track} track
- * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number, speedDigits?: number }} [opts]
+ * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number, speedDigits?: number, hdopDigits?: number }} [opts]
  * @returns {string}
  */
 export function writeGpx(track, opts = {}) {
@@ -164,6 +173,7 @@ export function writeGpx(track, opts = {}) {
   const llDigits = opts.latlonDigits ?? 7;
   const eleDigits = opts.eleDigits ?? 2;
   const speedDigits = opts.speedDigits ?? 2;
+  const hdopDigits = opts.hdopDigits ?? 2;
 
   const out = ['<?xml version="1.0" encoding="UTF-8"?>'];
   out.push(`<gpx version="1.1" creator="${xmlEncode(creator)}" xmlns="${GPX_NS}">`);
@@ -182,6 +192,9 @@ export function writeGpx(track, opts = {}) {
       let pt = `      <trkpt lat="${fmt(p.lat, llDigits)}" lon="${fmt(p.lon, llDigits)}">`;
       if (p.ele != null) pt += `<ele>${fmt(p.ele, eleDigits)}</ele>`;
       if (p.time != null) pt += `<time>${isoTime(p.time)}</time>`;
+      // GPX 1.1 trkpt child order: ele, time, fix, sat, hdop, ... then extensions.
+      if (p.fix != null) pt += `<fix>${xmlEncode(p.fix)}</fix>`;
+      if (p.hdop != null) pt += `<hdop>${fmt(p.hdop, hdopDigits)}</hdop>`;
       // Device speed (m/s) goes in <extensions> (not a standard GPX 1.1 trkpt child); parseGpx reads it back.
       if (p.speed != null)
         pt += `<extensions><speed>${fmt(p.speed, speedDigits)}</speed></extensions>`;
@@ -197,7 +210,7 @@ export function writeGpx(track, opts = {}) {
  * Serialize a parsed track and write it to a GPX file.
  * @param {Track} track
  * @param {string} path
- * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number, speedDigits?: number }} [opts]
+ * @param {{ creator?: string, latlonDigits?: number, eleDigits?: number, speedDigits?: number, hdopDigits?: number }} [opts]
  */
 export function saveGpx(track, path, opts) {
   writeFileSync(path, writeGpx(track, opts));

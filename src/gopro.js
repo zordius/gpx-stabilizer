@@ -11,6 +11,11 @@ import MP4Box from "mp4box";
 const CHUNK = 1 << 24; // 16 MiB read blocks
 const PROBE_CHUNK = 1 << 16; // 64 KiB — enough to reach moov via mp4box's seek hints
 
+// GPSF lock type (0 none / 2 2D / 3 3D) -> GPX <fix> token
+function gpsFix(n) {
+  return n === 3 ? "3d" : n === 2 ? "2d" : n === 0 ? "none" : null;
+}
+
 // gpmf-extract's Node "function" input mode: it hands us the mp4box file object
 // and we feed the bytes ourselves, so we control memory for huge files.
 function fileFeeder(path) {
@@ -117,18 +122,29 @@ export async function extractGoproPoints(path, opts = {}) {
     const streams = device?.streams ?? {};
     for (const [key, stream] of Object.entries(streams)) {
       if (!key.startsWith("GPS")) continue;
+      // GPS5 reports fix/precision once per ~1 Hz payload as sticky values; sticky
+      // semantics are "applies to all successive samples", so carry them forward
+      // onto every (18 Hz) point. precision is DOP x100. (GPS9 puts them in
+      // value[7..8] instead — left as carried-null here until tested.)
+      let fix = null;
+      let hdop = null;
       for (const s of stream.samples ?? []) {
         const v = s.value;
         if (!Array.isArray(v)) continue;
         // GPS5 and GPS9 share value[0..3] = [lat, lon, altitude, 2D speed]
         const [lat, lon, ele, speed] = v;
         const time = s.date != null ? new Date(s.date).getTime() : Number.NaN;
+        const sticky = s.sticky ?? {};
+        if (sticky.fix != null) fix = gpsFix(sticky.fix);
+        if (typeof sticky.precision === "number") hdop = sticky.precision / 100;
         points.push({
           lat,
           lon,
           ele: ele == null ? null : ele,
           time: Number.isNaN(time) ? null : time,
           speed: speed == null ? null : speed,
+          fix,
+          hdop,
         });
       }
     }

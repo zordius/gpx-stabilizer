@@ -5,8 +5,24 @@ import { parseGpx, writeGpx } from "../src/gpx.js";
 const sample = {
   segments: [
     [
-      { lat: 35.1, lon: 138.2, ele: 1200.5, time: Date.parse("2026-01-17T09:00:00Z"), speed: null },
-      { lat: 35.2, lon: 138.3, ele: 1199, time: Date.parse("2026-01-17T09:00:01Z"), speed: null },
+      {
+        lat: 35.1,
+        lon: 138.2,
+        ele: 1200.5,
+        time: Date.parse("2026-01-17T09:00:00Z"),
+        speed: null,
+        fix: null,
+        hdop: null,
+      },
+      {
+        lat: 35.2,
+        lon: 138.3,
+        ele: 1199,
+        time: Date.parse("2026-01-17T09:00:01Z"),
+        speed: null,
+        fix: null,
+        hdop: null,
+      },
     ],
   ],
   meta: { creator: "FitoTrack", name: "Morning Ski", time: "2026-01-17T00:00:18Z", type: "ski" },
@@ -114,4 +130,26 @@ test("omits <speed> when absent", () => {
     meta: {},
   });
   assert.doesNotMatch(gpx, /<speed>/);
+});
+
+test("writes <fix>/<hdop> in GPX 1.1 order, round-trips", () => {
+  const t = {
+    segments: [[{ lat: 1, lon: 2, ele: 100, time: null, speed: null, fix: "3d", hdop: 1.67 }]],
+    meta: {},
+  };
+  const gpx = writeGpx(t);
+  // ele, then fix, then hdop (standard 1.1 child order)
+  assert.match(gpx, /<ele>100<\/ele><fix>3d<\/fix><hdop>1\.67<\/hdop>/);
+  const p = parseGpx(gpx).segments[0][0];
+  assert.equal(p.fix, "3d");
+  assert.equal(p.hdop, 1.67);
+});
+
+test("omits <fix>/<hdop> when absent", () => {
+  const gpx = writeGpx({
+    segments: [[{ lat: 1, lon: 2, ele: null, time: null, speed: null, fix: null, hdop: null }]],
+    meta: {},
+  });
+  assert.doesNotMatch(gpx, /<fix>/);
+  assert.doesNotMatch(gpx, /<hdop>/);
 });

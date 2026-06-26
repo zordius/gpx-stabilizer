@@ -17,7 +17,7 @@ import { basename, join, resolve } from "node:path";
 import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
 import { saveGpx } from "./gpx.js";
 
-const CACHE_V = 1; // bump when extraction output shape/logic changes (invalidates old caches)
+const CACHE_V = 2; // bump when extraction output shape/logic changes (invalidates old caches)
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
 const MEDIAN_N = 30;
