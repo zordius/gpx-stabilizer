@@ -23,15 +23,16 @@ import { profile } from "./profile.js";
 
 /**
  * @param {import("./measure.js").TrackPoint[]} points  one track's points, in time order
- * @param {{ modules?: import("./mods/index.js").Module[] } & Record<string, number>} [opts]
- *   `modules` plus any measurement param overrides (see PARAMS in ./measure.js).
+ * @param {{ modules?: import("./mods/index.js").Module[], disable?: string[] } & Record<string, number>} [opts]
+ *   `modules` to append, `disable` to skip built-ins by name (e.g. ["oversample"]), plus any
+ *   measurement param overrides (see PARAMS in ./measure.js). The whole object is plain JSON.
  * @returns {Array<object>} every original point, enriched (kept) or position-only (dropped)
  */
 export function analyze(points, opts = {}) {
-  const { modules = [], ...paramOpts } = opts;
+  const { modules = [], disable = [], ...paramOpts } = opts;
   if (points.length === 0) return [];
 
-  const all = [...builtins, ...modules];
+  const all = [...builtins.filter((m) => !disable.includes(m.name)), ...modules];
   const pts = repairPoints(
     points,
     all.filter((m) => m.repair),

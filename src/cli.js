@@ -4,7 +4,9 @@
 //   gpx-stabilize FILE.gpx [...] --html [FILE]    -> ONE interactive HTML viewer (all files, default out.html)
 //   gpx-stabilize FILE.gpx [...] --png [--width N] [--height N]  -> one PNG per input (needs @resvg/resvg-js)
 //   --out DIR sets the output directory for the cleaned GPX / PNG (default ".").
-import { writeFileSync } from "node:fs";
+//   --config FILE.json passes a whole analyze config (params + disable list); --disable name,... skips
+//   built-in modules (merged onto the config). Both feed analyze() so runs are reproducible from JSON.
+import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { readGpx } from "./gpx.js";
 import { savePng } from "./png.js";
@@ -26,7 +28,8 @@ const files = argv.filter((a) => !a.startsWith("--") && /\.gpx$/i.test(a));
 
 if (!files.length) {
   console.error(
-    "usage: gpx-stabilize FILE.gpx [...] [--html [FILE]] [--png [--width N] [--height N]] [--out DIR]",
+    "usage: gpx-stabilize FILE.gpx [...] [--html [FILE]] [--png [--width N] [--height N]]" +
+      " [--out DIR] [--config FILE.json] [--disable name,...]",
   );
   process.exit(1);
 }
@@ -34,12 +37,18 @@ if (!files.length) {
 const dir = opt("out", ".");
 const base = (f) => basename(f).replace(/\.gpx$/i, "");
 
+// analyze config: a whole JSON object (--config), with --disable merged onto its disable list
+const cfgPath = opt("config", null);
+const cfg = cfgPath ? JSON.parse(readFileSync(cfgPath, "utf8")) : {};
+const dis = opt("disable", null);
+if (dis) cfg.disable = [...(cfg.disable ?? []), ...dis.split(",")];
+
 if (has("html")) {
   // one HTML document with a scrolling panel per file
   const tracks = files.map((f) => ({ name: basename(f), points: readGpx(f).segments.flat() }));
   for (const t of tracks) console.log(`${t.name}: ${t.points.length} points`);
   const out = optFile("html", "out.html");
-  writeFileSync(out, toHtmlAnalyzedFiles(tracks));
+  writeFileSync(out, toHtmlAnalyzedFiles(tracks, cfg));
   console.log(`html -> ${out}`);
 } else if (has("png")) {
   // one PNG per file
@@ -49,14 +58,14 @@ if (has("html")) {
     const points = readGpx(f).segments.flat();
     console.log(`${basename(f)}: ${points.length} points`);
     const path = `${dir}/${base(f)}.png`;
-    await savePng(analyzedSvg(points, { width, height }), path);
+    await savePng(analyzedSvg(points, { ...cfg, width, height }), path);
     console.log(`png -> ${path}`);
   }
 } else {
   // default: stabilize each input to a cleaned GPX (the stabilizer's product)
   for (const f of files) {
     const path = `${dir}/${base(f)}.stabilized.gpx`;
-    const clean = stabilizeGpx(f, path);
+    const clean = stabilizeGpx(f, path, cfg);
     const npts = clean.segments.reduce((sum, seg) => sum + seg.length, 0);
     console.log(`stabilized -> ${path} (${npts} points)`);
   }

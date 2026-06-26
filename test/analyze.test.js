@@ -102,6 +102,16 @@ test("analyze: resamples dense input to ~2 kept points per second (0.5 s gate)",
   assert.equal(analyze(pts).filter((p) => !p.dropReason).length, 5);
 });
 
+test("analyze: opts.disable skips a built-in (oversample off keeps the dense input)", () => {
+  const pts = Array.from({ length: 21 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * 1e-5,
+    ele: 1000,
+    time: i * 100, // 10 Hz
+  }));
+  assert.equal(analyze(pts, { disable: ["oversample"] }).filter((p) => !p.dropReason).length, 21);
+});
+
 test("analyze: a dropped point does not shift the projection centre", () => {
   const pts = track({ n: 121, dlon: STEP5 });
   pts.splice(61, 0, { lat: 80, lon: 200, ele: 0, time: 60300 }); // wild, < 0.5 s after a kept point
