@@ -11,10 +11,10 @@
 // - Tolerant: a file that fails to extract is logged and skipped, the run continues.
 // - Caches each file's extracted points (sidecar <file>.gpxcache.json by default, or --cache-dir),
 //   keyed by size+mtime+rate+version, so a killed run resumes without re-extracting done files.
-import { createHash } from "node:crypto";
-import { mkdirSync, readdirSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { mkdirSync, readdirSync, statSync } from "node:fs";
+import { basename, join } from "node:path";
 import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
+import { cachePath, readCache, writeCache } from "./gopro-cache.js";
 import { saveGpx } from "./gpx.js";
 
 const CACHE_V = 2; // bump when extraction output shape/logic changes (invalidates old caches)
@@ -89,40 +89,6 @@ function localDate(ms, tz) {
   return new Date(ms + tz * 3600e3).toISOString().slice(0, 10).replaceAll("-", "");
 }
 
-// ---- per-file extraction cache (resume a killed run cheaply) ----
-// Keyed by size + mtime + rate + version; sidecar by default, central via --cache-dir.
-function cachePath(file) {
-  if (cacheDir) {
-    const h = createHash("sha1").update(resolve(file)).digest("hex").slice(0, 16);
-    return join(cacheDir, `${basename(file)}.${h}.json`);
-  }
-  return `${file}.gpxcache.json`;
-}
-function readCache(path, ident) {
-  let rec;
-  try {
-    rec = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    return null; // missing or unreadable -> miss
-  }
-  const fresh =
-    rec.v === ident.v &&
-    rec.size === ident.size &&
-    rec.mtime === ident.mtime &&
-    rec.rate === ident.rate;
-  return fresh ? rec : null;
-}
-function writeCache(path, record) {
-  try {
-    if (cacheDir) mkdirSync(cacheDir, { recursive: true });
-    const tmp = `${path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(record));
-    renameSync(tmp, path); // atomic: a crash mid-write never leaves a half-written cache
-  } catch (e) {
-    console.error(`  (cache write skipped: ${e.message})`); // cache is an optimization, never fatal
-  }
-}
-
 // ---- collect video files ----
 function walk(dir) {
   const out = [];
@@ -176,7 +142,7 @@ for (const file of videos) {
     failed++;
     continue;
   }
-  const cp = cacheEnabled ? cachePath(file) : null;
+  const cp = cacheEnabled ? cachePath(file, cacheDir) : null;
   const cached = cp ? readCache(cp, ident) : null;
 
   let points;
@@ -201,7 +167,7 @@ for (const file of videos) {
       continue;
     }
     if (!meta.hasGps) {
-      if (cp) writeCache(cp, { ...ident, hasGps: false, meta });
+      if (cp) writeCache(cp, { ...ident, hasGps: false, meta }, cacheDir);
       const dim = meta.width && meta.height ? `${meta.width}x${meta.height}` : "?";
       console.error(`  no GPS track, skip: ${basename(file)} (${dim} ${meta.codec ?? "?"})`);
       skipped++;
@@ -215,12 +181,12 @@ for (const file of videos) {
       continue;
     }
     if (points.length === 0) {
-      if (cp) writeCache(cp, { ...ident, hasGps: false, meta });
+      if (cp) writeCache(cp, { ...ident, hasGps: false, meta }, cacheDir);
       console.error(`  no GPS, skip: ${basename(file)}`);
       skipped++;
       continue;
     }
-    if (cp) writeCache(cp, { ...ident, hasGps: true, meta, points });
+    if (cp) writeCache(cp, { ...ident, hasGps: true, meta, points }, cacheDir);
   }
 
   const fam = family(file);
