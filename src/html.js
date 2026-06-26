@@ -337,10 +337,11 @@ ${toggles}
 ${summary}${nav}</header>
 ${body}
 <script>
-// click a chart — three-way on whether its panel fills the viewport and whether it's the # anchor:
-//  - not in the viewport, # is NOT it -> click its title (navigate: the # change scrolls it in)
-//  - not in the viewport, # IS it      -> scrollIntoView (# unchanged, so a title click wouldn't move)
-//  - fills the viewport                -> zoom to the clicked point at 1 m = 5 px, then DRAG to pan
+// click a chart — a panel must be the current # anchor before it zooms (so the FIRST click on any
+// panel, including on load when # is empty, just selects it):
+//  - not the # anchor          -> click its title (sets # and scrolls it into view)
+//  - the # anchor, out of view  -> scrollIntoView (# unchanged, so a title click wouldn't move it)
+//  - the # anchor, in viewport  -> zoom to the clicked point at 1 m = 5 px, then DRAG to pan
 // Zoom out with a RIGHT-CLICK or the bottom-right "zoom out" button. One panel zoomed; legend/header ignored.
 let zoomed = null;
 let drag = null;
@@ -400,15 +401,14 @@ document.body.addEventListener("click", (e) => {
   if (!svg || svg === zoomed) return; // already zoomed -> drag pans, click does nothing
   if (zoomed) restore(); // clicking another panel un-zooms the previous one
   const section = svg.closest("section");
+  const a = section && section.querySelector("h2 a");
+  // not the current # anchor yet -> select it (the title click sets # and scrolls it into view)
+  if (a && section.id && location.hash !== "#" + section.id) return a.click();
+  // it IS the # anchor: scroll to it if it's out of view, otherwise zoom to the clicked point
   const rect = svg.getBoundingClientRect();
   const mid = innerHeight / 2;
-  if (rect.top >= mid || rect.bottom <= mid) {
-    // not the viewport panel: navigate here if # differs (title click scrolls it in), else just scroll
-    const a = section && section.querySelector("h2 a");
-    if (a && section.id && location.hash !== "#" + section.id) return a.click();
+  if (rect.top >= mid || rect.bottom <= mid)
     return svg.scrollIntoView({ behavior: "smooth", block: "start" });
-  }
-  // fills the viewport -> zoom to the clicked point at 1 m = 5 px
   if (!svg.dataset.orig) svg.dataset.orig = svg.getAttribute("viewBox");
   const u = new DOMPoint(e.clientX, e.clientY).matrixTransform(svg.getScreenCTM().inverse());
   const r = svg.getBoundingClientRect();
