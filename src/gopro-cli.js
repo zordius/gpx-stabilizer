@@ -11,7 +11,7 @@
 // - Tolerant: a file that fails to extract is logged and skipped, the run continues.
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-import { extractGoproPoints } from "./gopro.js";
+import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
 import { saveGpx } from "./gpx.js";
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
@@ -122,6 +122,22 @@ let ok = 0;
 let skipped = 0;
 let failed = 0;
 for (const file of videos) {
+  // Cheap moov probe first: skip files with no GPMF GPS track without the
+  // (slow) full extraction. Catches stitched products and non-GoPro videos.
+  let meta;
+  try {
+    meta = await probeGoproMeta(file);
+  } catch (e) {
+    console.error(`  FAILED probe ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`);
+    failed++;
+    continue;
+  }
+  if (!meta.hasGps) {
+    const dim = meta.width && meta.height ? `${meta.width}x${meta.height}` : "?";
+    console.error(`  no GPS track, skip: ${basename(file)} (${dim} ${meta.codec ?? "?"})`);
+    skipped++;
+    continue;
+  }
   let points;
   try {
     points = await extractGoproPoints(file, groupTimes ? { groupTimes } : {});
