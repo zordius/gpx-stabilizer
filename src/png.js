@@ -8,23 +8,25 @@ import { writeFileSync } from "node:fs";
 /**
  * Rasterize a standalone SVG string to a PNG. The SVG's own `width`/`height` set the pixel size.
  * @param {string} svg  a self-contained SVG (use toSvg with `standalone: true`)
+ * @param {{ background?: string }} [opts]  PNG background colour (default white, not transparent)
  * @returns {Promise<Buffer>} the PNG bytes
  */
-export async function svgToPng(svg) {
+export async function svgToPng(svg, opts = {}) {
   let resvg;
   try {
     resvg = await import("@resvg/resvg-js");
   } catch {
     throw new Error("PNG output needs @resvg/resvg-js — install it: npm i -D @resvg/resvg-js");
   }
-  return new resvg.Resvg(svg).render().asPng();
+  return new resvg.Resvg(svg, { background: opts.background ?? "white" }).render().asPng();
 }
 
 /**
  * Rasterize a standalone SVG and write it to a PNG file.
  * @param {string} svg
  * @param {string} path
+ * @param {{ background?: string }} [opts]
  */
-export async function savePng(svg, path) {
-  writeFileSync(path, await svgToPng(svg));
+export async function savePng(svg, path, opts = {}) {
+  writeFileSync(path, await svgToPng(svg, opts));
 }
