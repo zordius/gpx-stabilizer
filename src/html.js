@@ -128,20 +128,23 @@ export function toSvg(layers = [], opts = {}) {
       `  <rect x="${vbX}" y="${vbY}" width="${vbW}" height="${vbH}" fill="${enc(background)}"/>`,
     );
   }
-  // `opts.ontop` (viewer only): also emit, at the END of the svg, a hidden <use> referencing each
-  // marker layer's <path> — it shares the geometry (no `d` copied) and paints last, so the legend's
-  // hover rule can reveal it on top. The marker id needs a document-unique `idPrefix` (the panel id).
+  // `opts.ontop` (viewer only): also emit, at the END of the svg, a hidden <use> of each layer's line
+  // AND marker <path> (shares the geometry, no `d` copied), painted last so the legend's hover rule can
+  // reveal it on top. The line <use> needs the layer's paint, so the dupe <g> carries `groupAttrs`. Ids
+  // need a document-unique `idPrefix` (the panel id).
   const prefix = opts.ontop ? (opts.idPrefix ?? "p") : null;
   const ontopCopies = [];
   for (const layer of layers) {
     const lslug = slug(layer.label);
-    const markerId = prefix && layer.label ? `${prefix}-m-${lslug}` : null;
-    const { groupAttrs, body, hasMarkers } = renderLayer(layer, markerId);
+    const id = prefix && layer.label ? `${prefix}-${lslug}` : null;
+    const { groupAttrs, body, hasLine, hasMarkers } = renderLayer(layer, id);
     out.push(`  <g id="layer-${lslug}" class="layer layer-${lslug}"${groupAttrs}>`);
     out.push(...body);
     out.push("  </g>");
-    if (markerId && hasMarkers) {
-      ontopCopies.push(`  <g class="ontop ontop-${lslug}"><use href="#${markerId}"/></g>`);
+    if (id) {
+      const uses =
+        (hasLine ? `<use href="#${id}-l"/>` : "") + (hasMarkers ? `<use href="#${id}-m"/>` : "");
+      if (uses) ontopCopies.push(`  <g class="ontop ontop-${lslug}"${groupAttrs}>${uses}</g>`);
     }
   }
   out.push(...ontopCopies);
@@ -155,7 +158,7 @@ export function toSvg(layers = [], opts = {}) {
  * stroked polylines with filled shapes keeps its attributes per-element to avoid a stroke leaking
  * onto markers. Returns the group's hoisted attribute string and the child element lines.
  */
-function renderLayer(layer, markerId) {
+function renderLayer(layer, id) {
   const color = layer.color ?? "#0a6";
   const fontSize = layer.fontSize ?? 12;
   const op = layer.opacity == null || layer.opacity === 1 ? "" : ` opacity="${layer.opacity}"`;
@@ -198,7 +201,7 @@ function renderLayer(layer, markerId) {
     const d = lines
       .map((line) => `M${line.map((p) => `${round(p.x)},${round(p.y)}`).join(" ")}`)
       .join(" ");
-    body.push(`    <path d="${d}"/>`);
+    body.push(`    <path${id ? ` id="${id}-l"` : ""} d="${d}"/>`);
   }
 
   // markers: one stroked <path> of zero-length dots — the dot diameter IS the stroke-width (size + 1),
@@ -210,7 +213,7 @@ function renderLayer(layer, markerId) {
     const cap = layer.shape === "square" ? "square" : "round";
     const mColor = layer.pointColor ?? color;
     const mSize = layer.size ?? 2;
-    const idAttr = markerId ? ` id="${markerId}"` : ""; // unique id so an <use> can share this path
+    const idAttr = id ? ` id="${id}-m"` : ""; // unique id so an <use> can share this path
     body.push(
       `    <path${idAttr} d="${d}" stroke="${enc(mColor)}" stroke-width="${round(mSize + 1)}" stroke-linecap="${cap}"${elOp}/>`,
     );
@@ -228,7 +231,7 @@ function renderLayer(layer, markerId) {
     body.push("    </g>");
   }
 
-  return { groupAttrs, body, hasMarkers };
+  return { groupAttrs, body, hasLine: drawLine, hasMarkers };
 }
 
 /**
@@ -256,11 +259,15 @@ export function writeHtml(panels = [], opts = {}) {
   const title = enc(opts.title ?? "gpx-stabilizer");
   const heading = enc(opts.heading ?? "GPX Stabilizer");
   const summary = opts.summary == null ? "" : `<p>${enc(opts.summary)}</p>\n`;
-  // Index links in the intro: each titled panel becomes an anchor jump to its section.
-  const indexItems = panels
-    .filter((p) => p.title != null)
-    .map((p) => `<li><a href="#${slug(p.title)}">${enc(p.title)}</a></li>`)
-    .join("");
+  // Index links in the intro: each titled panel becomes an anchor jump to its section. Only worth it
+  // with more than one panel — a single panel needs no jump list.
+  const indexItems =
+    panels.length > 1
+      ? panels
+          .filter((p) => p.title != null)
+          .map((p) => `<li><a href="#${slug(p.title)}">${enc(p.title)}</a></li>`)
+          .join("")
+      : "";
   const nav = indexItems ? `<nav><ul>${indexItems}</ul></nav>\n` : "";
   // Drop empty layers entirely — a layer with no drawn points renders no <g>, no legend item, and
   // no toggle rule (so e.g. a "no outliers" run shows nothing for that layer).
@@ -293,7 +300,7 @@ export function writeHtml(panels = [], opts = {}) {
       const sw = lineSlugs.has(s) ? 4 : 10;
       return (
         `section:has(.t-${s} input:not(:checked)) .layer-${s} { opacity: 0.1; }\n` +
-        `section:has(.t-${s}:hover) .layer-${s} path { stroke-width: ${sw}; }\n` +
+        `section:has(.t-${s}:hover) .layer-${s} path, section:has(.t-${s}:hover) .ontop-${s} { stroke-width: ${sw}; }\n` +
         `section:has(.t-${s}:hover) .ontop-${s} { opacity: 1; }`
       );
     })

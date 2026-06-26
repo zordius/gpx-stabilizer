@@ -221,6 +221,21 @@ test("writeHtml hover enlarge: 10 px for pure-point layers, 4 px for line layers
       ],
     },
   ]);
-  assert.match(html, /section:has\(\.t-clean:hover\) \.layer-clean path \{ stroke-width: 4; \}/);
-  assert.match(html, /section:has\(\.t-drift:hover\) \.layer-drift path \{ stroke-width: 10; \}/);
+  // the enlarge rule also targets the on-top dupe (.ontop-…) so the raised copy is the fat one
+  assert.match(html, /\.layer-clean path,[^{]*\.ontop-clean \{ stroke-width: 4; \}/);
+  assert.match(html, /\.layer-drift path,[^{]*\.ontop-drift \{ stroke-width: 10; \}/);
+});
+
+test("writeHtml ontop: a line layer gets a hover dupe of its line path (raise on top)", () => {
+  const html = writeHtml([
+    { layers: [{ label: "trk", lines: [pts([0, 0], [1, 1])], width: 1.5 }] },
+  ]);
+  assert.match(html, /<path id="[^"]*-trk-l" d="M/); // the line path is id'd
+  assert.match(html, /<g class="ontop ontop-trk"[^>]*><use href="#[^"]*-trk-l"\/><\/g>/); // duped on top
+});
+
+test("writeHtml: the index nav appears only with more than one panel", () => {
+  const panel = (t) => ({ title: t, layers: [{ label: "x", points: pts([0, 0]) }] });
+  assert.doesNotMatch(writeHtml([panel("Solo")]), /<nav>/); // single panel: no jump list
+  assert.match(writeHtml([panel("A"), panel("B")]), /<nav><ul><li><a href="#A">A<\/a>/); // 2+: nav
 });
