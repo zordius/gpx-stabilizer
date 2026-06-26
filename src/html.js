@@ -299,7 +299,9 @@ export function writeHtml(panels = [], opts = {}) {
     .map((s) => {
       const sw = lineSlugs.has(s) ? 4 : 10;
       return (
-        `section:has(.t-${s} input:not(:checked)) .layer-${s} { opacity: 0.1; }\n` +
+        // dim an unchecked layer — but NOT while its legend row is hovered, so hovering still previews
+        // it (the dim out-specificities the hover rules, so it has to be lifted, not just overridden)
+        `section:has(.t-${s} input:not(:checked)):not(:has(.t-${s}:hover)) .layer-${s} { opacity: 0.1; }\n` +
         `section:has(.t-${s}:hover) .layer-${s} path, section:has(.t-${s}:hover) .ontop-${s} { stroke-width: ${sw}; }\n` +
         `section:has(.t-${s}:hover) .ontop-${s} { opacity: 1; }`
       );
