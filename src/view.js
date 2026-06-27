@@ -51,10 +51,11 @@ export function toLayers(points, opts = {}) {
  * Build a labels layer marking each line segment's head and tail: segment k (1-based, in the order
  * given) gets a "{k}s" label at its first point and "{k}e" at its last. Black text on its own layer —
  * append it LAST so it draws on top. Font size is in user units (`opts.fontSize`, default 12); it
- * scales with zoom, which is fine. Pass the SAME `lines` a track layer draws (already projected).
+ * scales with zoom, which is fine. Text is black at `opts.opacity` (default 0.8). Pass the SAME
+ * `lines` a track layer draws (already projected).
  * @param {Array<Array<{ x: number, y: number }>>} lines
- * @param {{ label?: string, fontSize?: number }} [opts]
- * @returns {object} a labels layer ({ label, color: "#000", fontSize, labels })
+ * @param {{ label?: string, fontSize?: number, opacity?: number }} [opts]
+ * @returns {object} a labels layer ({ label, color: "#000", fontSize, opacity, labels })
  */
 export function segmentLabels(lines, opts = {}) {
   const labels = [];
@@ -65,7 +66,13 @@ export function segmentLabels(lines, opts = {}) {
     labels.push({ x: head.x, y: head.y, text: `${i + 1}s` });
     labels.push({ x: tail.x, y: tail.y, text: `${i + 1}e` });
   });
-  return { label: opts.label ?? "labels", color: "#000", fontSize: opts.fontSize ?? 12, labels };
+  return {
+    label: opts.label ?? "labels",
+    color: "#000",
+    fontSize: opts.fontSize ?? 12,
+    opacity: opts.opacity ?? 0.8,
+    labels,
+  };
 }
 
 /** Convenience: render points straight to one HTML document (a single panel, a single layer). */
