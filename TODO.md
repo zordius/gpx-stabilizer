@@ -33,62 +33,75 @@ gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cach
 
 ## Open
 
-### 0. The OLD version's stress-test is RUNNING in the background  (don't rerun if alive)
+### 0. The OLD ~/bin/gopro-gpx.js stress-test — DEAD, produced no GPX  (closed 2026-06-27)
 
 The previous tool `~/bin/gopro-gpx.js` (exiftool-based, the version *before* this
-repo's rewrite) was launched on `/Volumes/ZS14T2025/p/20260211-ski` as a
-real-data stress test ("跑個挑戰一點的實測看有沒問題") and **was still running at
-handoff** as a detached background process:
+repo's rewrite) was launched on `/Volumes/ZS14T2025/p/20260211-ski` as a real-data
+stress test ("跑個挑戰一點的實測看有沒問題") and ran detached. **It died before
+completion and wrote no GPX.** Not being rerun — the new `gpx-from-gopro` (item 1)
+replaces it.
 
-- **Process** (at handoff): `node` pid **17801** (Bash-tool wrapper zsh 17798).
-  It's a session leader with **no controlling TTY**, so leaving Claude / closing
-  the terminal does not SIGHUP it; on Claude exit it reparents to launchd and
-  keeps running. (Residual risk: if the harness force-kills tracked tasks on quit
-  it would die — unverified.)
-- **Log** (durable, on disk): `~/zordius-ai/scratch/run2026.err` (and `.out`).
-- **Output**: writes the aggregate GPX to its cwd `~/zordius-ai/*.gpx`, but ONLY
-  at the very end — partial progress is not saved, so it must run to completion.
-- Progress at handoff: ~66 of 124 — **`j` (Hero5) only**; reached the j-root
-  stitched products (`20260211-j.mp4` … → `no GPS, skip`). **Had not reached `z`
-  (Hero10 GX)** or written its final GPX. Clean: 0 errors; 3-day grouping correct
-  (`20260211/12/13-GOPR`: 13 / 36 / 17).
+- **Death point**: killed mid-extraction of `z/140/GX025140.MP4` — the 118th file
+  in sorted (`walk(dir).sort()`, full-path alphabetical) order, immediately after
+  `z/140/GX015140.MP4` (the last *complete* block in the log). **117 of 120 files
+  fully extracted** (j/GOPR 66 = 13+36+17; z/GX 51 = 18+17+16). 3 left:
+  `GX025140.MP4` (died here) + the two z-root stitched files `z/GX015130.MP4`,
+  `z/GX015136.MP4`.
+- **Cause**: log ends cleanly with **no JS exception** → external **SIGKILL**, not
+  a code crash. The old js writes all GPX only AFTER the full extraction loop
+  (`~/bin/gopro-gpx.js:265-270`, `${key}.gpx` per group to cwd), so dying 3 files
+  short = **0 output**. Confirmed: no `*.gpx` in `~/zordius-ai/` (its cwd; the
+  `gpx/workout-*.gpx` there are unrelated Apple-Watch exports). The "no controlling
+  TTY → survives Claude exit" hope did NOT hold: it was force-killed when the Claude
+  session was torn down (it was inside the harness task tree). Lesson → item 1 runs
+  truly detached (own session via `setsid`).
+- **Log** (durable): `~/zordius-ai/scratch/run2026.err` (1176 lines; `.out` empty).
 
-**Resume:**
-```sh
-pgrep -fl gopro-gpx.js                 # still alive?
-ps -o pid,ppid,stat -p 17801           # PPID 1 = reparented to launchd, survived
-tail -f ~/zordius-ai/scratch/run2026.err   # watch progress
-ls ~/zordius-ai/*.gpx                   # appears only on completion
-```
-- If **alive** → let it finish; do NOT rerun. Then review it completes through
-  `z` cleanly and check the aggregate GPX.
-- If **dead** → rerun `node ~/bin/gopro-gpx.js /Volumes/ZS14T2025/p/20260211-ski`
-  (writes GPX to the current directory).
+### 1. Validate the NEW gpx-from-gopro on full real data  — RUNNING detached (2026-06-27)
 
-Note: this old version has no probe gate, so it fully extracts the huge stitched
-files just to skip them — slow. The new `gpx-from-gopro` is meant to replace it,
-so weigh whether finishing the old-version validation is still worth it vs. just
-running item 1 below.
+A full validation run is **in progress, launched fully detached** (own session,
+PPID = launchd, no controlling TTY) so it survives this/any Claude session teardown
+— it is NOT in the harness task tree (unlike item 0, which that killed).
 
-### 1. Validate the NEW gpx-from-gopro on full real data  (the main remaining item)
+- **Purpose**: end-to-end validation of `gpx-from-gopro` on the real 3-day ski
+  footage — confirm cheap stitched-file skips, correct (camera, local-date)
+  grouping, and full trkpt fields — to confirm it can replace `~/bin/gopro-gpx.js`.
+- **Arguments**: input dir `/Volumes/ZS14T2025/p/20260211-ski`; `--out
+  ~/gpx-validate/out`; no `--cache-dir` → per-file sidecar caches
+  `<file>.gpxcache.json` written on the drive next to each source, so a killed run
+  resumes cheaply (the restart hit them — files logged `(cached)`).
+- **Plain command** (foreground equivalent; paths absolute, run from anywhere):
+  ```sh
+  node ~/zrepos/gpx-stabilizer/src/gopro-cli.js \
+    /Volumes/ZS14T2025/p/20260211-ski --out ~/gpx-validate/out
+  ```
+- **How it was launched detached** (macOS has no `setsid`; python fork+setsid):
+  ```sh
+  python3 -c 'import os
+  if os.fork() > 0: os._exit(0)
+  os.setsid()
+  fo = os.open("/Users/zordius/gpx-validate/run.log", os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o644)
+  os.dup2(os.open("/dev/null", os.O_RDONLY), 0); os.dup2(fo, 1); os.dup2(fo, 2)
+  os.execvp("node", ["node", "/Users/zordius/zrepos/gpx-stabilizer/src/gopro-cli.js", "/Volumes/ZS14T2025/p/20260211-ski", "--out", "/Users/zordius/gpx-validate/out"])'
+  ```
+- **Log** (durable): `~/gpx-validate/run.log`.
+- **Output GPX** (durable): `~/gpx-validate/out/` — one `<YYYYMMDD>-<family>.gpx`
+  per (camera, local date), written only at the very end of the run.
+- **Monitor**: alive? `pgrep -fl gopro-cli.js` (PPID 1 = detached) · progress:
+  `tail -f ~/gpx-validate/run.log` · output appears at completion:
+  `ls ~/gpx-validate/out/`.
 
-Run the CLI on the real ski footage and sanity-check the output:
-```
-cd ~/zrepos/gpx-stabilizer
-node src/gopro-cli.js /Volumes/ZS14T2025/p/20260211-ski --out /tmp/gpxout
-```
-Check:
-- **Stitched products skipped cheaply** — files like `20260211-j.mp4` (no GPMF
-  track) should log `no GPS track, skip` via the probe (not a slow extraction).
-- **Grouping** — one `<YYYYMMDD>-GOPR.gpx` per day for the `j` camera (Hero5),
-  one `<YYYYMMDD>-GX.gpx` per day for `z` (Hero10). The trip spans 2026-02-11/12/13.
+**Validation checklist** (run once `~/gpx-validate/out/` is populated):
+- **Stitched products skipped cheaply** — files with no GPMF track should log
+  `no GPS track, skip` via the moov probe (not a slow full extraction).
+- **Grouping** — one `<YYYYMMDD>-GOPR.gpx` per day for `j` (Hero5), one
+  `<YYYYMMDD>-GX.gpx` per day for `z` (Hero10); trip spans 2026-02-11/12/13.
 - **Fields present** — trkpts carry `ele` (MSL), `time`, `speed`, `fix`, `hdop`;
-  validate with `xmllint --noout <out>.gpx`.
-- The slow external drive makes this take a while; the cache makes a rerun cheap.
-
-Was blocked during the build session because the old `~/bin/gopro-gpx.js` batch
-was running on the same dir and held the slow drive — check `pgrep -f gopro-gpx.js`
-is clear first.
+  validate each file with `xmllint --noout ~/gpx-validate/out/<file>.gpx`.
+- **File-count sanity** — this run reported `found 124 video file(s)`; an earlier
+  killed attempt reported `114`. Reconcile the diff (likely the dangling-symlink
+  dirs under `j/133` that the walk logs as `skip dir … ENOENT` and that may
+  intermittently resolve).
 
 ### 2. Probe unit tests  (deferred — needs a decision)
 
