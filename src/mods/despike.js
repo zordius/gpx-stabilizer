@@ -113,12 +113,18 @@ export const compute = (ctx) => {
   // (b) lone hairpin
   for (let k = 1; k < n - 1; k++) if (Math.abs(turn[k]) >= LONE) flag(k, "lone", turn[k]);
 
-  // (c) speed: both adjacent segments are log-length outliers vs the robust baseline -> point displaced
+  // (c) speed: a point is displaced when its TWO adjacent segments are log-length outliers vs the
+  // robust baseline AND that long pair is LOCALLY ISOLATED — the segments just outside it are normal.
+  // A real teleport is a lone out-and-back (normal · LONG · LONG · normal); sustained fast skiing is a
+  // RUN of long segments (every interior point would have both neighbours long), so requiring the
+  // flanking segments to be non-outliers rejects fast-skiing speed variation, keeping only true jumps.
   const logSeg = new Array(n - 1);
   for (let k = 0; k < n - 1; k++)
     logSeg[k] = Math.log(Math.max(0.1, Math.hypot(x[k + 1] - x[k], y[k + 1] - y[k])));
   const sf = robustOutliers(logSeg, KS, W);
-  for (let k = 1; k < n - 1; k++) if (sf[k - 1] && sf[k]) flag(k, "speed", true);
+  const isOut = (s) => s >= 0 && s < n - 1 && sf[s];
+  for (let k = 1; k < n - 1; k++)
+    if (sf[k - 1] && sf[k] && !isOut(k - 2) && !isOut(k + 1)) flag(k, "speed", true);
 
   return { drop };
 };
