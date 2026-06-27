@@ -62,12 +62,25 @@ function robustOutliers(vals, K, W) {
   return resid.map((ri) => ri > K * sigma);
 }
 
+// Turn-threshold profiles (degrees), selected by g.DESPIKE_PROFILE (default "core"). The general
+// "core" profile is CONSERVATIVE on turns: real everyday activities (walking/driving) have legitimate
+// sharp corners / slow pivots up to ~150° (measured on public non-ski GPX), so a low threshold would
+// cut REAL turns — core only flags near-180° lone hairpins and leans on speed/outlier/activity for
+// general spikes. "ski" is tuned to skiing's gentler carves (95th ~73°) so it can cut at 120° safely.
+// The speed-teleport detector + jut gate are activity-agnostic and stay shared (plain defaults below).
+const PROFILES = {
+  core: { LONE: 160, REV: 90, GAP: 3 },
+  ski: { LONE: 120, REV: 90, GAP: 3 },
+};
+
 export const compute = (ctx) => {
   const { x, y, n, g } = ctx;
   const DEG = Math.PI / 180;
-  const REV = (g.DESPIKE_REV ?? 90) * DEG; // reversal candidate threshold
-  const LONE = (g.DESPIKE_LONE ?? 120) * DEG; // lone hairpin threshold
-  const GAP = g.DESPIKE_GAP ?? 3; // max vertices an out-and-back may span
+  // turn thresholds come from the selected profile (default "core"); per-key g.DESPIKE_* still wins
+  const prof = PROFILES[g.DESPIKE_PROFILE] ?? PROFILES.core;
+  const REV = (g.DESPIKE_REV ?? prof.REV) * DEG; // reversal candidate threshold
+  const LONE = (g.DESPIKE_LONE ?? prof.LONE) * DEG; // lone hairpin threshold
+  const GAP = g.DESPIKE_GAP ?? prof.GAP; // max vertices an out-and-back may span
   const KS = g.DESPIKE_KS ?? 3.5; // speed log-baseline MAD factor (aggressive)
   const W = g.DESPIKE_W ?? 30; // speed baseline half-window
   const JUT = g.DESPIKE_JUT ?? 3; // m: absolute influence gate — only drop a jump that would pull the line this far off
