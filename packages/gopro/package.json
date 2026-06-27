@@ -33,6 +33,7 @@
   },
   "dependencies": {
     "gpx-stabilizer": "^0.1.0",
+    "egm96-universal": "^1.1.1",
     "gopro-telemetry": "^1.2.11",
     "gpmf-extract": "^0.3.3",
     "mp4box": "^0.5.4",
