@@ -57,9 +57,11 @@ function* layerPoints(layer) {
   yield* layer.labels ?? [];
 }
 
-/** Count a layer's drawn points (line vertices + explicit markers; labels don't count). */
+/** Count a layer's drawn elements (line vertices + explicit markers + text labels). Used both for the
+ * legend "(N)" and as the emptiness test in writeHtml — so a labels-only layer must count its labels,
+ * else it reads as empty and gets filtered out before render. */
 function countPoints(layer) {
-  let n = layer.points?.length ?? 0;
+  let n = (layer.points?.length ?? 0) + (layer.labels?.length ?? 0);
   for (const line of layer.lines ?? []) n += line.length;
   return n;
 }
@@ -118,7 +120,9 @@ export function toSvg(layers = [], opts = {}) {
   const sizeAttr = standalone
     ? ` width="${opts.width ?? 1280}" height="${opts.height ?? 720}"`
     : ` style="--ar:${ar}"`;
-  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet"${sizeAttr}>`;
+  // font-family/weight set once on the root <svg> so every <text> (labels) inherits one style —
+  // sans-serif to match the HTML legend, thinnest weight (degrades to nearest available).
+  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" font-family="sans-serif" font-weight="100"${sizeAttr}>`;
 
   const out = [head];
   // standalone has no host CSS, so carry the non-scaling-stroke rule inline (constant marker/line px)

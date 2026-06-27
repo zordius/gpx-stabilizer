@@ -47,6 +47,27 @@ export function toLayers(points, opts = {}) {
   return [layer];
 }
 
+/**
+ * Build a labels layer marking each line segment's head and tail: segment k (1-based, in the order
+ * given) gets a "{k}s" label at its first point and "{k}e" at its last. Black text on its own layer —
+ * append it LAST so it draws on top. Font size is in user units (`opts.fontSize`, default 12); it
+ * scales with zoom, which is fine. Pass the SAME `lines` a track layer draws (already projected).
+ * @param {Array<Array<{ x: number, y: number }>>} lines
+ * @param {{ label?: string, fontSize?: number }} [opts]
+ * @returns {object} a labels layer ({ label, color: "#000", fontSize, labels })
+ */
+export function segmentLabels(lines, opts = {}) {
+  const labels = [];
+  lines.forEach((seg, i) => {
+    if (!seg.length) return;
+    const head = seg[0];
+    const tail = seg[seg.length - 1];
+    labels.push({ x: head.x, y: head.y, text: `${i + 1}s` });
+    labels.push({ x: tail.x, y: tail.y, text: `${i + 1}e` });
+  });
+  return { label: opts.label ?? "labels", color: "#000", fontSize: opts.fontSize ?? 12, labels };
+}
+
 /** Convenience: render points straight to one HTML document (a single panel, a single layer). */
 export function toHtml(points, opts = {}) {
   const title = opts.title ?? "GPX Stabilizer Viewer";
@@ -109,7 +130,7 @@ export function analyzedLayers(points, opts = {}) {
   };
   // Layers render back-to-front: drops + kink first, then the raw track, then the clean line LAST so
   // it sits on top of raw. `out` is every point in order (drops included) → the full raw line.
-  return [
+  const layers = [
     dropLayer("drift", "drift", []),
     dropLayer("outlier drop", "outlier", ["drift"]),
     dropLayer("activity drop", "activity", ["drift", "outlier"]),
@@ -124,6 +145,9 @@ export function analyzedLayers(points, opts = {}) {
     { label: "raw", color: "#888", width: 1, opacity: 0.7, lines: [out.map(flipY)] },
     cleanLayer,
   ];
+  // opts.labels → a black head/tail label per clean segment, on top (opts.labelSize sets font size)
+  if (opts.labels) layers.push(segmentLabels(cleanLayer.lines, { fontSize: opts.labelSize }));
+  return layers;
 }
 
 /** Min/max of an array via reduce (avoids spread-arg limits on long tracks). */

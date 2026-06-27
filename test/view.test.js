@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { analyzedLayers, toHtml, toLayers, withXY } from "../src/view.js";
+import { analyzedLayers, segmentLabels, toHtml, toLayers, withXY } from "../src/view.js";
 
 const pts = [
   { lat: 0, lon: 0 },
@@ -81,4 +81,44 @@ test("analyzedLayers: clean track line + per-reason drop layers, unified red cir
     assert.equal(l.shape, undefined); // …default circle, no per-reason shape
   }
   assert.ok(byLabel["outlier drop"].points.length >= 1, "the spike is an outlier drop");
+});
+
+test("segmentLabels: head/tail label per segment, 1-based, black, on its own layer", () => {
+  const lines = [
+    [
+      { x: 0, y: 0 },
+      { x: 1, y: 1 },
+      { x: 2, y: 0 },
+    ],
+    [
+      { x: 5, y: 5 },
+      { x: 6, y: 6 },
+    ],
+  ];
+  const layer = segmentLabels(lines, { fontSize: 30 });
+  assert.equal(layer.color, "#000");
+  assert.equal(layer.fontSize, 30);
+  assert.deepEqual(layer.labels, [
+    { x: 0, y: 0, text: "1s" }, // seg 1 head
+    { x: 2, y: 0, text: "1e" }, // seg 1 tail
+    { x: 5, y: 5, text: "2s" }, // seg 2 head
+    { x: 6, y: 6, text: "2e" }, // seg 2 tail
+  ]);
+});
+
+test("analyzedLayers: opts.labels appends a black labels layer LAST (on top)", () => {
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx; // ~5 m/s eastward — a realistic track that survives the pipeline
+  const track = Array.from({ length: 30 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const layers = analyzedLayers(track, { labels: true, labelSize: 20 });
+  const top = layers[layers.length - 1];
+  assert.equal(top.label, "labels"); // appended LAST = on top
+  assert.equal(top.color, "#000");
+  assert.equal(top.fontSize, 20);
+  assert.ok(top.labels.length >= 2 && top.labels[0].text === "1s"); // first segment head
 });
