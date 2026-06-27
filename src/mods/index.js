@@ -16,7 +16,6 @@ import * as activity from "./activity.js";
 import * as dequantizeTime from "./dequantizeTime.js";
 import * as despike from "./despike.js";
 import * as drift from "./drift.js";
-import * as kink from "./kink.js";
 import * as noTime from "./noTime.js";
 import * as outlier from "./outlier.js";
 import * as oversample from "./oversample.js";
@@ -45,7 +44,12 @@ export function validateModule(name, def) {
   return { name, repair: def.repair, label: def.label, compute: def.compute };
 }
 
-/** The built-in modules, named after their files and validated. */
+/** The built-in modules (the general "core" pipeline), named after their files and validated.
+ * NOTE: `kink` is intentionally NOT here — it's a label-only overlay with no cleaning value in core
+ * (its sharp-turn flags are either spikes despike already drops, or real corners we keep). The file
+ * `./kink.js` stays; opt back in for the future ski work via `opts.modules: [await loadModule("kink")]`.
+ * It originally sat after `drift` / before `despike`, but compute-module ORDER IS COSMETIC (each runs
+ * on the same ctx independently; assemble/glue come after), so re-add it anywhere among the computes. */
 export const builtins = [
   validateModule("dequantizeTime", dequantizeTime),
   validateModule("noTime", noTime),
@@ -53,7 +57,6 @@ export const builtins = [
   validateModule("outlier", outlier),
   validateModule("activity", activity),
   validateModule("drift", drift),
-  validateModule("kink", kink),
   validateModule("despike", despike),
 ];
 
