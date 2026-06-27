@@ -3,9 +3,11 @@
 // concepts leak here; the consumer maps this to its own model. See
 // docs/export-contract.md.
 
+import { statSync } from "node:fs";
 import { stabilize } from "gpx-stabilizer";
 import tzlookup from "tz-lookup";
 import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
+import { CACHE_V, readCache, resolveCachePath, writeCache } from "./gopro-cache.js";
 
 function isFiniteNum(n) {
   return typeof n === "number" && Number.isFinite(n);
@@ -147,16 +149,64 @@ export function resolveStartUtc(points) {
  */
 
 /**
- * One-call convenience the adapter actually uses: probe + extract [+ stabilize]
- * + timezone + start anchor in a single await. Short-circuits on a video with no
- * GPS track.
+ * Cached probe + extract: a video's GoPro samples plus its metadata, as
+ * `{ meta, points, fromCache }`. The expensive whole-stream extraction (and the
+ * moov probe) are skipped entirely on a cache hit.
+ *
+ * Caching is **ON by default** — a sidecar `<file>.gpxcache.json` is written
+ * next to the source, keyed by file size+mtime+rate+schema-version, so a repeat
+ * read (or a killed run) returns instantly. Pass `cache: false` to disable
+ * (pure, no file writes) or `cache: { dir }` to keep records in a managed
+ * directory instead of beside the media.
+ *
+ * `points` is `[]` for a video with no GPS track (`meta.hasGps === false`).
  * @param {string} path
- * @param {{ rate?: number, stabilize?: boolean | Parameters<typeof stabilize>[1] }} [opts]
- *   rate in Hz (omit = native ~18 Hz); stabilize cleans the points first.
+ * @param {{ rate?: number, cache?: boolean | { dir?: string | null } }} [opts]
+ *   rate in Hz (omit = native ~18 Hz); cache controls the on-disk record (default on).
+ * @returns {Promise<{ meta: import("./gopro.js").GoproMeta, points: import("gpx-stabilizer").TrackPoint[], fromCache: boolean }>}
+ */
+export async function readGoproSamples(path, opts = {}) {
+  const { rate, cache } = opts;
+  const groupTimes = rate ? Math.round(1000 / rate) : undefined;
+  const cp = resolveCachePath(path, cache);
+  const ident = { v: CACHE_V, size: 0, mtime: 0, rate: groupTimes ?? null };
+  if (cp) {
+    try {
+      const st = statSync(path);
+      ident.size = st.size;
+      ident.mtime = Math.round(st.mtimeMs);
+    } catch {
+      // unstattable -> leave size/mtime 0 (guaranteed miss); probe surfaces the error
+    }
+    const hit = readCache(cp, ident);
+    if (hit) return { meta: hit.meta, points: hit.points ?? [], fromCache: true };
+  }
+  const meta = await probeGoproMeta(path);
+  const points = meta.hasGps
+    ? await extractGoproPoints(path, groupTimes ? { groupTimes } : {})
+    : [];
+  if (cp) {
+    const dir = cache && typeof cache === "object" ? (cache.dir ?? null) : null;
+    writeCache(cp, { ...ident, meta, points }, dir);
+  }
+  return { meta, points, fromCache: false };
+}
+
+/**
+ * One-call convenience the adapter actually uses: (cached) probe + extract
+ * [+ stabilize] + timezone + start anchor in a single await. Short-circuits on
+ * a video with no GPS track.
+ * @param {string} path
+ * @param {{ rate?: number, stabilize?: boolean | Parameters<typeof stabilize>[1], cache?: boolean | { dir?: string | null } }} [opts]
+ *   rate in Hz (omit = native ~18 Hz); stabilize cleans the points first; cache
+ *   controls the on-disk extraction record (default on — see `readGoproSamples`).
  * @returns {Promise<TelemetryResult>}
  */
 export async function readGoproTelemetry(path, opts = {}) {
-  const meta = await probeGoproMeta(path);
+  const { meta, points: raw } = await readGoproSamples(path, {
+    rate: opts.rate,
+    cache: opts.cache,
+  });
   if (!meta.hasGps) {
     return {
       meta,
@@ -166,7 +216,6 @@ export async function readGoproTelemetry(path, opts = {}) {
       clock: { startUtc: null, confidence: null, verified: false, slope: null },
     };
   }
-  const raw = await extractGoproPoints(path, opts.rate != null ? { rate: opts.rate } : {});
   // tz + anchor are derived from the RAW points: stabilize() reduces a point to
   // {lat,lon,ele,time}, dropping the `fix` + `cts` that good-fix selection and the
   // start regression rely on.

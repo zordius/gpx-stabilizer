@@ -6,6 +6,12 @@ import { createHash } from "node:crypto";
 import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 
+// Cache schema version: bump whenever the cached record's shape or the
+// extraction output changes, so stale records read as a miss and re-extract.
+// 3: points carry `cts` (media offset) and the record stores { meta, points }
+// (was { hasGps, meta, points } at v2, pre-cts).
+export const CACHE_V = 3;
+
 /**
  * Cache-record path for a source file: sidecar `<file>.gpxcache.json` by
  * default, or a hashed name inside `cacheDir` (keeps the media tree clean).
@@ -19,6 +25,21 @@ export function cachePath(file, cacheDir = null) {
     return join(cacheDir, `${basename(file)}.${h}.json`);
   }
   return `${file}.gpxcache.json`;
+}
+
+/**
+ * Resolve the opt-in `cache` option to a record path, or null when caching is
+ * off. Caching is ON by default: `undefined`/`true` → sidecar next to the
+ * source; `{ dir }` → a hashed name under `dir` (keeps the media tree clean);
+ * `false`/`null` → disabled.
+ * @param {string} file
+ * @param {boolean | { dir?: string | null } | null} [cache]
+ * @returns {string | null}
+ */
+export function resolveCachePath(file, cache = true) {
+  if (cache === false || cache == null) return null;
+  const dir = typeof cache === "object" ? (cache.dir ?? null) : null;
+  return cachePath(file, dir);
 }
 
 /**

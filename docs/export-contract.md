@@ -91,6 +91,7 @@ resolveStartUtc(points)        // → { startUtc, confidence, verified, slope } 
 readGoproTelemetry(path, {
   rate?,                       // Hz; omit = native ~18 Hz
   stabilize?,                  // boolean | StabilizeOptions — clean the points first
+  cache?,                      // on by default — see section E
 }) // → Promise<TelemetryResult>
 
 TelemetryResult = {
@@ -120,6 +121,37 @@ TelemetryResult = {
   `hdop` should pass `stabilize: false` and clean downstream, or read them off the raw
   points. (Decision 2026-06-27: keep `stabilize` minimal rather than widen core; revisit
   if a consumer genuinely needs cleaned points *with* those fields.)
+
+### E. Caching (opt-in, **on by default**)
+
+The expensive step is `extractGoproPoints` — it streams the whole MP4. To make
+repeat reads (re-render, preview, a killed batch) cheap, probe+extract is cached
+per file.
+
+```js
+readGoproSamples(path, {
+  rate?,                       // Hz; omit = native ~18 Hz
+  cache?,                      // true (default) | false | { dir }
+}) // → Promise<{ meta, points, fromCache }>   points: [] when no GPS track
+```
+
+- `readGoproSamples` is the cached probe+extract that backs `readGoproTelemetry`.
+  Both take the same `cache` option; the derivations (timezone, start anchor,
+  stabilize) are cheap pure functions over the cached raw points and are **not**
+  themselves cached.
+- **Default = on, sidecar.** With no `cache` (or `cache: true`) a record is
+  written next to the source as `<file>.gpxcache.json`. Pass **`cache: false`**
+  for a pure, side-effect-free read (no file writes), or **`cache: { dir }`** to
+  keep records in a managed directory (hashed names) instead of polluting the
+  media tree — the saner choice for an embedding app.
+- **Key** = file `size` + `mtime` + `rate` + schema `version` (`CACHE_V`). Any
+  change misses and re-extracts; writes are atomic (temp-then-rename). A hit
+  returns `{ meta, points }` **without touching the file at all** (the moov probe
+  is skipped too).
+- **What's cached** is the raw extraction (`{ meta, points }`, points carrying
+  `cts`); `probeGoproMeta` (cheap, moov-only) and `stabilize`/tz/anchor are not.
+- **`CACHE_V` discipline**: bump it whenever the cached point shape or extraction
+  output changes, so stale records are auto-invalidated. (v3 added `cts`.)
 
 ---
 

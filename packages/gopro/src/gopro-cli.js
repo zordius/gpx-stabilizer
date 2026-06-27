@@ -14,10 +14,7 @@
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { saveGpx } from "gpx-stabilizer";
-import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
-import { cachePath, readCache, writeCache } from "./gopro-cache.js";
-
-const CACHE_V = 2; // bump when extraction output shape/logic changes (invalidates old caches)
+import { readGoproSamples } from "./telemetry.js";
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
 const MEDIAN_N = 30;
@@ -48,11 +45,11 @@ if (manualTZ != null && Number.isNaN(manualTZ)) {
   console.error(`invalid --tz: ${opts.tz}`);
   process.exit(1);
 }
-// --rate HZ -> group samples to that rate; omit for native (~18 Hz)
-const groupTimes = opts.rate ? Math.round(1000 / Number(opts.rate)) : undefined;
-// per-file extraction cache: sidecar next to source by default, or --cache-dir; --no-cache disables
-const cacheEnabled = !opts["no-cache"];
-const cacheDir = opts["cache-dir"] ?? null;
+// --rate HZ -> downsample to that rate; omit for native (~18 Hz)
+const rate = opts.rate ? Number(opts.rate) : undefined;
+// per-file extraction cache (on by default): sidecar next to source; --cache-dir
+// redirects to a managed dir; --no-cache disables
+const cache = opts["no-cache"] ? false : opts["cache-dir"] ? { dir: opts["cache-dir"] } : true;
 
 // ---- camera family from filename ----
 function family(file) {
@@ -132,61 +129,25 @@ let ok = 0;
 let skipped = 0;
 let failed = 0;
 for (const file of videos) {
-  const ident = { v: CACHE_V, size: 0, mtime: 0, rate: groupTimes ?? null };
+  let meta;
+  let points;
+  let fromCache;
   try {
-    const st = statSync(file);
-    ident.size = st.size;
-    ident.mtime = Math.round(st.mtimeMs);
+    ({ meta, points, fromCache } = await readGoproSamples(file, { rate, cache }));
   } catch (e) {
-    console.error(`  FAILED stat ${basename(file)}: ${e.message}`);
+    console.error(`  FAILED ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`);
     failed++;
     continue;
   }
-  const cp = cacheEnabled ? cachePath(file, cacheDir) : null;
-  const cached = cp ? readCache(cp, ident) : null;
-
-  let points;
-  if (cached) {
-    if (!cached.hasGps) {
-      console.error(`  no GPS track, skip (cached): ${basename(file)}`);
-      skipped++;
-      continue;
-    }
-    points = cached.points;
-  } else {
-    // Cheap moov probe first: skip files with no GPMF GPS track without the
-    // (slow) full extraction. Catches stitched products and non-GoPro videos.
-    let meta;
-    try {
-      meta = await probeGoproMeta(file);
-    } catch (e) {
-      console.error(
-        `  FAILED probe ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`,
-      );
-      failed++;
-      continue;
-    }
-    if (!meta.hasGps) {
-      if (cp) writeCache(cp, { ...ident, hasGps: false, meta }, cacheDir);
-      const dim = meta.width && meta.height ? `${meta.width}x${meta.height}` : "?";
-      console.error(`  no GPS track, skip: ${basename(file)} (${dim} ${meta.codec ?? "?"})`);
-      skipped++;
-      continue;
-    }
-    try {
-      points = await extractGoproPoints(file, groupTimes ? { groupTimes } : {});
-    } catch (e) {
-      console.error(`  FAILED ${basename(file)}: ${(e?.message ?? String(e)).split("\n")[0]}`);
-      failed++;
-      continue;
-    }
-    if (points.length === 0) {
-      if (cp) writeCache(cp, { ...ident, hasGps: false, meta }, cacheDir);
-      console.error(`  no GPS, skip: ${basename(file)}`);
-      skipped++;
-      continue;
-    }
-    if (cp) writeCache(cp, { ...ident, hasGps: true, meta, points }, cacheDir);
+  // No GPMF GPS track (caught cheaply by the moov probe) or an extraction that
+  // yielded nothing — skip either way.
+  if (!meta.hasGps || points.length === 0) {
+    const dim = meta.width && meta.height ? `${meta.width}x${meta.height}` : "?";
+    console.error(
+      `  no GPS track, skip${fromCache ? " (cached)" : ""}: ${basename(file)} (${dim} ${meta.codec ?? "?"})`,
+    );
+    skipped++;
+    continue;
   }
 
   const fam = family(file);
@@ -204,7 +165,7 @@ for (const file of videos) {
   // reduce below — a single file can carry tens of thousands of points.
   const bucket = groups.get(key).points;
   for (const p of points) bucket.push(p);
-  console.log(`  ${basename(file)}: ${points.length} pts -> ${key}${cached ? " (cached)" : ""}`);
+  console.log(`  ${basename(file)}: ${points.length} pts -> ${key}${fromCache ? " (cached)" : ""}`);
   ok++;
 }
 

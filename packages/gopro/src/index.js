@@ -5,6 +5,7 @@
 export { stabilize } from "gpx-stabilizer";
 export { extractGoproPoints, probeGoproMeta } from "./gopro.js";
 export {
+  readGoproSamples,
   readGoproTelemetry,
   recordingStartUtc,
   regressStartUtc,

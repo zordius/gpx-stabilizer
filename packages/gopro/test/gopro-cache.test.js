@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { cachePath, readCache, writeCache } from "../src/gopro-cache.js";
+import { cachePath, readCache, resolveCachePath, writeCache } from "../src/gopro-cache.js";
 
 const ident = { v: 1, size: 100, mtime: 200, rate: null };
 const withTmp = (fn) => {
@@ -43,6 +43,16 @@ test("readCache returns null for a missing or unreadable file", () => {
 test("cachePath: sidecar by default, hashed name under cacheDir", () => {
   assert.equal(cachePath("/a/b/GX01.MP4"), "/a/b/GX01.MP4.gpxcache.json");
   assert.match(cachePath("/a/b/GX01.MP4", "/cache"), /^\/cache\/GX01\.MP4\.[0-9a-f]{16}\.json$/);
+});
+
+test("resolveCachePath: default/true → sidecar, {dir} → hashed, false/null → off", () => {
+  const f = "/a/b/GX01.MP4";
+  assert.equal(resolveCachePath(f), "/a/b/GX01.MP4.gpxcache.json"); // default on (undefined)
+  assert.equal(resolveCachePath(f, true), "/a/b/GX01.MP4.gpxcache.json");
+  assert.equal(resolveCachePath(f, { dir: null }), "/a/b/GX01.MP4.gpxcache.json"); // null dir = sidecar
+  assert.match(resolveCachePath(f, { dir: "/cache" }), /^\/cache\/GX01\.MP4\.[0-9a-f]{16}\.json$/);
+  assert.equal(resolveCachePath(f, false), null);
+  assert.equal(resolveCachePath(f, null), null);
 });
 
 test("writeCache creates a missing cacheDir and is atomic (no .tmp left)", () => {
