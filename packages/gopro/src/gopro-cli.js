@@ -200,7 +200,10 @@ for (const file of videos) {
   }
   const key = `${date}-${fam}`;
   if (!groups.has(key)) groups.set(key, { points: [], family: fam, date });
-  groups.get(key).points.push(...points);
+  // loop-push, not push(...points): same spread-overflow risk as the startMs
+  // reduce below — a single file can carry tens of thousands of points.
+  const bucket = groups.get(key).points;
+  for (const p of points) bucket.push(p);
   console.log(`  ${basename(file)}: ${points.length} pts -> ${key}${cached ? " (cached)" : ""}`);
   ok++;
 }
@@ -209,13 +212,22 @@ mkdirSync(outDir, { recursive: true });
 const written = [];
 for (const [key, g] of groups) {
   g.points.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-  // metadata start time = earliest real (non 0,0) fix, avoiding pre-lock placeholder times
-  const realTimes = g.points
-    .filter((p) => !(p.lat === 0 && p.lon === 0) && p.time != null)
-    .map((p) => p.time);
-  const startMs = realTimes.length ? Math.min(...realTimes) : null;
+  // Drop pre-lock placeholder fixes: a cold-starting GPS emits null-island
+  // (0,0) points with a stale clock (often a 2021 default). They sort to the
+  // front on those bogus times and pollute the track; a file that never locks
+  // forms an all-placeholder stray-date group, so skip groups left empty.
+  const points = g.points.filter((p) => !(p.lat === 0 && p.lon === 0));
+  if (points.length === 0) {
+    console.error(`  no real fix, skip group: ${key}`);
+    continue;
+  }
+  // metadata start time = earliest real fix.
+  // reduce, not Math.min(...): a day-group can hold hundreds of thousands of
+  // points and spreading that many args overflows the call stack.
+  let startMs = null;
+  for (const p of points) if (p.time != null && (startMs === null || p.time < startMs)) startMs = p.time;
   const track = {
-    segments: [g.points],
+    segments: [points],
     meta: {
       name: key,
       time: startMs != null ? new Date(startMs).toISOString() : null,
@@ -224,7 +236,7 @@ for (const [key, g] of groups) {
   };
   const path = join(outDir, `${key}.gpx`);
   saveGpx(track, path, { creator: "gpx-from-gopro" });
-  written.push(`${key}.gpx (${g.points.length} pts)`);
+  written.push(`${key}.gpx (${points.length} pts)`);
 }
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
