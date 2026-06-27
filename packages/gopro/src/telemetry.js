@@ -61,12 +61,89 @@ export function recordingStartUtc(points) {
   return { startUtc: isFiniteNum(p.time) ? p.time : null, fix: p.fix };
 }
 
+// Gates for trusting the regression extrapolation.
+const MIN_REG_POINTS = 5; // too few points → slope is noise
+const MIN_REG_SPAN_MS = 5000; // <5 s of media offset → extrapolating to 0 is unreliable
+const SLOPE_TOL = 0.05; // |slope−1| must be within this (UTC ms vs media ms ⇒ ≈1)
+
+/**
+ * True recording-start instant (UTC) by **linear regression** of each good-fix
+ * sample's UTC `time` against its media offset `cts`: `time ≈ intercept +
+ * slope·cts`. The recording starts at `cts = 0`, so the intercept is the
+ * wall-clock instant of the first video frame — *before* GPS lock, recovering the
+ * pre-lock delay that the first-good-fix anchor ignores. `slope` should be ≈ 1
+ * (both axes are milliseconds); a slope far from 1 means the GPS UTC and media
+ * clocks disagree, so the extrapolation is not trustworthy.
+ *
+ * @param {import("gpx-stabilizer").TrackPoint[]} points  raw points (need `cts` + `time` + `fix`)
+ * @returns {{ startUtc: number, slope: number, n: number } | null}  null when too
+ *   few points, too short a media span, or `cts` is unavailable
+ */
+export function regressStartUtc(points) {
+  const pts = (points ?? []).filter(
+    (p) => p && (p.fix === "3d" || p.fix === "2d") && isFiniteNum(p.time) && isFiniteNum(p.cts),
+  );
+  const n = pts.length;
+  if (n < MIN_REG_POINTS) return null;
+  // Centre x (cts) and y (time) before the least-squares sums: UTC ms (~1.7e12)
+  // and cts ms make the raw normal equations lose precision to catastrophic
+  // cancellation; centring keeps the magnitudes small and the slope/intercept
+  // accurate.
+  let sx = 0;
+  let sy = 0;
+  let minC = Number.POSITIVE_INFINITY;
+  let maxC = Number.NEGATIVE_INFINITY;
+  for (const p of pts) {
+    sx += p.cts;
+    sy += p.time;
+    if (p.cts < minC) minC = p.cts;
+    if (p.cts > maxC) maxC = p.cts;
+  }
+  if (maxC - minC < MIN_REG_SPAN_MS) return null;
+  const mx = sx / n;
+  const my = sy / n;
+  let sxx = 0;
+  let sxy = 0;
+  for (const p of pts) {
+    const dx = p.cts - mx;
+    sxx += dx * dx;
+    sxy += dx * (p.time - my);
+  }
+  if (sxx === 0) return null;
+  const slope = sxy / sxx;
+  const intercept = my - slope * mx; // UTC at cts = 0
+  return { startUtc: Math.round(intercept), slope, n };
+}
+
+/**
+ * Best recording-start anchor + how much to trust it. Prefers the regression
+ * true-start when its slope passes the quality gate; otherwise falls back to the
+ * first good fix (the pre-lock delay is then unknown and left in).
+ * @param {import("gpx-stabilizer").TrackPoint[]} points  raw points
+ * @returns {{ startUtc: number | null, confidence: 'gps' | null, verified: boolean, slope: number | null }}
+ */
+export function resolveStartUtc(points) {
+  const reg = regressStartUtc(points);
+  const verified = reg != null && Math.abs(reg.slope - 1) <= SLOPE_TOL;
+  const startUtc = verified ? reg.startUtc : recordingStartUtc(points).startUtc;
+  return {
+    startUtc,
+    confidence: startUtc != null ? "gps" : null,
+    verified,
+    slope: reg ? reg.slope : null,
+  };
+}
+
 /**
  * @typedef {object} TelemetryResult
  * @property {import("./gopro.js").GoproMeta} meta   geometry / fps / durationS / hasGps
  * @property {import("gpx-stabilizer").TrackPoint[]} points  raw, or stabilized per opts
  * @property {string | null} timezone   = timezoneOfPoints(raw points)
- * @property {number | null} startUtc    = recordingStartUtc(raw points).startUtc
+ * @property {number | null} startUtc    best recording-start anchor: the regression
+ *   true-start when verified, else the first good fix (= clock.startUtc)
+ * @property {{ startUtc: number|null, confidence: 'gps'|null, verified: boolean, slope: number|null }} clock
+ *   the start anchor + trust: `verified` true ⇒ regression-extrapolated true start
+ *   (slope ≈ 1); false ⇒ first-good-fix fallback (pre-lock delay left in)
  */
 
 /**
@@ -81,15 +158,16 @@ export function recordingStartUtc(points) {
 export async function readGoproTelemetry(path, opts = {}) {
   const meta = await probeGoproMeta(path);
   if (!meta.hasGps) {
-    return { meta, points: [], timezone: null, startUtc: null };
+    return { meta, points: [], timezone: null, startUtc: null, clock: { startUtc: null, confidence: null, verified: false, slope: null } };
   }
   const raw = await extractGoproPoints(path, opts.rate != null ? { rate: opts.rate } : {});
   // tz + anchor are derived from the RAW points: stabilize() reduces a point to
-  // {lat,lon,ele,time}, dropping the `fix` that good-fix selection relies on.
+  // {lat,lon,ele,time}, dropping the `fix` + `cts` that good-fix selection and the
+  // start regression rely on.
   const timezone = timezoneOfPoints(raw);
-  const { startUtc } = recordingStartUtc(raw);
+  const clock = resolveStartUtc(raw);
   const points = opts.stabilize
     ? stabilize(raw, opts.stabilize === true ? {} : opts.stabilize)
     : raw;
-  return { meta, points, timezone, startUtc };
+  return { meta, points, timezone, startUtc: clock.startUtc, clock };
 }

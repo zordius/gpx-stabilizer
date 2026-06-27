@@ -7,6 +7,8 @@ export { extractGoproPoints, probeGoproMeta } from "./gopro.js";
 export {
   readGoproTelemetry,
   recordingStartUtc,
+  regressStartUtc,
+  resolveStartUtc,
   timezoneAt,
   timezoneOfPoints,
 } from "./telemetry.js";

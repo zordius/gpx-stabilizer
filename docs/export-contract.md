@@ -22,6 +22,7 @@ TrackPoint = {
   speed,                    // m/s, or null
   fix,                      // "none" | "2d" | "3d" | null
   hdop,                     // horizontal DOP, or null
+  cts,                      // media offset (ms from stream start), or null — for start regression
 }
 
 // src/gopro.js
@@ -67,11 +68,22 @@ timezoneOfPoints(points)       // → IANA string | null   (uses the first good-
 
 ```js
 recordingStartUtc(points)      // → { startUtc: number | null, fix: string | null }
+regressStartUtc(points)        // → { startUtc, slope, n } | null   (regression true-start)
+resolveStartUtc(points)        // → { startUtc, confidence, verified, slope }   (best of the two)
 ```
 
-- `startUtc` = the **UTC ms of the first good-fix sample** = the recording's start
-  instant (a renderer uses it as the segment wall-clock anchor). `fix` = that
-  sample's fix (so the consumer knows the confidence). `null` if no fixed sample.
+- `recordingStartUtc` = the **UTC ms of the first good-fix sample**. Simple, but it
+  ignores the **pre-lock delay** — the camera records before GPS locks, so the first
+  fix is some seconds into the video, not its start.
+- `regressStartUtc` recovers the **true start**: least-squares fit of good-fix `time`
+  (UTC ms) against `cts` (media offset ms) → `time ≈ intercept + slope·cts`; the
+  intercept is the UTC at `cts = 0` (the first video frame). `slope` should be ≈ 1
+  (both axes ms). Returns `null` when there are too few points (<5), too short a
+  media span (<5 s), or `cts` is unavailable.
+- `resolveStartUtc` picks the **best**: the regression true-start when its slope
+  passes the gate (`|slope − 1| ≤ 0.05`, i.e. `verified: true`), else the
+  first-good-fix fallback (`verified: false`, pre-lock delay left in). This is what
+  `readGoproTelemetry.clock` carries.
 
 ### D. New — one-call convenience (what the adapter actually calls)
 
@@ -85,13 +97,17 @@ TelemetryResult = {
   meta,                        // GoproMeta (geometry / fps / durationS / hasGps)
   points,                      // TrackPoint[]  (raw, or stabilized per opts)
   timezone,                    // from the RAW points (see note)    (string | null)
-  startUtc,                    // from the RAW points (see note)    (number | null)
+  startUtc,                    // best start anchor (= clock.startUtc) (number | null)
+  clock,                       // { startUtc, confidence:'gps'|null, verified, slope } — see C
 }
 ```
 
 - Bundles `probeGoproMeta` + `extractGoproPoints` [+ `stabilize`] + `timezoneOfPoints`
-  + `recordingStartUtc` in one await. Short-circuit on `!meta.hasGps` (return
-  `points: []`, `timezone: null`, `startUtc: null`).
+  + `resolveStartUtc` in one await. Short-circuit on `!meta.hasGps` (return
+  `points: []`, `timezone: null`, `startUtc: null`, `clock` all-null).
+- **`startUtc` = `clock.startUtc`** — the regression true-start when `clock.verified`,
+  else the first-good-fix fallback. The renderer anchors the segment to `startUtc`;
+  `clock.verified` tells it whether the pre-lock delay was corrected.
 - **`timezone` / `startUtc` are derived from the RAW (pre-stabilize) points**, not
   from the returned `points`. That's deliberate: `stabilize` reduces each point to
   `{lat, lon, ele, time}` (below), dropping the `fix` that good-fix selection needs —
@@ -149,7 +165,9 @@ TelemetryResult = {
 `provider-gopro` (movie-layers side) will roughly do:
 
 ```js
-const { meta, points, timezone, startUtc } = await readGoproTelemetry(path, { rate, stabilize: true })
+const { meta, points, timezone, startUtc, clock } = await readGoproTelemetry(path, { rate })
+// anchor channels to startUtc (the verified true-start when clock.verified, so the
+// first fix lands `lockDelay` into playback — gray pre-display before it)
 return {
   channels: {
     gps:      { unit: 'deg',  samples: points.map(p => ({ t: tRel(p), value: { lat: p.lat, lon: p.lon } })) },
@@ -157,10 +175,10 @@ return {
     speed:    { unit: 'km/h', samples: points.map(p => ({ t: tRel(p), value: p.speed == null ? null : p.speed * 3.6 })) },
     // gradient is DERIVED by the adapter from altitude + distance — not from this lib
   },
-  clock:    { startUtc, confidence: 'gps' },   // ← recordingStartUtc
-  timezone,                                    // ← timezoneOfPoints
+  clock:    { startUtc, confidence: clock.confidence },   // ← resolveStartUtc
+  timezone,                                               // ← timezoneOfPoints
 }
 ```
 
-So this lib only needs to deliver **points + meta + timezone + startUtc**; everything
-above the dashed line is the adapter's.
+So this lib only needs to deliver **points + meta + timezone + startUtc/clock**;
+everything above the dashed line is the adapter's.

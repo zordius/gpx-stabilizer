@@ -1,8 +1,11 @@
 // Extract a GoPro video's GPS track as package TrackPoints
-// ({ lat, lon, ele, time, speed }). Uses gpmf-extract to pull the GPMF 'gpmd'
-// track and gopro-telemetry to interpret it. The MP4 is streamed to mp4box in
-// blocks so multi-GB files never load whole into RAM. No filtering: every GPS
-// sample is kept (including pre-lock 0,0 points), matching the exiftool path.
+// ({ lat, lon, ele, time, speed, fix, hdop, cts }). Uses gpmf-extract to pull the
+// GPMF 'gpmd' track and gopro-telemetry to interpret it. The MP4 is streamed to
+// mp4box in blocks so multi-GB files never load whole into RAM. No filtering:
+// every GPS sample is kept (including pre-lock 0,0 points), matching the exiftool
+// path. `cts` is the sample's media offset (ms from stream start) — the x-axis a
+// consumer regresses UTC against to recover the true recording start (see
+// telemetry.js regressStartUtc).
 import { open } from "node:fs/promises";
 import goproTelemetry from "gopro-telemetry";
 import gpmfExtract from "gpmf-extract";
@@ -138,6 +141,9 @@ export async function extractGoproPoints(path, opts = {}) {
         // GPS5 and GPS9 share value[0..3] = [lat, lon, altitude, 2D speed]
         const [lat, lon, ele, speed] = v;
         const time = s.date != null ? new Date(s.date).getTime() : Number.NaN;
+        // cts = composite time stamp = media offset (ms) of this sample within the
+        // stream; gopro-telemetry carries it natively alongside the GPS `date`.
+        const cts = typeof s.cts === "number" ? s.cts : null;
         if (isGps9) {
           // value = [lat, lon, alt, 2Dspeed, 3Dspeed, days, secs, DOP, fix]
           fix = gpsFix(v[8]);
@@ -157,6 +163,7 @@ export async function extractGoproPoints(path, opts = {}) {
           speed: speed == null ? null : speed,
           fix,
           hdop,
+          cts,
         });
       }
     }

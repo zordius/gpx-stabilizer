@@ -1,6 +1,12 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { recordingStartUtc, timezoneAt, timezoneOfPoints } from "../src/telemetry.js";
+import {
+  recordingStartUtc,
+  regressStartUtc,
+  resolveStartUtc,
+  timezoneAt,
+  timezoneOfPoints,
+} from "../src/telemetry.js";
 
 const pt = (over = {}) => ({
   lat: 35.68,
@@ -84,4 +90,44 @@ test("recordingStartUtc: startUtc null but fix reported when the good-fix sample
     startUtc: null,
     fix: "3d",
   });
+});
+
+const BASE = 1_700_000_000_000;
+// good fixes on a perfect line: time = BASE + cts (slope 1) → true start at cts 0 = BASE
+const lineFixes = () => {
+  const out = [];
+  for (let c = 1000; c <= 10000; c += 1000) out.push(pt({ fix: "3d", time: BASE + c, cts: c }));
+  return out;
+};
+
+test("regressStartUtc: extrapolates UTC~cts to cts=0 to recover the true start", () => {
+  const reg = regressStartUtc(lineFixes());
+  assert.equal(reg.startUtc, BASE);
+  assert.ok(Math.abs(reg.slope - 1) < 1e-6);
+  assert.equal(reg.n, 10);
+});
+
+test("regressStartUtc: null for too few points, too short a span, or missing cts", () => {
+  assert.equal(regressStartUtc([pt({ cts: 1000 }), pt({ cts: 2000 })]), null); // <5 points
+  const short = [];
+  for (let c = 0; c < 6; c++) short.push(pt({ fix: "3d", time: BASE + c, cts: c })); // 5ms span
+  assert.equal(regressStartUtc(short), null);
+  assert.equal(
+    regressStartUtc(lineFixes().map((p) => ({ ...p, cts: null }))),
+    null,
+  ); // no cts
+});
+
+test("resolveStartUtc: verified true-start when slope ≈ 1, else first-fix fallback", () => {
+  assert.deepEqual(resolveStartUtc(lineFixes()), {
+    startUtc: BASE,
+    confidence: "gps",
+    verified: true,
+    slope: 1,
+  });
+  const bad = lineFixes().map((p) => ({ ...p, time: BASE + (p.cts * 3) / 2 })); // slope 1.5
+  const rb = resolveStartUtc(bad);
+  assert.equal(rb.verified, false);
+  assert.equal(rb.startUtc, BASE + 1500); // first good fix (cts 1000)
+  assert.equal(rb.confidence, "gps");
 });
