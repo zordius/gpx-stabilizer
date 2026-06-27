@@ -108,7 +108,7 @@ export async function probeGoproMeta(path) {
  * @param {{ rate?: number, groupTimes?: number }} [opts] rate in Hz (public knob;
  *   omit for native ~18 Hz). `groupTimes` (ms) is the internal equivalent kept for
  *   existing callers; `rate` wins when both are given (groupTimes = 1000 / rate).
- * @returns {Promise<import("./gpx.js").TrackPoint[]>}
+ * @returns {Promise<import("gpx-stabilizer").TrackPoint[]>}
  */
 export async function extractGoproPoints(path, opts = {}) {
   const groupTimes = opts.rate ? Math.round(1000 / opts.rate) : opts.groupTimes;

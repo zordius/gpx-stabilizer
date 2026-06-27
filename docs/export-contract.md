@@ -30,9 +30,14 @@ GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS }
 
 ---
 
-## Exports (all from `src/index.js`)
+## Exports (all from the `gpx-from-gopro` package entry — `packages/gopro/src/index.js`)
 
-### A. Surface the existing GoPro functions (today they live in `src/gopro.js`, not exported)
+> Post monorepo split: the GoPro/telemetry surface ships in the **`gpx-from-gopro`**
+> package, not core `gpx-stabilizer`. Consumers `import { readGoproTelemetry, … }
+> from "gpx-from-gopro"`. `stabilize` is re-exported there from the core package
+> for convenience.
+
+### A. Surface the existing GoPro functions (they live in `packages/gopro/src/gopro.js`)
 
 ```js
 probeGoproMeta(path)                      // → Promise<GoproMeta>   (cheap moov-only probe)

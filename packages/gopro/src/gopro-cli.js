@@ -13,9 +13,9 @@
 //   keyed by size+mtime+rate+version, so a killed run resumes without re-extracting done files.
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { saveGpx } from "gpx-stabilizer";
 import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
 import { cachePath, readCache, writeCache } from "./gopro-cache.js";
-import { saveGpx } from "./gpx.js";
 
 const CACHE_V = 2; // bump when extraction output shape/logic changes (invalidates old caches)
 

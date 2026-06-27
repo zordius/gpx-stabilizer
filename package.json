@@ -1,45 +1,27 @@
 {
-  "name": "gpx-stabilizer",
+  "name": "gpx-stabilizer-monorepo",
   "version": "0.1.0",
-  "description": "Remove noise lines from a GPX recording and emit a smoothed .out.gpx; everything beyond is an optional module.",
-  "keywords": [
-    "gpx",
-    "gps",
-    "ski",
-    "track",
-    "cleanup",
-    "smoothing",
-    "noise-removal"
-  ],
-  "author": "zordius",
+  "description": "Monorepo root for gpx-stabilizer (core) and gpx-from-gopro. Private; not published.",
+  "private": true,
   "type": "module",
-  "bin": {
-    "gpx-stabilize": "src/cli.js",
-    "gpx-from-gopro": "src/gopro-cli.js"
-  },
-  "exports": "./src/index.js",
+  "workspaces": [
+    "packages/*"
+  ],
   "scripts": {
-    "start": "node src/cli.js",
-    "test": "node --test",
+    "test": "npm test --workspaces",
     "lint": "biome check .",
     "format": "biome format --write ."
   },
   "engines": {
     "node": ">=18"
   },
+  "author": "zordius",
   "license": "MIT",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/zordius/gpx-stabilizer.git"
   },
   "devDependencies": {
-    "@biomejs/biome": "^2.5.1",
-    "@resvg/resvg-js": "^2.6.2"
-  },
-  "dependencies": {
-    "egm96-universal": "^1.1.1",
-    "gopro-telemetry": "^1.2.11",
-    "gpmf-extract": "^0.3.3",
-    "tz-lookup": "^6.1.25"
+    "@biomejs/biome": "^2.5.1"
   }
 }

@@ -3,9 +3,9 @@
 // concepts leak here; the consumer maps this to its own model. See
 // docs/export-contract.md.
 
+import { stabilize } from "gpx-stabilizer";
 import tzlookup from "tz-lookup";
 import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
-import { stabilize } from "./stabilize.js";
 
 function isFiniteNum(n) {
   return typeof n === "number" && Number.isFinite(n);
@@ -40,7 +40,7 @@ export function timezoneAt({ lat, lon } = {}) {
 
 /**
  * IANA timezone for a track, from its first good-fix point.
- * @param {import("./gpx.js").TrackPoint[]} points
+ * @param {import("gpx-stabilizer").TrackPoint[]} points
  * @returns {string | null}  null if no good-fix point exists
  */
 export function timezoneOfPoints(points) {
@@ -52,7 +52,7 @@ export function timezoneOfPoints(points) {
  * Recording start instant (UTC) = the UTC ms of the first good-fix sample, the
  * wall-clock anchor a renderer pins the segment to. `fix` reports that sample's
  * fix so the consumer knows the confidence.
- * @param {import("./gpx.js").TrackPoint[]} points
+ * @param {import("gpx-stabilizer").TrackPoint[]} points
  * @returns {{ startUtc: number | null, fix: string | null }}
  */
 export function recordingStartUtc(points) {
@@ -64,7 +64,7 @@ export function recordingStartUtc(points) {
 /**
  * @typedef {object} TelemetryResult
  * @property {import("./gopro.js").GoproMeta} meta   geometry / fps / durationS / hasGps
- * @property {import("./gpx.js").TrackPoint[]} points  raw, or stabilized per opts
+ * @property {import("gpx-stabilizer").TrackPoint[]} points  raw, or stabilized per opts
  * @property {string | null} timezone   = timezoneOfPoints(raw points)
  * @property {number | null} startUtc    = recordingStartUtc(raw points).startUtc
  */
