@@ -225,7 +225,8 @@ for (const [key, g] of groups) {
   // reduce, not Math.min(...): a day-group can hold hundreds of thousands of
   // points and spreading that many args overflows the call stack.
   let startMs = null;
-  for (const p of points) if (p.time != null && (startMs === null || p.time < startMs)) startMs = p.time;
+  for (const p of points)
+    if (p.time != null && (startMs === null || p.time < startMs)) startMs = p.time;
   const track = {
     segments: [points],
     meta: {

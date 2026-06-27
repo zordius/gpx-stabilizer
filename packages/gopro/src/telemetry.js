@@ -158,7 +158,13 @@ export function resolveStartUtc(points) {
 export async function readGoproTelemetry(path, opts = {}) {
   const meta = await probeGoproMeta(path);
   if (!meta.hasGps) {
-    return { meta, points: [], timezone: null, startUtc: null, clock: { startUtc: null, confidence: null, verified: false, slope: null } };
+    return {
+      meta,
+      points: [],
+      timezone: null,
+      startUtc: null,
+      clock: { startUtc: null, confidence: null, verified: false, slope: null },
+    };
   }
   const raw = await extractGoproPoints(path, opts.rate != null ? { rate: opts.rate } : {});
   // tz + anchor are derived from the RAW points: stabilize() reduces a point to

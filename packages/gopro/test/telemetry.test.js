@@ -112,10 +112,7 @@ test("regressStartUtc: null for too few points, too short a span, or missing cts
   const short = [];
   for (let c = 0; c < 6; c++) short.push(pt({ fix: "3d", time: BASE + c, cts: c })); // 5ms span
   assert.equal(regressStartUtc(short), null);
-  assert.equal(
-    regressStartUtc(lineFixes().map((p) => ({ ...p, cts: null }))),
-    null,
-  ); // no cts
+  assert.equal(regressStartUtc(lineFixes().map((p) => ({ ...p, cts: null }))), null); // no cts
 });
 
 test("resolveStartUtc: verified true-start when slope ≈ 1, else first-fix fallback", () => {
