@@ -84,14 +84,26 @@ readGoproTelemetry(path, {
 TelemetryResult = {
   meta,                        // GoproMeta (geometry / fps / durationS / hasGps)
   points,                      // TrackPoint[]  (raw, or stabilized per opts)
-  timezone,                    // = timezoneOfPoints(points)        (string | null)
-  startUtc,                    // = recordingStartUtc(points).startUtc (number | null)
+  timezone,                    // from the RAW points (see note)    (string | null)
+  startUtc,                    // from the RAW points (see note)    (number | null)
 }
 ```
 
 - Bundles `probeGoproMeta` + `extractGoproPoints` [+ `stabilize`] + `timezoneOfPoints`
   + `recordingStartUtc` in one await. Short-circuit on `!meta.hasGps` (return
   `points: []`, `timezone: null`, `startUtc: null`).
+- **`timezone` / `startUtc` are derived from the RAW (pre-stabilize) points**, not
+  from the returned `points`. That's deliberate: `stabilize` reduces each point to
+  `{lat, lon, ele, time}` (below), dropping the `fix` that good-fix selection needs —
+  so computing them post-stabilize would break tz/anchor. The guarantees hold either
+  way.
+- **Stabilize drops per-sample fields.** With a truthy `stabilize`, the returned
+  `points` keep only `{lat, lon, ele, time}` — `fix`, `speed`, and `hdop` are **not**
+  carried through (that's `stabilize`'s output shape; it's a general-purpose core
+  function, intentionally minimal). A consumer that needs per-sample `speed`/`fix`/
+  `hdop` should pass `stabilize: false` and clean downstream, or read them off the raw
+  points. (Decision 2026-06-27: keep `stabilize` minimal rather than widen core; revisit
+  if a consumer genuinely needs cleaned points *with* those fields.)
 
 ---
 
