@@ -1,0 +1,142 @@
+# Export contract — telemetry for renderers (e.g. movie-layers `provider-gopro`)
+
+Goal: give a renderer everything it needs from a GoPro video through a small,
+**render-agnostic** API — telemetry samples, video metadata, the recording's UTC
+anchor, and the timezone. No renderer concepts ("channel" / "frame" / "layer")
+leak in here; the consumer (e.g. movie-layers' `provider-gopro` adapter) maps
+this neutral shape to its own model.
+
+Keep the repo's ethos: ESM, minimal deps, UTC/SI units, points kept raw (the
+consumer decides what to drop).
+
+---
+
+## Types (already exist)
+
+```js
+// src/gpx.js
+TrackPoint = {
+  lat, lon,                 // degrees
+  ele,                      // metres MSL, or null
+  time,                     // epoch ms, UTC (GPS-derived), or null
+  speed,                    // m/s, or null
+  fix,                      // "none" | "2d" | "3d" | null
+  hdop,                     // horizontal DOP, or null
+}
+
+// src/gopro.js
+GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS }
+```
+
+---
+
+## Exports (all from `src/index.js`)
+
+### A. Surface the existing GoPro functions (today they live in `src/gopro.js`, not exported)
+
+```js
+probeGoproMeta(path)                      // → Promise<GoproMeta>   (cheap moov-only probe)
+extractGoproPoints(path, { rate? })       // → Promise<TrackPoint[]> (native ~18 Hz; rate in Hz to downsample)
+stabilize(points, opts?)                  // → TrackPoint[]          (already exported)
+```
+
+- `extractGoproPoints` today takes `{ groupTimes }` (ms). **Rename/accept `rate`
+  (Hz)** in the public contract — map `rate → groupTimes = 1000 / rate`; omit
+  `rate` for native ~18 Hz. (Keep `groupTimes` internally if you like.)
+
+### B. New — timezone (GPS → tz)
+
+```js
+timezoneAt({ lat, lon })       // → IANA string | null   e.g. "Asia/Tokyo"   (raw lookup)
+timezoneOfPoints(points)       // → IANA string | null   (uses the first good-fix point)
+```
+
+- Needs an **offline** lat/lon→IANA lookup. `tz-lookup` (tiny, offline, zero-dep
+  flavour) fits the minimal-deps ethos; `geo-tz` is heavier but boundary-accurate.
+- "good-fix point" = first sample with `fix === "3d"` (fallback `"2d"`) and finite
+  lat/lon. Returns `null` if none.
+- Rationale for "first good fix, not every point": tz is constant within one video
+  (cross-timezone travel is out of scope for v1).
+
+### C. New — recording start anchor (UTC)
+
+```js
+recordingStartUtc(points)      // → { startUtc: number | null, fix: string | null }
+```
+
+- `startUtc` = the **UTC ms of the first good-fix sample** = the recording's start
+  instant (a renderer uses it as the segment wall-clock anchor). `fix` = that
+  sample's fix (so the consumer knows the confidence). `null` if no fixed sample.
+
+### D. New — one-call convenience (what the adapter actually calls)
+
+```js
+readGoproTelemetry(path, {
+  rate?,                       // Hz; omit = native ~18 Hz
+  stabilize?,                  // boolean | StabilizeOptions — clean the points first
+}) // → Promise<TelemetryResult>
+
+TelemetryResult = {
+  meta,                        // GoproMeta (geometry / fps / durationS / hasGps)
+  points,                      // TrackPoint[]  (raw, or stabilized per opts)
+  timezone,                    // = timezoneOfPoints(points)        (string | null)
+  startUtc,                    // = recordingStartUtc(points).startUtc (number | null)
+}
+```
+
+- Bundles `probeGoproMeta` + `extractGoproPoints` [+ `stabilize`] + `timezoneOfPoints`
+  + `recordingStartUtc` in one await. Short-circuit on `!meta.hasGps` (return
+  `points: []`, `timezone: null`, `startUtc: null`).
+
+---
+
+## Semantics / units (contract guarantees)
+
+- **time** epoch ms UTC (GPS), **speed** m/s, **ele** metres MSL, **lat/lon** degrees.
+- A **no-fix prefix** (pre-lock samples) is **kept** in `points` (current behaviour);
+  the consumer decides to drop or dim them — it reads `fix`/`hdop` for that.
+- `points` are in **capture order**, ascending `time` (modulo the kept pre-lock head).
+- All "missing" values are `null`, never `undefined`/`NaN`.
+
+## Out of scope (the renderer's job, NOT this lib)
+
+- Mapping to renderer channels, **gradient** (derive from `ele` + distance),
+  interpolation, unit conversion (e.g. m/s → km/h), drawing.
+
+## Flag for the implementer (known gaps)
+
+- **GPS9 (Hero11+) fix/hdop** are now filled from `value[7..8]` = `[DOP, fix]`
+  (`extractGoproPoints`), so fix-based logic works on Hero11+. **Open gap [TBC]:**
+  the `hdop` scale is unverified — GPS5's sticky `precision` is DOP×100 (divided
+  by 100), but GPS9's `value[7]` is read as-is on the assumption it's already in
+  DOP units. No Hero11+ sample on hand to confirm; if `hdop` comes out ×100 too
+  large on real Hero11+ footage, divide `value[7]` by 100 in `extractGoproPoints`.
+  `fix` (`value[8]`) is unaffected.
+- **Only the GPS stream** is extracted; accel/gyro/etc. (the >1 Hz non-GPS data)
+  are **not** in this contract's v1.
+- `probeGoproMeta` (mp4box) overlaps a renderer's own video probe (movie-layers
+  uses ffprobe). Both are fine; the renderer picks one. Expose it anyway — useful
+  standalone and as the `hasGps` gate.
+
+---
+
+## How movie-layers consumes it (informative, not part of this lib)
+
+`provider-gopro` (movie-layers side) will roughly do:
+
+```js
+const { meta, points, timezone, startUtc } = await readGoproTelemetry(path, { rate, stabilize: true })
+return {
+  channels: {
+    gps:      { unit: 'deg',  samples: points.map(p => ({ t: tRel(p), value: { lat: p.lat, lon: p.lon } })) },
+    altitude: { unit: 'm',    samples: points.map(p => ({ t: tRel(p), value: p.ele })) },
+    speed:    { unit: 'km/h', samples: points.map(p => ({ t: tRel(p), value: p.speed == null ? null : p.speed * 3.6 })) },
+    // gradient is DERIVED by the adapter from altitude + distance — not from this lib
+  },
+  clock:    { startUtc, confidence: 'gps' },   // ← recordingStartUtc
+  timezone,                                    // ← timezoneOfPoints
+}
+```
+
+So this lib only needs to deliver **points + meta + timezone + startUtc**; everything
+above the dashed line is the adapter's.

@@ -105,16 +105,19 @@ export async function probeGoproMeta(path) {
 /**
  * Extract GPS samples from a GoPro MP4 as package TrackPoints, in capture order.
  * @param {string} path
- * @param {{ groupTimes?: number }} [opts] groupTimes=1000 -> ~1 Hz; omit for native ~18 Hz
+ * @param {{ rate?: number, groupTimes?: number }} [opts] rate in Hz (public knob;
+ *   omit for native ~18 Hz). `groupTimes` (ms) is the internal equivalent kept for
+ *   existing callers; `rate` wins when both are given (groupTimes = 1000 / rate).
  * @returns {Promise<import("./gpx.js").TrackPoint[]>}
  */
 export async function extractGoproPoints(path, opts = {}) {
+  const groupTimes = opts.rate ? Math.round(1000 / opts.rate) : opts.groupTimes;
   const extracted = await gpmfExtract(fileFeeder(path));
   const telemetry = await goproTelemetry(extracted, {
     stream: ["GPS"], // auto-selects GPS5 (Hero5-10) or GPS9 (Hero11+)
     timeIn: "GPS", // derive sample time from GPS UTC, not the camera clock
     timeOut: "date", // we only need the per-sample date
-    ...(opts.groupTimes ? { groupTimes: opts.groupTimes } : {}),
+    ...(groupTimes ? { groupTimes } : {}),
   });
 
   const points = [];
@@ -124,8 +127,9 @@ export async function extractGoproPoints(path, opts = {}) {
       if (!key.startsWith("GPS")) continue;
       // GPS5 reports fix/precision once per ~1 Hz payload as sticky values; sticky
       // semantics are "applies to all successive samples", so carry them forward
-      // onto every (18 Hz) point. precision is DOP x100. (GPS9 puts them in
-      // value[7..8] instead — left as carried-null here until tested.)
+      // onto every (18 Hz) point. precision is DOP x100. GPS9 (Hero11+) instead
+      // carries them per-sample in value[7..8] = [DOP, fix] — read those directly.
+      const isGps9 = key === "GPS9";
       let fix = null;
       let hdop = null;
       for (const s of stream.samples ?? []) {
@@ -134,9 +138,17 @@ export async function extractGoproPoints(path, opts = {}) {
         // GPS5 and GPS9 share value[0..3] = [lat, lon, altitude, 2D speed]
         const [lat, lon, ele, speed] = v;
         const time = s.date != null ? new Date(s.date).getTime() : Number.NaN;
-        const sticky = s.sticky ?? {};
-        if (sticky.fix != null) fix = gpsFix(sticky.fix);
-        if (typeof sticky.precision === "number") hdop = sticky.precision / 100;
+        if (isGps9) {
+          // value = [lat, lon, alt, 2Dspeed, 3Dspeed, days, secs, DOP, fix]
+          fix = gpsFix(v[8]);
+          // GPS9 DOP is already in DOP units (not x100 like GPS5's sticky.precision).
+          // [TBC] exact scale unverified — no Hero11+ sample on hand to confirm.
+          hdop = typeof v[7] === "number" ? v[7] : null;
+        } else {
+          const sticky = s.sticky ?? {};
+          if (sticky.fix != null) fix = gpsFix(sticky.fix);
+          if (typeof sticky.precision === "number") hdop = sticky.precision / 100;
+        }
         points.push({
           lat,
           lon,
