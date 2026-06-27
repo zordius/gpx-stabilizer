@@ -91,7 +91,9 @@ export function profile(m, opts = {}) {
   const { straight, steady } = localShape(x, y, hs, g); //       block 4
   const { maDist, cu } = jitter(x, y, el, g); //                 block 5
   const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 6
-  const carve = carveDensity(x, y, planarStep, g); //            block 7
+  // carve (S-arc density) is a SKI-specific signal — no core module consumes it. Gate it on g.CARVE
+  // (off by default → zeros) so the general core skips the work; ski mode turns it on. Block 7.
+  const carve = g.CARVE ? carveDensity(x, y, planarStep, g) : new Array(x.length).fill(0);
   return { hs, vs, straight, steady, maDist, cu, netsp, netd150, wander, paused, carve, g };
 }
 
