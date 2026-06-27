@@ -33,83 +33,55 @@ gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cach
 
 ## Open
 
-### 0. The OLD ~/bin/gopro-gpx.js stress-test — DEAD, produced no GPX  (closed 2026-06-27)
+### 1. Validate the NEW gpx-from-gopro on full real data  — DONE (2026-06-28), 2 bugs found + fixed
 
-The previous tool `~/bin/gopro-gpx.js` (exiftool-based, the version *before* this
-repo's rewrite) was launched on `/Volumes/ZS14T2025/p/20260211-ski` as a real-data
-stress test ("跑個挑戰一點的實測看有沒問題") and ran detached. **It died before
-completion and wrote no GPX.** Not being rerun — the new `gpx-from-gopro` (item 1)
-replaces it.
+End-to-end validated on the real 3-day ski footage (`/Volumes/ZS14T2025/p/20260211-ski`,
+124 files, GOPR=Hero5 `j/` + GX=Hero10 `z/`). The first full run (detached, 7 h)
+**extracted all 124 files but crashed at the final write step with 0 output** — which
+surfaced two real bugs, both now fixed in `packages/gopro/src/gopro-cli.js`:
 
-- **Death point**: killed mid-extraction of `z/140/GX025140.MP4` — the 118th file
-  in sorted (`walk(dir).sort()`, full-path alphabetical) order, immediately after
-  `z/140/GX015140.MP4` (the last *complete* block in the log). **117 of 120 files
-  fully extracted** (j/GOPR 66 = 13+36+17; z/GX 51 = 18+17+16). 3 left:
-  `GX025140.MP4` (died here) + the two z-root stitched files `z/GX015130.MP4`,
-  `z/GX015136.MP4`.
-- **Cause**: log ends cleanly with **no JS exception** → external **SIGKILL**, not
-  a code crash. The old js writes all GPX only AFTER the full extraction loop
-  (`~/bin/gopro-gpx.js:265-270`, `${key}.gpx` per group to cwd), so dying 3 files
-  short = **0 output**. Confirmed: no `*.gpx` in `~/zordius-ai/` (its cwd; the
-  `gpx/workout-*.gpx` there are unrelated Apple-Watch exports). The "no controlling
-  TTY → survives Claude exit" hope did NOT hold: it was force-killed when the Claude
-  session was torn down (it was inside the harness task tree). Lesson → item 1 runs
-  truly detached (own session via `setsid`).
-- **Log** (durable): `~/zordius-ai/scratch/run2026.err` (1176 lines; `.out` empty).
+- **Stack overflow on large groups** — `Math.min(...realTimes)` (and
+  `points.push(...points)`) spread hundreds of thousands of args → `Maximum call
+  stack size exceeded`. The biggest group, `20260212-GOPR`, is 433 k points. Fixed:
+  reduce-loop for the min, loop-push for accumulation (no array spread into a call).
+- **GPS cold-start pollution** — a cold-starting GPS emits null-island `(0,0)` points
+  with a stale 2021 clock; they sort to the front of a day file (polluting the track)
+  and a file that never locks formed bogus stray-date groups (`20210307-GX`,
+  `20210310-GX`). Fixed: filter `(0,0)` points at write time and skip groups left
+  empty. Cleared ~30 k junk points across the 6 outputs and removed the 2 stray files.
 
-### 1. Validate the NEW gpx-from-gopro on full real data  — RUNNING detached (2026-06-27)
+**Validated** (rerun via the on-drive sidecar caches, `processed=120 skipped=4 failed=0`):
+stitched skips (4× `no GPS track, skip` via moov probe) · grouping (6 files = GOPR+GX ×
+2026-02-11/12/13) · fields (`ele` MSL, `time`, `speed`, `fix`, `hdop`) · `xmllint`
+clean on all 6 · `(0,0)` residual = 0 · first trkpt now a real fix (`37.54,140.15`).
 
-A full validation run is **in progress, launched fully detached** (own session,
-PPID = launchd, no controlling TTY) so it survives this/any Claude session teardown
-— it is NOT in the harness task tree (unlike item 0, which that killed).
+Re-run command (current `packages/` path; caches make it ~minutes, not 7 h):
+```sh
+node ~/zrepos/gpx-stabilizer/packages/gopro/src/gopro-cli.js \
+  /Volumes/ZS14T2025/p/20260211-ski --out ~/gpx-validate/out
+```
 
-- **Purpose**: end-to-end validation of `gpx-from-gopro` on the real 3-day ski
-  footage — confirm cheap stitched-file skips, correct (camera, local-date)
-  grouping, and full trkpt fields — to confirm it can replace `~/bin/gopro-gpx.js`.
-- **Arguments**: input dir `/Volumes/ZS14T2025/p/20260211-ski`; `--out
-  ~/gpx-validate/out`; no `--cache-dir` → per-file sidecar caches
-  `<file>.gpxcache.json` written on the drive next to each source, so a killed run
-  resumes cheaply (the restart hit them — files logged `(cached)`).
-- **Plain command** (foreground equivalent; paths absolute, run from anywhere):
-  ```sh
-  node ~/zrepos/gpx-stabilizer/src/gopro-cli.js \
-    /Volumes/ZS14T2025/p/20260211-ski --out ~/gpx-validate/out
-  ```
-- **How it was launched detached** (macOS has no `setsid`; python fork+setsid):
-  ```sh
-  python3 -c 'import os
-  if os.fork() > 0: os._exit(0)
-  os.setsid()
-  fo = os.open("/Users/zordius/gpx-validate/run.log", os.O_WRONLY|os.O_CREAT|os.O_TRUNC, 0o644)
-  os.dup2(os.open("/dev/null", os.O_RDONLY), 0); os.dup2(fo, 1); os.dup2(fo, 2)
-  os.execvp("node", ["node", "/Users/zordius/zrepos/gpx-stabilizer/src/gopro-cli.js", "/Volumes/ZS14T2025/p/20260211-ski", "--out", "/Users/zordius/gpx-validate/out"])'
-  ```
-- **Log** (durable): `~/gpx-validate/run.log`.
-- **Output GPX** (durable): `~/gpx-validate/out/` — one `<YYYYMMDD>-<family>.gpx`
-  per (camera, local date), written only at the very end of the run.
-- **Monitor**: alive? `pgrep -fl gopro-cli.js` (PPID 1 = detached) · progress:
-  `tail -f ~/gpx-validate/run.log` · output appears at completion:
-  `ls ~/gpx-validate/out/`.
+**Caveats / left open**:
+- **Caches predate the monorepo refactor** (`CACHE_V` still `2`). The rerun validated
+  the write/group/skip/field paths on real extracted points, but the *post-refactor*
+  extraction code (cts / recording-start commits) was **not** re-verified — that needs
+  a `--no-cache` (or `CACHE_V` bump) full re-extraction (~7 h). Decide if worth it.
+- **Drive is a flaky SMB mount** (`//pi@192.168.199.239/usbhdd`): `found N` drifted
+  124/114/54 across runs and one file once probed as `EISDIR`. Not a tool bug; just
+  expect intermittent partial walks on that network drive.
+- `j/133` dangling-symlink dirs still log `skip dir … ENOENT` intermittently.
 
-**Validation checklist** (run once `~/gpx-validate/out/` is populated):
-- **Stitched products skipped cheaply** — files with no GPMF track should log
-  `no GPS track, skip` via the moov probe (not a slow full extraction).
-- **Grouping** — one `<YYYYMMDD>-GOPR.gpx` per day for `j` (Hero5), one
-  `<YYYYMMDD>-GX.gpx` per day for `z` (Hero10); trip spans 2026-02-11/12/13.
-- **Fields present** — trkpts carry `ele` (MSL), `time`, `speed`, `fix`, `hdop`;
-  validate each file with `xmllint --noout ~/gpx-validate/out/<file>.gpx`.
-- **File-count sanity** — this run reported `found 124 video file(s)`; an earlier
-  killed attempt reported `114`. Reconcile the diff (likely the dangling-symlink
-  dirs under `j/133` that the walk logs as `skip dir … ENOENT` and that may
-  intermittently resolve).
-
-### 2. Probe unit tests  (deferred — needs a decision)
+### 2. Probe unit tests  (decided 2026-06-27 — no fixture, covered by end-to-end)
 
 `probeGoproMeta` has no unit test because testing it needs a real mp4 (binary
 fixture), which breaks this repo's all-inline-string test convention. The cache
-logic IS tested (`test/gopro-cache.test.js`, fixture-free). Decide: commit a tiny
-(~8.5 KB) no-GPS mp4 fixture to cover the probe's skip path + dims, or leave the
-probe to the empirical end-to-end validation.
+logic IS tested (`test/gopro-cache.test.js`, fixture-free).
+
+**Decision**: leave the probe to the empirical end-to-end validation (item 1) —
+do **not** commit a binary mp4 fixture, keeping the all-inline-string convention.
+The probe's key behaviours (no-GPS stitched-file skip path + width/height/dims)
+are exercised by the real 3-day footage run; if probe logic changes later and
+needs regression cover, revisit then.
 
 ## Ideas parked (not started)
 
