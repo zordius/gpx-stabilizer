@@ -115,13 +115,24 @@ export async function probeGoproMeta(path) {
  */
 export async function extractGoproPoints(path, opts = {}) {
   const groupTimes = opts.rate ? Math.round(1000 / opts.rate) : opts.groupTimes;
+  const cfg = { stream: ["GPS"], ...(groupTimes ? { groupTimes } : {}) }; // auto GPS5/GPS9
   const extracted = await gpmfExtract(fileFeeder(path));
-  const telemetry = await goproTelemetry(extracted, {
-    stream: ["GPS"], // auto-selects GPS5 (Hero5-10) or GPS9 (Hero11+)
-    timeIn: "GPS", // derive sample time from GPS UTC, not the camera clock
-    timeOut: "date", // we only need the per-sample date
-    ...(groupTimes ? { groupTimes } : {}),
-  });
+  // Two interpretations of the SAME extraction. timeOut:'date' yields the GPS UTC
+  // per sample but strips cts; timeIn:'MP4'/timeOut:'cts' yields the media offset
+  // (ms within the video, cts 0 = first frame) but no date. We need both — UTC for
+  // `time`, media cts as the x-axis the start regression extrapolates to 0 — so we
+  // interpret twice and zip by index (same stream + groupTimes ⇒ same sample
+  // order/count; a length guard drops cts if that ever fails to hold).
+  const telemetry = await goproTelemetry(extracted, { ...cfg, timeIn: "GPS", timeOut: "date" });
+  const mediaTel = await goproTelemetry(extracted, { ...cfg, timeIn: "MP4", timeOut: "cts" });
+
+  const mediaCts = [];
+  for (const device of Object.values(mediaTel ?? {})) {
+    for (const [key, stream] of Object.entries(device?.streams ?? {})) {
+      if (!key.startsWith("GPS")) continue;
+      for (const s of stream.samples ?? []) mediaCts.push(typeof s.cts === "number" ? s.cts : null);
+    }
+  }
 
   const points = [];
   for (const device of Object.values(telemetry ?? {})) {
@@ -141,9 +152,6 @@ export async function extractGoproPoints(path, opts = {}) {
         // GPS5 and GPS9 share value[0..3] = [lat, lon, altitude, 2D speed]
         const [lat, lon, ele, speed] = v;
         const time = s.date != null ? new Date(s.date).getTime() : Number.NaN;
-        // cts = composite time stamp = media offset (ms) of this sample within the
-        // stream; gopro-telemetry carries it natively alongside the GPS `date`.
-        const cts = typeof s.cts === "number" ? s.cts : null;
         if (isGps9) {
           // value = [lat, lon, alt, 2Dspeed, 3Dspeed, days, secs, DOP, fix]
           fix = gpsFix(v[8]);
@@ -163,10 +171,14 @@ export async function extractGoproPoints(path, opts = {}) {
           speed: speed == null ? null : speed,
           fix,
           hdop,
-          cts,
+          cts: null, // filled by the media-cts zip below
         });
       }
     }
+  }
+  // zip media cts onto the points by index; only when the two passes agree in count
+  if (mediaCts.length === points.length) {
+    for (let i = 0; i < points.length; i++) points[i].cts = mediaCts[i];
   }
   return points;
 }
