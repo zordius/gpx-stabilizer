@@ -70,6 +70,7 @@ export const compute = (ctx) => {
   const GAP = g.DESPIKE_GAP ?? 3; // max vertices an out-and-back may span
   const KS = g.DESPIKE_KS ?? 3.5; // speed log-baseline MAD factor (aggressive)
   const W = g.DESPIKE_W ?? 30; // speed baseline half-window
+  const JUT = g.DESPIKE_JUT ?? 3; // m: absolute influence gate — only drop a jump that would pull the line this far off
   const drop = new Array(n).fill(null);
   if (n < 3) return { drop };
   // each detector tags its own key on the point's drop context (rev/lone/speed may co-occur), so the
@@ -123,8 +124,19 @@ export const compute = (ctx) => {
     logSeg[k] = Math.log(Math.max(0.1, Math.hypot(x[k + 1] - x[k], y[k + 1] - y[k])));
   const sf = robustOutliers(logSeg, KS, W);
   const isOut = (s) => s >= 0 && s < n - 1 && sf[s];
-  for (let k = 1; k < n - 1; k++)
-    if (sf[k - 1] && sf[k] && !isOut(k - 2) && !isOut(k + 1)) flag(k, "speed", true);
+  for (let k = 1; k < n - 1; k++) {
+    if (!(sf[k - 1] && sf[k] && !isOut(k - 2) && !isOut(k + 1))) continue;
+    // absolute influence gate: only drop if keeping the point would pull the line > JUT m off the
+    // chord through its neighbours (small juts are absorbed by reconstruction — not worth dropping).
+    const dx = x[k + 1] - x[k - 1];
+    const dy = y[k + 1] - y[k - 1];
+    const L = Math.hypot(dx, dy);
+    const jut =
+      L < 1e-6
+        ? Math.hypot(x[k] - x[k - 1], y[k] - y[k - 1])
+        : Math.abs((x[k] - x[k - 1]) * dy - (y[k] - y[k - 1]) * dx) / L;
+    if (jut > JUT) flag(k, "speed", true);
+  }
 
   return { drop };
 };
