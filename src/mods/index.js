@@ -14,6 +14,7 @@ import { basename, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import * as activity from "./activity.js";
 import * as dequantizeTime from "./dequantizeTime.js";
+import * as despike from "./despike.js";
 import * as drift from "./drift.js";
 import * as kink from "./kink.js";
 import * as noTime from "./noTime.js";
@@ -53,6 +54,7 @@ export const builtins = [
   validateModule("activity", activity),
   validateModule("drift", drift),
   validateModule("kink", kink),
+  validateModule("despike", despike),
 ];
 
 /**

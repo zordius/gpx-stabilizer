@@ -49,7 +49,81 @@ export function analyze(points, opts = {}) {
   const modData = {};
   for (const mod of all.filter((mm) => mm.compute)) modData[mod.name] = mod.compute(ctx);
 
-  return assemble(pts, bags, valid, ctx, modData);
+  const result = assemble(pts, bags, valid, ctx, modData);
+  if (!disable.includes("badspan")) glueBadSpans(result, ctx.g ?? {});
+  return result;
+}
+
+/** Drop reasons that are deliberate policy/structure, NOT quality problems — excluded from the
+ * bad-span density (e.g. oversample is downsampling; it would mark dense-but-good regions as bad). */
+const POLICY_DROPS = new Set(["oversample", "noTime", "badspan"]);
+
+/** True if the point carries a QUALITY drop (any reason that signals a bad measurement). */
+function isQualityDropped(p) {
+  if (!p.dropReason) return false;
+  for (const key in p.dropReason) if (!POLICY_DROPS.has(key)) return true;
+  return false;
+}
+
+/**
+ * Pipeline-level DECISION pass (separate from detection): the per-module quality drops above are the
+ * detectors; here we glue. A point sits in a BAD (garbage) span when the quality-drop density in its
+ * ±BADSPAN_DENS-second neighbourhood is high (≥BADSPAN_FRAC of the window AND ≥BADSPAN_MIN flags) —
+ * the eye reads such a stretch as one blob of noise. Every point inside a bad span (incl. ones no
+ * module flagged) gets the `badspan` drop, merging spans ≤BADSPAN_GLUE seconds apart. Isolated flags
+ * are left to their own module's drop. Operates over the timed points (null-time points are already
+ * label-dropped). Tunable via g.BADSPAN_*.
+ * @param {object[]} points  the assembled track (mutated in place)
+ * @param {Record<string, number>} g  resolved params
+ */
+export function glueBadSpans(points, g) {
+  const DENS = (g.BADSPAN_DENS ?? 5) * 1000; // ± window (ms)
+  const FRAC = g.BADSPAN_FRAC ?? 0.3; // flagged fraction of the window that marks a bad span
+  const MIN = g.BADSPAN_MIN ?? 2; // and at least this many flags (a region, not a lone point)
+  const GLUE = (g.BADSPAN_GLUE ?? 5) * 1000; // merge bad spans separated by ≤ this (ms)
+
+  const timed = [];
+  for (let i = 0; i < points.length; i++) if (points[i].time != null) timed.push(i);
+  const m = timed.length;
+  if (m === 0) return points;
+  const time = timed.map((i) => points[i].time);
+  const flag = timed.map((i) => isQualityDropped(points[i]));
+
+  // sliding-window flag density (two pointers over the timed points)
+  const bad = new Array(m).fill(false);
+  let lo = 0;
+  let hi = 0;
+  let cnt = 0;
+  for (let k = 0; k < m; k++) {
+    while (lo < m && time[k] - time[lo] > DENS) {
+      if (flag[lo]) cnt--;
+      lo++;
+    }
+    while (hi < m && time[hi] - time[k] <= DENS) {
+      if (flag[hi]) cnt++;
+      hi++;
+    }
+    if (cnt >= MIN && cnt / (hi - lo) >= FRAC) bad[k] = true;
+  }
+  // glue: drop every (not-already-quality-dropped) point inside a bad span, merging near spans
+  let k = 0;
+  while (k < m) {
+    if (!bad[k]) {
+      k++;
+      continue;
+    }
+    let j = k;
+    let last = k;
+    while (j < m) {
+      if (bad[j]) last = j;
+      else if (time[j] - time[last] > GLUE) break;
+      j++;
+    }
+    for (let p = k; p <= last; p++)
+      if (!flag[p]) addDrop(points[timed[p]], "badspan", { dens: true });
+    k = last + 1;
+  }
+  return points;
 }
 
 /**
