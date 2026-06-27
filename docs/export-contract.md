@@ -117,6 +117,13 @@ TelemetryResult = {
   DOP units. No Hero11+ sample on hand to confirm; if `hdop` comes out ×100 too
   large on real Hero11+ footage, divide `value[7]` by 100 in `extractGoproPoints`.
   `fix` (`value[8]`) is unaffected.
+  - **Verification status (2026-06-27): NOT VERIFIED — no hardware/footage.**
+    `readGoproTelemetry` was integration-tested against two real GoPro clips, but
+    both are **GPS5** (HERO10 Black + an older camera), so the GPS5 path is
+    confirmed (correct coords / `Asia/Tokyo` / `hdop` scale) while the **GPS9 path
+    was never exercised**. Closing this needs a Hero11+ (or later, GPS9) `.mp4`/
+    `.360` sample — none available at time of writing. Re-run the integration test
+    against such a file to confirm `fix`/`hdop` before relying on GPS9.
 - **Only the GPS stream** is extracted; accel/gyro/etc. (the >1 Hz non-GPS data)
   are **not** in this contract's v1.
 - `probeGoproMeta` (mp4box) overlaps a renderer's own video probe (movie-layers
