@@ -42,6 +42,51 @@ function fileFeeder(path) {
   };
 }
 
+// GoPro firmware prefix → camera model. HD5 / H21 verified against real files; the rest follow
+// GoPro's documented firmware scheme (HD6–HD9 = HERO6–9, H22–H24 = HERO11–13).
+const GOPRO_MODEL = {
+  HD5: "HERO5",
+  HD6: "HERO6",
+  HD7: "HERO7",
+  HD8: "HERO8",
+  HD9: "HERO9",
+  H21: "HERO10",
+  H22: "HERO11",
+  H23: "HERO12",
+  H24: "HERO13",
+};
+
+/**
+ * Camera model from a GoPro `FIRM` firmware string (e.g. "HD5.02.02.60.00" → "HERO5").
+ * @param {string | null} firmware
+ * @returns {string | null}  null for missing/unknown firmware
+ */
+export function goproModel(firmware) {
+  return firmware ? (GOPRO_MODEL[firmware.slice(0, 3)] ?? null) : null;
+}
+
+/**
+ * Read a GoPro `udta` atom's string from a moov-region buffer. GoPro stores camera info as
+ * custom atoms `[4-byte BE size][4CC][ASCII data]` inside `udta` (FIRM=firmware, CAME=serial,
+ * LENS, …) — non-standard boxes mp4box doesn't decode, so read them straight from the bytes.
+ * @param {Buffer} buf     bytes covering the moov (including udta)
+ * @param {string} fourcc  e.g. "FIRM"
+ * @returns {string | null}
+ */
+export function readUdtaAtom(buf, fourcc) {
+  const i = buf.indexOf(fourcc, 0, "latin1");
+  if (i < 4) return null;
+  const size = buf.readUInt32BE(i - 4); // the 4 bytes before the 4CC are the atom's byte size
+  if (size < 8 || i - 4 + size > buf.length) return null;
+  return (
+    buf
+      .subarray(i + 4, i - 4 + size)
+      .toString("latin1")
+      .replace(/\0+$/, "")
+      .trim() || null
+  );
+}
+
 /**
  * @typedef {object} GoproMeta
  * @property {boolean} hasGps      whether a GPMF 'gpmd' track with samples is present
@@ -51,6 +96,8 @@ function fileFeeder(path) {
  * @property {string | null} codec  video codec (e.g. "avc1.64002a")
  * @property {number | null} fps    video frame rate
  * @property {number | null} durationS video duration in seconds
+ * @property {string | null} firmware  GoPro firmware string (e.g. "HD5.02.02.60.00"), or null
+ * @property {string | null} model     camera model from the firmware (e.g. "HERO5"), or null
  */
 
 /**
@@ -76,10 +123,12 @@ export async function probeGoproMeta(path) {
       error = e;
     };
     const buf = Buffer.allocUnsafe(PROBE_CHUNK);
+    const moovChunks = []; // keep the moov-region bytes mp4box reads, to find GoPro's udta/FIRM
     let pos = 0;
     while (pos < size && info === null && error === null) {
       const { bytesRead } = await fh.read(buf, 0, PROBE_CHUNK, pos);
       if (bytesRead === 0) break;
+      moovChunks.push(Buffer.from(buf.subarray(0, bytesRead))); // copy: buf is reused next loop
       const ab = buf.buffer.slice(buf.byteOffset, buf.byteOffset + bytesRead);
       ab.fileStart = pos; // absolute offset; mp4box uses it to place the block
       const next = file.appendBuffer(ab);
@@ -91,6 +140,8 @@ export async function probeGoproMeta(path) {
     const gpmd = tracks.find((t) => t.codec === "gpmd");
     const video = tracks.find((t) => t.type === "video") ?? tracks.find((t) => t.video);
     const durationS = info?.duration && info?.timescale ? info.duration / info.timescale : null;
+    // FIRM is a custom atom deep in moov's udta — read it from the (contiguous) moov bytes above
+    const firmware = readUdtaAtom(Buffer.concat(moovChunks), "FIRM");
     return {
       hasGps: gpmd != null && gpmd.nb_samples > 0,
       gpmdSamples: gpmd?.nb_samples ?? 0,
@@ -99,6 +150,8 @@ export async function probeGoproMeta(path) {
       codec: video?.codec ?? null,
       fps: video && durationS ? video.nb_samples / durationS : null,
       durationS,
+      firmware,
+      model: goproModel(firmware),
     };
   } finally {
     await fh.close();
