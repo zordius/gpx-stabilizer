@@ -79,11 +79,18 @@ with zero re-IO (today's cache stores only the GPS points).
 | 4 | **GRAV+GYRO → carve lean** | ski `carve` signal | GRAV, GYRO | Hero10 | ★★ | roll (from GRAV) + yaw synchronized through a carve | UNVERIFIED |
 | 5 | **SCEN(indoor)+low-speed+FACE → rest/queue** | temporal activity segmentation (roadmap) | SCEN, FACE, GPS speed | Hero10 | ★★ | indoor/face episodes ↔ stationary runs (the base-area hdop clusters) | UNVERIFIED |
 | 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | IMU motion energy ≈ 0 ⇒ really stopped (vs GPS drift while moving) | UNVERIFIED |
-| 7 | exposure (ISO+SHUT+YAVG) → lighting context | scene aux (minor) | ISO, SHUT, YAVG | both² | ★ | — | PARKED |
+| 7 | **exposure (SHUT×ISO) → obstruction / indoor (PORTABLE)** | obstruction detection — the one proxy that works on *both* chips | SHUT, ISO (+`YAVG` on Hero10) | both² | ★★ | per-clip-relative `SHUT×ISO` (or `YAVG`) vs `SCEN` indoor/vegetation prob + GOPR hdop≥3 clusters (ground truth) + known indoor episodes³ | UNVERIFIED |
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
 
 ¹ On Hero5 (no `GRAV`/`CORI`) gravity & orientation must be self-estimated from raw `ACCL`/`GYRO`.
-² `YAVG` is Hero10-only; `ISO`/`SHUT` on both.
+² `YAVG` (measured luma) is Hero10-only; `SHUT`/`ISO` on both → the proxy itself is portable.
+³ Use the **exposure product** `SHUT×ISO`, not `SHUT` alone (GoPro has no iris, so it trades shutter
+  against gain). **Confounds**: snow is bright enough to compress the range under light tree cover;
+  auto-exposure saturates in full sun (shutter floored); time-of-day / weather shift the baseline —
+  so normalise per-clip and read it as **coarse open-vs-covered / indoor**, not a fine sky fraction.
+  Physical basis: trees & terrain block light *and* satellites together, so "darker ⇒ more obstructed"
+  has real causation. **Indoor is the strong signal** (order-of-magnitude drop); light tree cover is
+  the subtle, confounded end.
 
 ## 5. Strategy
 
@@ -92,13 +99,18 @@ with zero re-IO (today's cache stores only the GPS points).
 - **Hero10-only = image/orientation** (`SCEN`/`GRAV`/`FACE`…) — can't be the general solution,
   but they plug *exactly* GX's GPS weakness: `SCEN` gives a device-independent obstruction signal
   where GX's hdop has no usable knee (see `hdop-notes.md` §4–5).
-- **Recurring theme**: which signal to trust stays **device-dependent** — Hero5 reads obstruction
-  off its clean hdop knee; Hero10 reads it off `SCEN`. The pipeline must pick per source.
+- **Obstruction has three candidate signals, and only one is portable**: Hero5 → clean **hdop knee**;
+  Hero10 → **`SCEN`**; and **exposure (`SHUT×ISO`) on both** (#7). The portable exposure proxy is the
+  most interesting bet precisely because it sidesteps the device-dependence — if it holds up it could
+  be *the* cross-model obstruction signal, with hdop/SCEN as per-device corroboration.
+- **Recurring theme**: which signal to trust otherwise stays **device-dependent** (see
+  `hdop-notes.md` §4–5). The pipeline must pick per source.
 
 ## 6. Validation order
 
 1. **GYRO → carve/spike** (#1) — portable, cleanest signal, hits the central ski problem.
-2. **SCEN → obstruction** (#3) — novel, fills the GX gap hdop can't.
+2. **Obstruction trio** (#3 + #7) — test `SCEN` and exposure `SHUT×ISO` together against the GOPR
+   hdop≥3 ground truth; the portable exposure proxy (#7) is the prize if it holds.
 3. **ACCL → teleport-kill** (#2) — strong, but needs body→world frame fusion.
 4. **rest/queue segmentation** (#5).
 
