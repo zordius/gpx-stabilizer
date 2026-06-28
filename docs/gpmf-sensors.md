@@ -92,21 +92,37 @@ GPS-only CLI run also populates the rich cache at ~0 extra IO.
 - **Time alignment**: IMU/image streams ride media `cts`; GPS has UTC. Align on `cts` (already
   extracted for the start-regression) — payload-precise (§1).
 
+### Camera-facing ≠ travel direction — a cross-cutting caveat
+
+The camera's **orientation is not the travel direction** — except on a *rigid vehicle mount*. On a
+body/helmet mount the rider looks around and the torso turns independently of where the GPS says they
+are going (a ski carve turns the skis while the camera stays facing downhill). So **any design that
+relates a body-frame sensor to the GPS course must not assume camera-heading = travel**:
+
+- `GYRO` yaw ≠ travel-turning → #1 uses centripetal `ACCL`, **not** yaw.
+- `ACCL`/`GYRO` body axes ≠ world N/E/up → isolating "lateral"/"vertical" needs a gravity/orientation
+  step (`GRAV`, or a GYRO+ACCL AHRS on Hero5), not a fixed axis.
+- The mismatch is itself a **signal** — its *degree* is the mount type (#10 below).
+
+Treat "is camera-heading usable as course?" as a per-clip question (answered by #10), never an
+assumption. Expect this caveat to recur across the multi-sensor designs.
+
 ## 4. Use-case catalog (validate one by one)
 
 `★` = leverage (expected payoff × tractability). Status starts UNVERIFIED.
 
 | # | use | target open problem | streams | device | ★ | how to validate | status |
 |---|---|---|---|---|---|---|---|
-| 1 | **GYRO → carve vs spike** | `despike` / ski "real carve or noise?" | GYRO | both | ★★★ | yaw-rate vs GPS heading-change at `despike`-flagged points; real turn ⇒ gyro yaw, spike ⇒ none | UNVERIFIED |
+| 1 | **ACCL centripetal → carve vs spike** | `despike` / ski "real carve or noise?" | ACCL (+`GRAV`/orientation) | both | ★★★ | at a `despike`-flagged turn a real carve has sustained lateral **centripetal** accel (`v²/r`), a spike has none. Coarse/portable = `ACCL` magnitude above g; carve-specific = the horizontal-projected linear accel (down-axis from `GRAV`, or GYRO+ACCL AHRS on Hero5). **Not gyro yaw** — a carve needn't rotate the camera (angulation keeps it facing downhill) | UNVERIFIED |
 | 2 | **ACCL → kill teleport false-claims** | `stray` / `outlier` | ACCL (+GRAV+CORI) | both¹ | ★★★ | a GPS jump with ~zero body linear accel = confirmed garbage | **CONFIRM ✓**⁵ |
 | 3 | **SCEN → obstruction (device-independent)** | obstruction detection — hdop fails on GX | SCEN | Hero10 | ★★★ | correlate vegetation/indoor prob with the hdop≥3 spatial clusters (GOPR's hdop knee is the ground truth) | UNVERIFIED |
-| 4 | **GRAV+GYRO → carve lean** | ski `carve` signal | GRAV, GYRO | Hero10 | ★★ | roll (from GRAV) + yaw synchronized through a carve | UNVERIFIED |
+| 4 | **GRAV lean + ACCL centripetal → carve confirm** | ski `carve` signal | GRAV, ACCL | Hero10 | ★★ | lean angle (`GRAV` tilt) and lateral centripetal (`ACCL`) rise together through a carved arc — the lean *is* the resultant of gravity + centripetal (not gyro yaw) | UNVERIFIED |
 | 5 | **SCEN(indoor)+low-speed+FACE → rest/queue** | temporal activity segmentation (roadmap) | SCEN, FACE, GPS speed | Hero10 | ★★ | indoor/face episodes ↔ stationary runs (the base-area hdop clusters) | UNVERIFIED |
 | 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | IMU motion energy ≈ 0 ⇒ really stopped (vs GPS drift while moving) | UNVERIFIED |
 | 7 | **exposure (SHUT×ISO) → obstruction / indoor (PORTABLE)** | obstruction detection — the one proxy that works on *both* chips | SHUT, ISO (+`YAVG` on Hero10) | both² | ★★ | per-clip-relative `SHUT×ISO` (or `YAVG`) vs `SCEN` indoor/vegetation prob + GOPR hdop≥3 clusters (ground truth) + known indoor episodes³ | UNVERIFIED |
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
 | 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | UNVERIFIED |
+| 10 | **GYRO heading vs GPS heading → mount type** | `activity` (vehicle vs body) + a *meta*-gate: is camera-heading = travel? | GYRO (+`GRAV`/AHRS for the yaw axis) | both | ★★ | correlate GYRO-yaw heading-change with GPS heading-change over moving segments — **tight ⇒ hard/vehicle** mount (camera ≈ travel), **loose ⇒ soft/body** mount. A high-corr clip *unlocks* GYRO-as-travel-heading (turn-type, dead-reckon); a low-corr clip must **not** use it (the §3 facing caveat) | UNVERIFIED |
 
 ¹ On Hero5 (no `GRAV`/`CORI`) gravity & orientation must be self-estimated from raw `ACCL`/`GYRO`.
 ² `YAVG` (measured luma) is Hero10-only; `SHUT`/`ISO` on both → the proxy itself is portable.
@@ -160,16 +176,22 @@ GPS-only CLI run also populates the rich cache at ~0 extra IO.
   Hero10 → **`SCEN`**; and **exposure (`SHUT×ISO`) on both** (#7). The portable exposure proxy is the
   most interesting bet precisely because it sidesteps the device-dependence — if it holds up it could
   be *the* cross-model obstruction signal, with hdop/SCEN as per-device corroboration.
+- **`GYRO` repositioned** — it is **not** a carve signal (a carve needn't rotate the camera, §3
+  facing caveat). Its jobs: the **orientation/gravity backbone** that makes the centripetal-`ACCL`
+  extraction (#1/#4) work on Hero5 (no `GRAV`) and corroborates it on Hero10, **mount detection**
+  (#10), and a no-rotation term for the stationary check (#6).
 - **Recurring theme**: which signal to trust otherwise stays **device-dependent** (see
   `hdop-notes.md` §4–5). The pipeline must pick per source.
 
 ## 6. Validation order
 
-1. **GYRO → carve/spike** (#1) — portable, cleanest signal, hits the central ski problem.
+1. **ACCL centripetal → carve/spike** (#1) — portable, hits the central ski problem. (Was "GYRO yaw";
+   corrected — a carve is a *centripetal acceleration*, not a camera rotation. See §3 facing caveat.)
 2. **Obstruction trio** (#3 + #7) — test `SCEN` and exposure `SHUT×ISO` together against the GOPR
    hdop≥3 ground truth; the portable exposure proxy (#7) is the prize if it holds.
-3. **ACCL → teleport-kill** (#2) — strong, but needs body→world frame fusion.
-4. **rest/queue segmentation** (#5).
+3. **rest/queue segmentation** (#5) and **mount type** (#10).
+
+(**#2 ACCL → teleport-kill is DONE** — confirmed on both cameras, §4.)
 
 Prove each on real footage (the `~/Downloads/5/` clips + the on-drive trip) before any pipeline
 wiring. Tick the status column as each lands.
