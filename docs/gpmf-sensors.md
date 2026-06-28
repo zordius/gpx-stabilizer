@@ -34,6 +34,28 @@ sample values), `io_cost.mjs` (IO measurement). Run them on any model to extend 
 - **Hero10-only: everything image-derived + orientation** → richer, but not on the older chip.
 - **No satellite count on either** — GoPro's only GPS-quality fields are `fix` + DOP (see
   `hdop-notes.md`). GPMF is presence-based: a clip lists only the streams it actually recorded.
+- **Camera model is identifiable** — read from the MP4 `udta/FIRM` atom (firmware prefix → model:
+  `HD5`→HERO5, `H21`→HERO10), now carried in `GoproMeta.model`/`.firmware` and the cache. This is the
+  per-model hook the axis/ISO differences above need (e.g. `if model === "HERO5"` for the `(z,x,y)`
+  gyro axis order). Self-contained — no exiftool/ffprobe.
+
+### IMU sample rate — genuine data, interpolated timestamps *(verified 2026-06-28)*
+
+Checked on both cameras (static + moving clips): the rates above are the **true data rate**, not a
+padded/held lower rate — ACCL/GYRO samples are all distinct measurements (**~0 %** exact-consecutive
+duplicates, max identical-run 2 = coincidence), and each ~1 s GPMF payload carries ~200 ACCL samples.
+**But** GPMF timestamps *payloads*, not individual IMU samples, so gopro-telemetry spreads a payload's
+samples **uniformly** (per-sample `cts` step `sd ≈ 0`). Consequence: GPS↔IMU alignment is
+*payload-precise* (the ~1 s boundaries are real; within-payload `cts` is nominal) — fine for windowed
+energy (±300 ms, as #2/#6 use), but **don't trust a single sample's `cts` for sub-10 ms event timing**.
+
+**Downsampling: aggregate, never decimate.** The accelerometer's worth is its sub-second transients
+(impacts, vibration, carve dynamics). Decimating 200 Hz → 1 Hz **aliases** (high-freq folds in → a
+meaningless near-gravity reading). Reduce by a windowed **statistic** instead — RMS / peak / variance
+of `|ACCL|−g` per GPS sample — which is what #2/#6 already do, effectively consuming the IMU at GPS
+rate. Keep the **raw** stream in the cache (re-derivable features); GYRO's high rate is needed for #1
+(carve), so don't reduce it. (Hero5 records GYRO at **2×** ACCL — ~400 Hz — so #1 gets finer turn
+dynamics there.)
 
 ## 2. IO cost — reading more streams is free
 
