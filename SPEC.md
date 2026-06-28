@@ -154,7 +154,9 @@ enabled activity** is dropped as `implausible`.
 
 `stabilize(points)` = `analyze` → keep points with no `dropReason` → reduce to plain track points.
 `stabilizeTrack` / `stabilizeGpx` apply it per segment and write the cleaned `.gpx`, preserving meta.
-**Current scope = noise/outlier removal; smoothing of survivors is not yet implemented.**
+**Base scope = noise/outlier removal.** The first *survivor-rewriting* step now exists as an opt-in:
+`stabilize(points, { smooth: true })` appends `mods/smooth.js` and exports a slope-stable `ele`
+(distance-domain elevation smoothing — see the contract below). The base default is unchanged (raw).
 
 ### Viewer (`view.js` + `html.js`) — eval rendering module
 
@@ -197,16 +199,19 @@ statistic O(1)/point instead of O(W).
 Beyond the base + the eval viewer, still to come:
 
 - track smoothing (resample/smooth the cleaned survivors) — **elevation
-  reconstruction contract specced below**
+  smoothing BUILT (`mods/smooth.js`, opt-in via `stabilize`'s `smooth`); resample
+  and the IMU-fusion tier still future (contract below)**
 - segment classification / lift handling / segment bridging / cluster cleanup
 - OSM validation
 - temporal activity segmentation (smooth per-point `activity.modes` into activity runs)
 
 ## Track smoothing — elevation reconstruction (contract) *(added 2026-06-28)*
 
-**Status: proposed (not implemented).** Promotes the roadmap's "track smoothing"
-bullet to a contract. Smoothing of survivors is still absent today — `stabilize`
-removes noise *points*; it never rewrites a survivor's values.
+**Status: distance-domain elevation smoothing IMPLEMENTED** (`mods/smooth.js` +
+`stabilize` `opts.smooth`, 2026-06-29); the resample and IMU-fusion tiers remain
+future. Promotes the roadmap's "track smoothing" bullet to a contract. The base
+still removes noise *points* and never rewrites a survivor's values by default —
+elevation rewriting is strictly opt-in.
 
 ### Why (the finding)
 
@@ -223,27 +228,36 @@ same fix. Elevation truth, and the kinematic context to smooth it (`profile.vs`,
 along-track distance), live **here** — so the smoothing belongs here, as the
 long-planned opt-in module on the survivors.
 
-### Contract (proposed)
+### Contract (built — base tier; advanced tier future)
 
-An opt-in module over the cleaned survivors (post-drop), with measure/profile context,
+`mods/smooth.js`, a `compute` module over the survivors, with measure/profile context,
 producing a **slope-stable elevation**:
 
-- **Distance-domain smoothing.** Smooth `ele` over an along-track **length scale in
-  metres** (a `profile.js` PARAM, e.g. `SMOOTH_WIN_M`), *not* a time/index window — so
-  it is robust to variable speed and sample spacing, matching the planar-distance basis
-  `measure` already computes (`cps`/`cpath`). Endpoints use a shrinking window.
+- **Distance-domain smoothing.** Smooths `ele` over an along-track **length scale in
+  metres** (`SMOOTH_WIN_M`, half-width, default ±30 m), *not* a time/index window — so
+  it is robust to variable speed and sample spacing. The module builds its own cumulative
+  along-track distance from `measure`'s planar `planarStep` and boxcar-means within ±win
+  via an O(n) two-pointer sweep; endpoints use a naturally shrinking window. **As built**
+  the param follows the in-module `g.SMOOTH_WIN_M ?? 30` convention (like stray's
+  `STRAY_*`, overridable via opts), *not* a `profile.js` PARAM.
 - **Guarantee.** Per-sample vertical noise is reduced so grade = `Δele* / Δdist` over
   that scale has **bounded jitter** (small mean `|Δgrade|` per metre), while real
-  terrain grade over the scale is preserved (true climbs are not flattened).
-- **Output shape.** Per the module data-model the smoothed series is emitted as a
-  namespaced signal `point.smooth.ele` (raw `ele` untouched in-pipeline). The **export**
-  decides what ships: `stabilize` stays raw by default (base ethos — removal, not
-  rewriting); an opt-in (`opts.smooth`, or the module being enabled) makes the exported
-  `ele` the smoothed value, raw retained under a label if round-trip fidelity is wanted.
-  `stabilize`'s `{lat,lon,ele,time}` shape is unchanged; only the *meaning* of `ele`
-  flips when smoothing is on.
-- **Parameters per activity.** The length scale differs by activity (ski vs walk);
-  defaults tie into the ski-tier work (`profile` PARAMS / `CORE_DEFAULT`).
+  terrain grade over the scale is preserved (true climbs are not flattened). Verified by
+  the proxy eval below.
+- **Output shape.** The smoothed series is emitted as a namespaced signal
+  `point.smooth.ele` (raw `ele` untouched in-pipeline). The **export** decides what ships:
+  `stabilize` stays raw by default (base ethos — removal, not rewriting); **`opts.smooth`**
+  appends the module *and* flips the exported `ele` to the smoothed value (adding the
+  module alone, via `opts.modules`, only surfaces the `point.smooth.ele` signal — it does
+  not swap the export). `stabilize`'s `{lat,lon,ele,time}` shape is unchanged; only the
+  *meaning* of `ele` flips when `smooth` is on.
+- **Parameters per activity (future).** The length scale should differ by activity
+  (ski vs walk); today there is one default (±30 m), overridable via
+  `opts.smooth = { SMOOTH_WIN_M: n }`. Per-activity defaults tie into the ski-tier work.
+- **Current limitation.** Runs on the post-label valid series, which still contains the
+  points the compute-phase drops (outlier/stray/activity) will flag — compute modules are
+  independent and don't see each other's drops. Strictly post-drop smoothing awaits the
+  proposed `finalize` phase.
 - **Advanced (future, GoPro-only).** GoPro has no barometer (altitude is GPS-derived,
   the noisiest GPS axis); a complementary filter could fuse low-pass GPS `ele` with
   high-pass IMU vertical acceleration to constrain the *shape* between samples — gated on
@@ -255,6 +269,21 @@ producing a **slope-stable elevation**:
 Re-derive gradient on `GX065132.MP4` through the consumer: raw = −39…26 % at high
 jitter; smoothed = grade tracking terrain with bounded jitter at a *modest* consumer
 baseline. The movie-layers render is the eval harness.
+
+**Proxy eval (done, 2026-06-29)** — `gpx_eval/smooth_eval.mjs` derives grade over a 20 m
+baseline on the stabilized `GX065132` track (57 survivors), raw `ele` vs smoothed:
+
+| | grade range | span | jitter (Δ/step) |
+|---|---|---|---|
+| raw `ele` | −32.8…25.4 % | 58.3 | 2.66 % |
+| smooth ±20 m | ±14.2 % | 28.4 | 1.17 % |
+| **smooth ±30 m** (default) | −11.8…11.2 % | 23.0 | **0.98 %** |
+| smooth ±50 m | −8.0…4.6 % | 12.6 | 0.58 % |
+
+raw matches the contract's −39…26 % / high-jitter; ±30 m cuts jitter 2.7× and span 2.5×
+while staying small enough to track terrain (≈3.5 s of skiing). This is a *proxy* (the
+eval's own grade derivation); the **true acceptance through the movie-layers consumer is
+still pending** (wiring `smooth` into `provider-gopro` / `provider-gpx`).
 
 ### Related finding — `stabilize` drops `speed`
 
