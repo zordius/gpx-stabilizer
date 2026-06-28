@@ -33,12 +33,23 @@ gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cach
 
 ## Open
 
-_Nothing open._ **Item 1 — re-verify post-refactor extraction: DONE (2026-06-28).**
-The full `--no-cache` re-extraction (~7 h, 124 files) wrote all 6 day-files with
-point counts **identical to the prior cache-based run** (`processed=120 skipped=4
-failed=0`; `xmllint --noout` clean on all 6; `(0,0)` null-island residual 0; first
-trkpt a real fix `37.54,140.15`) — confirming the post-refactor extraction code
-(cts / recording-start) has no regression vs the pre-refactor caches.
+**Sequencing (2026-06-28): finish the core first, then the GPS/IMU module.** The
+geometry-only, portable **core** stabilization (the `gpx-stabilizer` roadmap in
+[`SPEC.md`](SPEC.md) — track smoothing / elevation reconstruction, etc.) comes
+before the GoPro multi-sensor work.
+
+- **GPS/IMU module (deferred).** The full non-GPS sensor catalog + the fusion
+  analysis live in [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). It is a
+  **GoPro-only opt-in module** (via the aux / `finalize` hooks, §3 + `SPEC.md`),
+  **not** the base. When picked up, lead with the **witness** uses — #2 ACCL
+  teleport-kill (validated, both cameras) and #1 ACCL-centripetal carve-vs-spike —
+  not full INS reconstruction (§7: "witness, not reconstructor"). Already built +
+  committed: full-telemetry extraction, all-stream v3 cache, camera model/firmware.
+  Left: validate the remaining witness signals, then wire one into the pipeline
+  (which needs the proposed `finalize` phase).
+
+(Item 1 — re-verify post-refactor extraction — **DONE 2026-06-28**: the `--no-cache`
+rerun matched the cache-based output, no regression.)
 
 ## Ideas parked (not started)
 

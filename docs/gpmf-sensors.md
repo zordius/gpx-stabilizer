@@ -205,6 +205,53 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 Prove each on real footage (the `~/Downloads/5/` clips + the on-drive trip) before any pipeline
 wiring. Tick the status column as each lands.
 
+## 7. Sensor fusion — the complementary pairs, and IMU as *witness* not *reconstructor*
+
+**Two complementary pairs, same shape.** GPS and an inertial sensor have errors in *opposite* frequency
+bands, so they fuse:
+
+| fused quantity | absolute, drift-free, high-freq-noisy | smooth high-freq, low-freq drift |
+|---|---|---|
+| **heading** | GPS course (position deltas) | `GYRO` (integrated yaw) |
+| **velocity / position** | GPS position / Doppler velocity | `ACCL` (gravity-removed, integrated) |
+
+A complementary filter takes `low-pass(GPS) + high-pass(IMU)`: the IMU's **drift lives in the low band**
+the high-pass discards; the GPS's **noise lives in the high band** the low-pass discards. Because GPS
+**re-anchors** every sample, the IMU integration never runs long enough to drift — the error is
+*bounded*, not growing, so it holds indefinitely (the "no accumulation limit" §1 alludes to). The
+acceleration pair is the harsher one: position is a *double* integral of accel, so bias drifts as
+`½·b·t²` (quadratic) — GPS anchoring is even more essential there.
+
+**The two pairs are one GPS-INS, coupled.** The accel pair can't run without the heading pair: `ACCL`
+carries gravity, so isolating *linear* acceleration needs the orientation (which way is down) that
+`GYRO`+`GRAV` produce. A small attitude error leaks residual gravity into "horizontal accel" → a large
+integrated velocity error. So it is a single strapdown GPS/INS, not two independent filters.
+
+**Practical limits — why it is not a free true-track:**
+
+- **No GPS = no anchor.** Short gaps (seconds) the IMU bridges; a long outage (indoor, deep cover, the
+  pre-lock cold-start) drifts unbounded — it is **GPS-anchored, not GPS-free**; a no-GPS stretch can't
+  be reconstructed from IMU alone.
+- **Systematic GPS error passes through.** The low-pass removes GPS jitter/teleports (high-freq), but a
+  *sustained* offset (multipath under a cliff) is low-freq → the fused track inherits it. It fixes the
+  wobble, not a consistently-wrong GPS.
+- **Orientation/gravity dependency** — worst on Hero5 (no `GRAV`) and during a sustained carve (the
+  centripetal contaminates the gravity reference, exactly when you need it).
+- **Bias drifts with temperature/time** → must be re-estimated continuously, which only works while GPS
+  is present.
+- **Camera motion ≠ body track** — on a soft mount the IMU sees head bob/lean that isn't the path.
+- **Cost / portability** — a full GPS-INS is a heavy multi-state EKF, **GoPro-only** (a `.gpx` source
+  has no IMU), so it can never be the base.
+
+**Conclusion — witness, not reconstructor.** For this project's goal (*remove noise points*), the
+high-value, cheap use of the IMU is as an independent **witness** that confirms/vetoes a GPS point
+(#1 carve, #2 teleport) — a windowed comparison, no EKF. **Full INS trajectory reconstruction is a
+separate, heavier, GoPro-only thing** — an opt-in module at most (via the aux/`finalize` hooks, §3 /
+`SPEC.md`), never the base. So the **sequencing**: finish the geometry-only, portable **core** first;
+the GoPro **GPS/IMU module** (this whole catalog) is deferred — and when it lands, lead with the
+witness uses; INS-grade reconstruction is the speculative far end that may, at most, feed *back* into
+stabilization through the same hooks.
+
 ## Open
 
 - Per-model axis/scale map — fill in as each camera model is dumped.
