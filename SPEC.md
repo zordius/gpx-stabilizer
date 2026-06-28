@@ -194,8 +194,21 @@ assemble.)
   alignment (today each compute module re-aligns itself, e.g. `k = min(p, s-1)`), and the unified
   **label / signal / drop** data model: `drop` is a reserved output of *both* phases; labels (pre-
   measure) and signals (post-measure) are the ordinary outputs; assemble merges all three onto points.
-- **Viewer** — still to connect to `analyze`: colour kept vs dropped points, mark `activity.modes`,
-  shade by a signal (e.g. `hs`). This is the last mile that makes every signal above visible.
+- **Viewer (connected)** — `analyzedLayers` now splits the analysis into render layers: the clean
+  (kept) track, one marker layer per drop reason (`drift` · `stray` · `outlier` · `activity`), and
+  device-`hdop` quality overlays (`hdop 2–3`, `hdop ≥3`, plus the stationary-`paused ∩ ≥3`
+  "garbage-zone" subset the pipeline currently keeps). Still open: shade the clean line by a signal
+  (e.g. `hs`), and surface `activity.modes`.
+- **Drop → keep / reposition, and where framing rides (direction)** — the drop modules only emit a
+  **drop signal**; the eventual reconstruction tier (see roadmap: *track smoothing*) is a later stage
+  that decides, per dropped point/run, **discard vs reposition** (move it back onto a plausible line)
+  rather than just delete. The viewBox is computed at that **keep decision**: it frames the **kept**
+  set only (the `bbox: true` clean layer), while every point — raw, drop markers, far `stray` garbage
+  — stays **drawn**. So dropped points never distort the default frame, yet are not lost: the planned
+  **multi-level zoom** (zoom-out) is exactly what reveals the off-frame drops for inspection. The
+  `stray` module itself was lifted from this work — the bbox-framing garbage detector (robust centre +
+  bulk-radius gate) turned out to be a useful drop in its own right, complementary to `outlier`'s
+  single-point detour (which misses *clusters*).
 
 ## Reference
 
