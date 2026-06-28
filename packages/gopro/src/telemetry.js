@@ -4,7 +4,7 @@
 // docs/export-contract.md.
 
 import { statSync } from "node:fs";
-import { stabilize } from "gpx-stabilizer";
+import { resample, stabilize } from "gpx-stabilizer";
 import tzlookup from "tz-lookup";
 import { extractGoproAll, probeGoproMeta } from "./gopro.js";
 import { CACHE_V, readCache, resolveCachePath, writeCache } from "./gopro-cache.js";
@@ -139,7 +139,10 @@ export function resolveStartUtc(points) {
 /**
  * @typedef {object} TelemetryResult
  * @property {import("./gopro.js").GoproMeta} meta   geometry / fps / durationS / hasGps
- * @property {import("gpx-stabilizer").TrackPoint[]} points  raw, or stabilized per opts
+ * @property {import("gpx-stabilizer").TrackPoint[]} points  raw, or stabilized per opts;
+ *   with `resample`, the flat concatenation of `segments` (back-compat single array)
+ * @property {import("gpx-stabilizer").TrackPoint[][]} segments  one entry per `<trkseg>`:
+ *   `[points]` normally, but `resample` splits at gaps > maxGap into several (always present)
  * @property {string | null} timezone   = timezoneOfPoints(raw points)
  * @property {number | null} startUtc    best recording-start anchor: the regression
  *   true-start when verified, else the first good fix (= clock.startUtc)
@@ -207,9 +210,14 @@ export async function readGoproSamples(path, opts = {}) {
  * [+ stabilize] + timezone + start anchor in a single await. Short-circuits on
  * a video with no GPS track.
  * @param {string} path
- * @param {{ rate?: number, stabilize?: boolean | Parameters<typeof stabilize>[1], cache?: boolean | { dir?: string | null } }} [opts]
- *   rate in Hz (omit = native ~18 Hz); stabilize cleans the points first; cache
- *   controls the on-disk extraction record (default on — see `readGoproSamples`).
+ * @param {{ rate?: number, stabilize?: boolean | Parameters<typeof stabilize>[1],
+ *   resample?: boolean | "fps" | { RESAMPLE_HZ?: number | "fps", maxGap?: number },
+ *   cache?: boolean | { dir?: string | null } }} [opts]
+ *   `rate` in Hz (omit = native ~18 Hz); `stabilize` cleans the points first; `resample`
+ *   regularises the cleaned points onto a uniform time grid (see {@link resample}) — it
+ *   **implies** `stabilize` (resampling raw, uncleaned points is meaningless), and
+ *   `RESAMPLE_HZ: "fps"` (or `resample: "fps"`) uses the video frame rate (`meta.fps`) so
+ *   there is one point per frame; `cache` controls the on-disk extraction record.
  * @returns {Promise<TelemetryResult>}
  */
 export async function readGoproTelemetry(path, opts = {}) {
@@ -221,6 +229,7 @@ export async function readGoproTelemetry(path, opts = {}) {
     return {
       meta,
       points: [],
+      segments: [],
       timezone: null,
       startUtc: null,
       clock: { startUtc: null, confidence: null, verified: false, slope: null },
@@ -231,8 +240,29 @@ export async function readGoproTelemetry(path, opts = {}) {
   // start regression rely on.
   const timezone = timezoneOfPoints(raw);
   const clock = resolveStartUtc(raw);
-  const points = opts.stabilize
-    ? stabilize(raw, opts.stabilize === true ? {} : opts.stabilize)
-    : raw;
-  return { meta, points, timezone, startUtc: clock.startUtc, clock };
+
+  // resample runs on cleaned survivors, so it IMPLIES stabilize; an explicit
+  // `stabilize: false` alongside `resample` is contradictory.
+  if (opts.resample && opts.stabilize === false) {
+    throw new Error("readGoproTelemetry: `resample` requires cleaning — drop `stabilize: false`");
+  }
+  const cleaned =
+    opts.stabilize || opts.resample
+      ? stabilize(raw, opts.stabilize && opts.stabilize !== true ? opts.stabilize : {})
+      : raw;
+
+  let points = cleaned;
+  let segments = cleaned.length ? [cleaned] : [];
+  if (opts.resample) {
+    const ro = typeof opts.resample === "object" ? { ...opts.resample } : {};
+    // "fps" (shorthand `resample: "fps"` or `RESAMPLE_HZ: "fps"`) → one point per video frame
+    if (opts.resample === "fps" || ro.RESAMPLE_HZ === "fps") {
+      if (!meta.fps)
+        throw new Error("readGoproTelemetry: resample 'fps' but meta.fps is unavailable");
+      ro.RESAMPLE_HZ = meta.fps;
+    }
+    segments = resample(cleaned, ro);
+    points = segments.flat();
+  }
+  return { meta, points, segments, timezone, startUtc: clock.startUtc, clock };
 }

@@ -26,8 +26,12 @@ TrackPoint = {
 }
 
 // src/gopro.js
-GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS, model, firmware }
-//   model/firmware read from the MP4 udta FIRM atom (e.g. "HERO5" / "HD5.02.02.60.00"), or null
+GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS,
+              model, firmware, serial, mediaId, highlights }
+//   model/firmware from the MP4 udta FIRM atom (e.g. "HERO5" / "HD5.02.02.60.00"), or null.
+//   serial = body serial (udta CAME, hex) — tells two same-model bodies apart;
+//   mediaId = recording id (udta GUMI, hex) — shared by a recording's chapter files;
+//   highlights = user tag-button times (udta HMMT, ms array). All null/[] when absent.
 ```
 
 ---
@@ -93,12 +97,16 @@ resolveStartUtc(points)        // → { startUtc, confidence, verified, slope } 
 readGoproTelemetry(path, {
   rate?,                       // Hz; omit = native ~18 Hz
   stabilize?,                  // boolean | StabilizeOptions — clean the points first
+                               //   StabilizeOptions.smooth: true → slope-stable elevation (see below)
+  resample?,                   // boolean | 'fps' | { RESAMPLE_HZ?: number|'fps', maxGap?: number }
+                               //   uniform time grid; IMPLIES stabilize; 'fps' = one point per video frame
   cache?,                      // on by default — see section E
 }) // → Promise<TelemetryResult>
 
 TelemetryResult = {
   meta,                        // GoproMeta (geometry / fps / durationS / hasGps)
-  points,                      // TrackPoint[]  (raw, or stabilized per opts)
+  points,                      // TrackPoint[]  (raw, or stabilized; with resample = flat concat of segments)
+  segments,                    // TrackPoint[][]  one per <trkseg> — [points] normally; resample splits at gaps
   timezone,                    // from the RAW points (see note)    (string | null)
   startUtc,                    // best start anchor (= clock.startUtc) (number | null)
   clock,                       // { startUtc, confidence:'gps'|null, verified, slope } — see C
@@ -128,6 +136,25 @@ TelemetryResult = {
     Folded into the elevation-reconstruction contract in [`SPEC.md`](../SPEC.md) —
     decide there whether the cleaned shape carries `speed`, or the export derives it
     from `kinematics.velocity.mag` (3D speed already computed in `measure`).
+- **Elevation smoothing (`stabilize: { smooth: true }`) — NEW 2026-06-29.** Smooths each
+  survivor's `ele` over an along-track distance window (default ±30 m), so a gradient
+  derived as `Δele / distance` has **bounded jitter** (the raw GPS `ele` is the noisiest
+  axis; on a ski clip raw grade swings −33…+25 % at high jitter, smoothed ≈ ±11 % at ⅓
+  the jitter). The `{lat,lon,ele,time}` shape is unchanged — only the *meaning* of `ele`
+  flips to the smoothed value; deriving the gradient number from it is still the renderer's
+  job. See [`SPEC.md`](../SPEC.md) "Track smoothing".
+- **Resampling (`resample`) — NEW 2026-06-29.** Regularises the cleaned points onto a
+  **uniform time grid** (`RESAMPLE_HZ`, default 1 Hz; `'fps'` ⇒ `meta.fps`, one point per
+  video frame). It **implies `stabilize`** (resampling raw, uncleaned points is meaningless;
+  `stabilize: false` + `resample` throws). A time gap longer than `maxGap` (default 10 s) is
+  **not bridged** — the output splits into separate `segments` there, so a stop / GPS dropout
+  / GoPro crash break becomes a real `<trkseg>` break instead of an invented straight line.
+  Read **`segments`** for the split; `points` stays the flat concatenation for back-compat.
+  Position/ele/speed are linearly interpolated; with `smooth` also on, the grid carries the
+  smoothed elevation. See [`SPEC.md`](../SPEC.md) "Track resampling".
+- **`segments` is always present** (NEW 2026-06-29): `[points]` when not resampling, the
+  split list when resampling. A renderer that must not bridge holes should iterate `segments`
+  rather than `points`.
 
 ### E. Caching (opt-in, **on by default**)
 
@@ -180,8 +207,14 @@ readGoproSamples(path, {
 
 ## Out of scope (the renderer's job, NOT this lib)
 
-- Mapping to renderer channels, **gradient** (derive from `ele` + distance),
-  interpolation, unit conversion (e.g. m/s → km/h), drawing.
+- Mapping to renderer channels, **gradient** (derive the number from `ele` + distance),
+  unit conversion (e.g. m/s → km/h), drawing.
+- **Boundary moved (2026-06-29):** elevation **smoothing** and uniform-grid
+  **resampling / interpolation** — which the renderer used to own — are now **offered
+  opt-in** by the lib (`stabilize: { smooth: true }` / `resample`), because the elevation
+  truth and the kinematic context to smooth it live here (every consumer would otherwise
+  re-implement the same fix). Deriving the gradient *number* from the (now-smoothable)
+  `ele` is still the renderer's; the lib just makes the `ele` it derives from slope-stable.
 
 ## Flag for the implementer (known gaps)
 
@@ -232,3 +265,16 @@ return {
 
 So this lib only needs to deliver **points + meta + timezone + startUtc/clock**;
 everything above the dashed line is the adapter's.
+
+**Using the new smoothing / resampling (2026-06-29).** For the jittery-gradient and
+hole-bridging problems, the adapter can opt in:
+
+```js
+const { meta, points, segments, startUtc, clock } = await readGoproTelemetry(path, {
+  stabilize: { smooth: true },   // ele is now slope-stable → derived gradient stops jittering
+  resample: 'fps',               // one point per video frame (= meta.fps); maxGap splits dropouts
+})
+// iterate `segments` (not `points`) so a GPS dropout / crash break renders as a gap,
+// not a straight line; each segment is a uniform per-frame TrackPoint[].
+for (const seg of segments) { /* map seg → channel samples, anchored to startUtc */ }
+```
