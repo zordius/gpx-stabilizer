@@ -33,55 +33,20 @@ gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cach
 
 ## Open
 
-### 1. Validate the NEW gpx-from-gopro on full real data  — DONE (2026-06-28), 2 bugs found + fixed
+### 1. Re-verify post-refactor extraction (caches predate the monorepo split)
 
-End-to-end validated on the real 3-day ski footage (`/Volumes/ZS14T2025/p/20260211-ski`,
-124 files, GOPR=Hero5 `j/` + GX=Hero10 `z/`). The first full run (detached, 7 h)
-**extracted all 124 files but crashed at the final write step with 0 output** — which
-surfaced two real bugs, both now fixed in `packages/gopro/src/gopro-cli.js`:
+The real 3-day end-to-end validation (124 files; the stack-overflow + GPS
+cold-start `(0,0)` bugs it surfaced are fixed in commit `f581a58`) was **rerun via
+the on-drive sidecar caches**, so it confirmed the write/group/skip/field paths but
+ran them on points extracted *before* the refactor — `CACHE_V` is still `2`. The
+**post-refactor** extraction code (cts / recording-start commits) was therefore
+**not** re-verified. Closing this needs a `--no-cache` (or `CACHE_V` bump) full
+re-extraction (~7 h). Decide whether it's worth the run.
 
-- **Stack overflow on large groups** — `Math.min(...realTimes)` (and
-  `points.push(...points)`) spread hundreds of thousands of args → `Maximum call
-  stack size exceeded`. The biggest group, `20260212-GOPR`, is 433 k points. Fixed:
-  reduce-loop for the min, loop-push for accumulation (no array spread into a call).
-- **GPS cold-start pollution** — a cold-starting GPS emits null-island `(0,0)` points
-  with a stale 2021 clock; they sort to the front of a day file (polluting the track)
-  and a file that never locks formed bogus stray-date groups (`20210307-GX`,
-  `20210310-GX`). Fixed: filter `(0,0)` points at write time and skip groups left
-  empty. Cleared ~30 k junk points across the 6 outputs and removed the 2 stray files.
-
-**Validated** (rerun via the on-drive sidecar caches, `processed=120 skipped=4 failed=0`):
-stitched skips (4× `no GPS track, skip` via moov probe) · grouping (6 files = GOPR+GX ×
-2026-02-11/12/13) · fields (`ele` MSL, `time`, `speed`, `fix`, `hdop`) · `xmllint`
-clean on all 6 · `(0,0)` residual = 0 · first trkpt now a real fix (`37.54,140.15`).
-
-Re-run command (current `packages/` path; caches make it ~minutes, not 7 h):
 ```sh
 node ~/zrepos/gpx-stabilizer/packages/gopro/src/gopro-cli.js \
-  /Volumes/ZS14T2025/p/20260211-ski --out ~/gpx-validate/out
+  /Volumes/ZS14T2025/p/20260211-ski --out ~/gpx-validate/out --no-cache
 ```
-
-**Caveats / left open**:
-- **Caches predate the monorepo refactor** (`CACHE_V` still `2`). The rerun validated
-  the write/group/skip/field paths on real extracted points, but the *post-refactor*
-  extraction code (cts / recording-start commits) was **not** re-verified — that needs
-  a `--no-cache` (or `CACHE_V` bump) full re-extraction (~7 h). Decide if worth it.
-- **Drive is a flaky SMB mount** (`//pi@192.168.199.239/usbhdd`): `found N` drifted
-  124/114/54 across runs and one file once probed as `EISDIR`. Not a tool bug; just
-  expect intermittent partial walks on that network drive.
-- `j/133` dangling-symlink dirs still log `skip dir … ENOENT` intermittently.
-
-### 2. Probe unit tests  (decided 2026-06-27 — no fixture, covered by end-to-end)
-
-`probeGoproMeta` has no unit test because testing it needs a real mp4 (binary
-fixture), which breaks this repo's all-inline-string test convention. The cache
-logic IS tested (`test/gopro-cache.test.js`, fixture-free).
-
-**Decision**: leave the probe to the empirical end-to-end validation (item 1) —
-do **not** commit a binary mp4 fixture, keeping the all-inline-string convention.
-The probe's key behaviours (no-GPS stitched-file skip path + width/height/dims)
-are exercised by the real 3-day footage run; if probe logic changes later and
-needs regression cover, revisit then.
 
 ## Ideas parked (not started)
 
