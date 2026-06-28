@@ -89,15 +89,39 @@ Sweeping the threshold and watching track coverage fall (low coverage = concentr
 
 | device | hdop as an obstruction signal? | how to use it |
 |---|---|---|
-| **GOPR (good chip)** | ✓ reliable — bimodal, clean knee | absolute **≥3** = obstruction places; can be handled spatially (drop/flag the zone) |
-| **GX (poor chip)** | ✗ unreliable — continuous noise ramp, no knee, day-variable | no fixed cut works; fall back to a **per-track relative percentile** (rough), or rely on the **geometric pipeline** rather than hdop |
+| **GOPR (good chip)** | ✓ reliable — bimodal, clean knee | absolute **≥3**, or a per-track **p97** that auto-adapts (see §6) = obstruction places; handle spatially (drop/flag the zone) |
+| **GX (poor chip)** | ✗ unreliable — continuous noise ramp, no knee, day-variable | no fixed cut works, **and a relative percentile fails too** (no knee — §6); rely on the **geometric pipeline** rather than hdop |
 
 The one-line takeaway: **a good GPS chip's hdop has a clean baseline/obstruction split
 so a threshold means something; a poor chip's hdop is a continuous noise ramp where no
 threshold cleanly separates signal from noise.** Any hdop-based logic must therefore be
 **per-device (or per-track-relative), never one absolute set of cutpoints.**
 
-## 6. Relation to the pipeline (geometry-only today)
+## 6. Percentile method — an adaptive per-day threshold (good chip only)
+
+For a good chip, a **fixed percentile** of each track's own good-fix hdop auto-derives a
+per-day obstruction threshold — adapting the absolute cut to the day's conditions while
+keeping the band definition ("the worst ~3%") fixed. On GOPR, **p97** lands on the
+obstruction knee every day:
+
+| day | p97 → absolute hdop | band share | track coverage |
+|---|---|---|---|
+| 02-11 | **3.33** | 3.0% | 6% |
+| 02-12 | **3.05** | 3.0% | 7% |
+| 02-13 | **2.60** | 3.2% | 7% |
+
+The three thresholds **differ** (3.33 / 3.05 / 2.60) yet each pins the band to ~6–7%
+track coverage — the same spatial concentration the fixed `≥3` knee gives (§3). Below
+p97 the band is still spread (p90–p95 = 11–27% coverage); at ~p97 it snaps to the
+obstruction places. So `threshold = p97(track hdop)` self-tunes: a clear day drops the
+cut to 2.60, a worse day raises it to 3.33 — more robust than a hardcoded `≥3`.
+
+**This works only because GOPR has a knee.** The same sweep on GX never stabilises (a
+relative top-5% gave 31% coverage one day vs 9% another) — no percentile recovers a
+place-bound band from GX's noise ramp. So the percentile method is the *adaptive form of
+the good-chip case*, not a rescue for poor chips.
+
+## 7. Relation to the pipeline (geometry-only today)
 
 The base pipeline ignores hdop entirely (pure geometry/kinematics). Cross-checking the
 geometry drops against hdop on GOPR (Hero5, an 18-file cache run, ~221k pts) showed the
@@ -119,7 +143,7 @@ for good-chip devices (GOPR ≥3 = place-based obstruction) and must be per-devi
 per-track. For GX-class devices it adds little over geometry. The geometric modules
 (`drift`, `outlier`, `stray`, `despike`) already cover the garbage either way.
 
-## 7. Open
+## 8. Open
 
 - **GPS9 (Hero11+) hdop scale unverified** (no hardware) — `export-contract.md`.
 - **"stationary ∩ hdop≥3 = garbage zone"** the pipeline currently KEEPS: on GX 02-11
