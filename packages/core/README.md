@@ -32,7 +32,9 @@ const clean = stabilize(segments[0]); // array of { lat, lon, ele, time }, noise
 
 Noise removal is a pipeline of built-in modules (all on by default): `dequantizeTime` (spread
 duplicate-second timestamps), `noTime`, `oversample`, `outlier` (position / acceleration spikes),
-`activity`, `drift` (stationary satellite drift), and `despike` (heading + segment-length spikes).
+`stray` (points far outside the track's spatial bulk — cold-start / wild-fix teleport clusters that
+`outlier`'s single-point detour misses), `activity`, `drift` (stationary satellite drift), and
+`despike` (heading + segment-length spikes).
 `activity` classifies each point into the human-movement activities whose kinematic envelope it fits
 (walking · running · cycling · driving · rail · skiing · flight) and drops anything no enabled activity
 can explain. Enable a special activity:

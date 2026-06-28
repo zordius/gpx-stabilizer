@@ -19,6 +19,7 @@ import * as drift from "./drift.js";
 import * as noTime from "./noTime.js";
 import * as outlier from "./outlier.js";
 import * as oversample from "./oversample.js";
+import * as stray from "./stray.js";
 
 /**
  * @typedef {{ repair?: Function, label?: Function, compute?: Function }} ModuleDef  a module's exports
@@ -55,6 +56,7 @@ export const builtins = [
   validateModule("noTime", noTime),
   validateModule("oversample", oversample),
   validateModule("outlier", outlier),
+  validateModule("stray", stray),
   validateModule("activity", activity),
   validateModule("drift", drift),
   validateModule("despike", despike),

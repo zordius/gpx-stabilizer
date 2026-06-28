@@ -86,11 +86,14 @@ const flipY = (p) => ({ ...p, y: -p.y });
 
 /**
  * Run the analysis pipeline and split the result into render layers: a faint `raw` line of every
- * input point (background reference), the clean track (kept points as a line), plus one marker layer
- * per drop reason — `drift`, `outlier`, `activity`. All drops render
+ * input point (background reference), the clean track (kept points as a line), one marker layer
+ * per drop reason — `drift`, `stray`, `outlier`, `activity` — plus two GPS-quality overlay layers (`hdop 2–3`,
+ * `hdop ≥3`) marking points the device itself flagged as low-precision. All drops render
  * the same (red circles, 0.7 opacity); the separate layers exist only for the legend's per-reason
  * count + toggle. Each dropped point lands in exactly ONE layer by priority drift > outlier >
  * activity. Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
+ * The hdop overlays are independent of drop status (a kept point can still be flagged) and self-gate
+ * to empty on a track with no `<hdop>`.
  * `opts` flows to `analyze` (e.g. `activities`, param overrides).
  * The clean track is split into separate polylines by `opts.breakLine(out) → runs`; the default
  * cuts it at every dropped point (a drop = a break, no line across the gap). This is the seam the
@@ -109,6 +112,18 @@ export function analyzedLayers(points, opts = {}) {
     size: 4,
     opacity: 0.7,
     points: droppedBy(mod, not),
+  });
+  // GPS-reported quality overlay (independent of drop status): mark every point whose device hdop
+  // falls in a band, so a render shows where the receiver itself flagged low precision. Self-gating:
+  // a track without `<hdop>` (e.g. FitoTrack) yields empty layers. The 99.99 sentinel (fix=none,
+  // "no valid fix") is excluded — those points are already shown via the drift layer; capping at <99
+  // keeps the `>=3` band to genuinely poor-but-valid fixes (real hdop tops out ~50).
+  const hdopLayer = (label, lo, hi, color) => ({
+    label,
+    color,
+    size: 3,
+    opacity: 0.6,
+    points: out.filter((p) => p.hdop != null && p.hdop >= lo && p.hdop < hi).map(flipY),
   });
   // default `斷開`: cut the clean line at every dropped point — accumulate kept points into a run,
   // and close the run whenever a drop interrupts it, so no line is drawn across a removed point.
@@ -133,14 +148,31 @@ export function analyzedLayers(points, opts = {}) {
     label: "clean",
     color: "#06c",
     width: 1.5,
+    bbox: true, // the kept track alone sets the viewBox; drops/raw are drawn but don't grow the frame
     lines: breakLine(out).map((run) => run.map(flipY)),
   };
   // Layers render back-to-front: drops + kink first, then the raw track, then the clean line LAST so
   // it sits on top of raw. `out` is every point in order (drops included) → the full raw line.
   const layers = [
     dropLayer("drift", "drift", []),
-    dropLayer("outlier drop", "outlier", ["drift"]),
-    dropLayer("activity drop", "activity", ["drift", "outlier"]),
+    dropLayer("stray", "stray", ["drift"]),
+    dropLayer("outlier drop", "outlier", ["drift", "stray"]),
+    dropLayer("activity drop", "activity", ["drift", "stray", "outlier"]),
+    // hdop quality overlay: orange = moderately poor (2–3), purple = poor-but-valid (3–99)
+    hdopLayer("hdop 2–3", 2, 3, "#f80"),
+    hdopLayer("hdop ≥3", 3, 99, "#a0e"),
+    // "garbage-zone" candidates the pipeline currently KEEPS: poor hdop (≥3) while big-picture
+    // stationary (profile `paused` = net speed below NETSTAY). `paused` rides only on kept points, so
+    // this layer is exactly the leaked stationary-noise — eyeball it before deciding to drop wholesale.
+    {
+      label: "hdop≥3 paused",
+      color: "#d0006a",
+      size: 4,
+      opacity: 0.7,
+      points: out
+        .filter((p) => p.paused && p.hdop != null && p.hdop >= 3 && p.hdop < 99)
+        .map(flipY),
+    },
     // kink is a label, not a drop — yellow overlay on points that stay in the clean track
     {
       label: "kink",

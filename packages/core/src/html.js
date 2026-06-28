@@ -87,20 +87,36 @@ export function toSvg(layers = [], opts = {}) {
   const background = opts.background ?? null;
   const standalone = opts.standalone ?? false;
 
-  let minX = Number.POSITIVE_INFINITY;
-  let maxX = Number.NEGATIVE_INFINITY;
-  let minY = Number.POSITIVE_INFINITY;
-  let maxY = Number.NEGATIVE_INFINITY;
-  let count = 0;
-  for (const layer of layers) {
-    for (const p of layerPoints(layer)) {
-      count++;
-      if (p.x < minX) minX = p.x;
-      if (p.x > maxX) maxX = p.x;
-      if (p.y < minY) minY = p.y;
-      if (p.y > maxY) maxY = p.y;
+  // The viewBox frames only the points that should set the default view, while EVERY layer is still
+  // drawn. A layer opts in as a frame driver with `bbox: true` (analyzedLayers marks the clean track),
+  // so dropped/raw/garbage points are drawn but never shrink the frame to a dot — pan/zoom can still
+  // reach them outside it. If no layer opts in, all layers drive the frame (back-compat). `opts.bbox`
+  // ({ minX, maxX, minY, maxY }) is an explicit override.
+  const scan = (ls) => {
+    let mnX = Number.POSITIVE_INFINITY;
+    let mxX = Number.NEGATIVE_INFINITY;
+    let mnY = Number.POSITIVE_INFINITY;
+    let mxY = Number.NEGATIVE_INFINITY;
+    let c = 0;
+    for (const layer of ls) {
+      for (const p of layerPoints(layer)) {
+        c++;
+        if (p.x < mnX) mnX = p.x;
+        if (p.x > mxX) mxX = p.x;
+        if (p.y < mnY) mnY = p.y;
+        if (p.y > mxY) mxY = p.y;
+      }
     }
-  }
+    return { minX: mnX, maxX: mxX, minY: mnY, maxY: mxY, count: c };
+  };
+  const drivers = layers.filter((l) => l.bbox === true);
+  let box;
+  if (opts.bbox) box = { ...opts.bbox, count: 1 };
+  else if (drivers.length) {
+    box = scan(drivers);
+    if (box.count === 0) box = scan(layers); // drivers carried no points (all-dropped track) → fall back
+  } else box = scan(layers);
+  const { minX, maxX, minY, maxY, count } = box;
   if (count === 0) return `<svg xmlns="${SVG_NS}"></svg>\n`;
 
   // viewBox = the data's own bounding box, inset by `padding` on each axis (a fraction of that

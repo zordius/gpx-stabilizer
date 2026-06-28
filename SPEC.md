@@ -30,7 +30,7 @@ Both are built on a layered pipeline:
 gpx.js ──▶ analyze.js ───────────────────────────────────▶ enriched points ──▶ stabilize.js ──▶ out.gpx
 parse      label → measure → profile → compute-modules        (+ dropReason)     keep un-dropped
                        │         │            │
-                  point-level  window-level   noTime · sameTime · oversample · outlier · activity
+                  point-level  window-level   noTime · sameTime · oversample · outlier · stray · activity
 
 view.js / html.js ── project points ──▶ layers ──▶ SVG ──▶ HTML viewer
 ```
@@ -99,6 +99,7 @@ built-ins, in order:
 | `sameTime` | label | duplicate timestamps |
 | `oversample` | label | sub-1 s points → survivors land at ~1 Hz |
 | `outlier` | compute | GPS spikes: 3-point geometric detour, or speed-change spike |
+| `stray` | compute | points far outside the track's spatial bulk (median centre + bulk-radius × factor) — teleport/cluster garbage `outlier`'s single-point detour misses |
 | `activity` | compute | physically-implausible motion (see below) |
 
 ### Activity classification (`mods/activity.js`)
@@ -131,6 +132,12 @@ enabled activity** is dropped as `implausible`.
 - `view.js` projects points to local-meter `x/y` (north-up) and builds `Layer`s; a layer draws a
   **line** when a `width` is set, otherwise **markers**; a point style (`pointColor`/`size`) draws
   markers on top of the line (reusing its points).
+- **Frame on the kept track.** A layer may set `bbox: true` to opt in as the viewBox driver;
+  `analyzedLayers` marks the **clean** track so the default frame is the kept points alone. Every
+  layer — raw, drop markers, far `stray` garbage — is still **drawn**, but dropped points never grow
+  the frame (so a teleport to null-island no longer shrinks the real track to a dot); pan/zoom can
+  still reach anything drawn outside it. `toSvg` falls back to all layers when none opt in, and
+  `opts.bbox` is an explicit override.
 - `html.js` emits **semantic** HTML (no `<div>`): an `<h1>`, a summary `<p>`, then one `<section>`
   per file — each a sticky `<header>` (file-name `<h2>` anchor + overlaid legend) over a
   full-viewport `<svg>`. Each `<svg>` carries the data's bounding-box aspect ratio as a `--ar` CSS
