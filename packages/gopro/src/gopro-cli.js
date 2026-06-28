@@ -1,19 +1,25 @@
 #!/usr/bin/env node
-// gpx-from-gopro — extract GoPro GPS into merged GPX, grouped by camera family + local date.
+// gpx-from-gopro — extract GoPro GPS into merged GPX, one file per camera per local date.
 //   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
 //
 // - Recurses directories for video files (mp4/mov/m4v/360); skips .LRV/.THM and ._ AppleDouble.
-// - Groups by (filename family, local date): GOPR/GP = old camera, GX/GH = new camera; a session's
-//   first file (GOPR) and its continuation chapters (GP..) merge into one family.
+// - Groups by (camera, local date): camera = the body serial (udta CAME) when known, so two
+//   same-model bodies shot on the same day stay separate; falls back to the filename family
+//   (GOPR/GP = old, GX/GH = new) for files without a serial. Crash-fragmented files still merge
+//   (same serial+date), so a session GoPro split across a crash is rejoined into the day's file.
+// - Within a day's file, points split into one <trkseg> per recording session (udta GUMI): an
+//   uncrashed activity is one segment; a crash (new GUMI) shows as a segment break, same file.
 // - Local date: timezone from the median longitude of the first valid fixes (round(lon/15)),
 //   snapped to the machine's local timezone when within 1 hour; override with --tz.
-// - One merged <YYYYMMDD>-<family>.gpx per group, written to --out (default ".").
+// - One merged <YYYYMMDD>-<family>.gpx per group (a short serial suffix is added only when two
+//   cameras collide on the same family+date), written to --out (default ".").
 // - Tolerant: a file that fails to extract is logged and skipped, the run continues.
 // - Caches each file's extracted points (sidecar <file>.gpxcache.json by default, or --cache-dir),
 //   keyed by size+mtime+rate+version, so a killed run resumes without re-extracting done files.
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { saveGpx } from "gpx-stabilizer";
+import { buildGroups, family } from "./group.js";
 import { readGoproSamples } from "./telemetry.js";
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
@@ -50,17 +56,6 @@ const rate = opts.rate ? Number(opts.rate) : undefined;
 // per-file extraction cache (on by default): sidecar next to source; --cache-dir
 // redirects to a managed dir; --no-cache disables
 const cache = opts["no-cache"] ? false : opts["cache-dir"] ? { dir: opts["cache-dir"] } : true;
-
-// ---- camera family from filename ----
-function family(file) {
-  const b = basename(file).toUpperCase();
-  if (/^GOPR\d+\./.test(b)) return "GOPR";
-  if (/^GP\d\d\d+\./.test(b)) return "GOPR";
-  if (/^GX\d\d\d+\./.test(b)) return "GX";
-  if (/^GH\d\d\d+\./.test(b)) return "GH";
-  const m = b.match(/^([A-Z]+)/);
-  return m ? m[1] : "MISC";
-}
 
 // ---- timezone from median longitude of the first valid fixes ----
 function medianLon(points) {
@@ -124,7 +119,7 @@ if (videos.length === 0) {
 }
 console.log(`found ${videos.length} video file(s)`);
 
-const groups = new Map(); // key "YYYYMMDD-FAMILY" -> { points, family, date }
+const entries = []; // one per extracted file -> buildGroups
 let ok = 0;
 let skipped = 0;
 let failed = 0;
@@ -159,46 +154,31 @@ for (const file of videos) {
     skipped++;
     continue;
   }
-  const key = `${date}-${fam}`;
-  if (!groups.has(key)) groups.set(key, { points: [], family: fam, date });
-  // loop-push, not push(...points): same spread-overflow risk as the startMs
-  // reduce below — a single file can carry tens of thousands of points.
-  const bucket = groups.get(key).points;
-  for (const p of points) bucket.push(p);
-  console.log(`  ${basename(file)}: ${points.length} pts -> ${key}${fromCache ? " (cached)" : ""}`);
+  // Hand the grouping inputs to buildGroups: serial (CAME) splits cameras,
+  // mediaId (GUMI) splits recording sessions into <trkseg>s. See ./group.js.
+  entries.push({ family: fam, date, serial: meta.serial, mediaId: meta.mediaId, points });
+  const tag = meta.serial ? `${date}-${fam}#${meta.serial.slice(0, 4)}` : `${date}-${fam}`;
+  console.log(`  ${basename(file)}: ${points.length} pts -> ${tag}${fromCache ? " (cached)" : ""}`);
   ok++;
 }
 
 mkdirSync(outDir, { recursive: true });
+const { groups, skipped: emptyGroups } = buildGroups(entries);
+for (const name of emptyGroups) console.error(`  no real fix, skip group: ${name}`);
 const written = [];
-for (const [key, g] of groups) {
-  g.points.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-  // Drop pre-lock placeholder fixes: a cold-starting GPS emits null-island
-  // (0,0) points with a stale clock (often a 2021 default). They sort to the
-  // front on those bogus times and pollute the track; a file that never locks
-  // forms an all-placeholder stray-date group, so skip groups left empty.
-  const points = g.points.filter((p) => !(p.lat === 0 && p.lon === 0));
-  if (points.length === 0) {
-    console.error(`  no real fix, skip group: ${key}`);
-    continue;
-  }
-  // metadata start time = earliest real fix.
-  // reduce, not Math.min(...): a day-group can hold hundreds of thousands of
-  // points and spreading that many args overflows the call stack.
-  let startMs = null;
-  for (const p of points)
-    if (p.time != null && (startMs === null || p.time < startMs)) startMs = p.time;
+for (const g of groups) {
   const track = {
-    segments: [points],
+    segments: g.segments,
     meta: {
-      name: key,
-      time: startMs != null ? new Date(startMs).toISOString() : null,
+      name: g.name,
+      time: g.startMs != null ? new Date(g.startMs).toISOString() : null,
       type: null,
     },
   };
-  const path = join(outDir, `${key}.gpx`);
+  const path = join(outDir, `${g.name}.gpx`);
   saveGpx(track, path, { creator: "gpx-from-gopro" });
-  written.push(`${key}.gpx (${points.length} pts)`);
+  const npts = g.segments.reduce((s, seg) => s + seg.length, 0);
+  written.push(`${g.name}.gpx (${npts} pts, ${g.segments.length} seg)`);
 }
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
