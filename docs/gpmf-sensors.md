@@ -71,23 +71,26 @@ is a **post-parse, in-memory** filter. Measured (local SSD):
 
 **Extra IO for all-streams vs GPS-only = 0 bytes.** So multi-sensor is free on the axis that
 hurt (the SMB read); only a few hundred ms of extra parse CPU. Implication: **extract once,
-parse many** — and optionally cache the raw 243 KB GPMF buffer so any stream is re-derivable
-with zero re-IO (today's cache stores only the GPS points).
+parse many** — **now built** (§3): `readGoproSamples` extracts and caches *all* streams, so the
+GPS-only CLI run also populates the rich cache at ~0 extra IO.
 
-## 3. Architecture — keep the dep, widen the gate
+## 3. Architecture — keep the dep, widen the gate *(built)*
 
 - **`gopro-telemetry` stays** — it already parses every stream with names/units/scaling/sticky/
-  timing (the dump used it). Multi-stream = drop `stream: ["GPS"]` in `gopro.js` and use
-  `timeIn: "MP4"`/cts (universal) instead of GPS-UTC time. We were *under*-using the dep, not
-  needing to replace it. (Replacing it is a separate, optional zero-dep decision.)
+  timing (the dump used it). Multi-stream just drops the `stream: ["GPS"]` filter and uses
+  `timeIn: "MP4"`/cts (universal). We were *under*-using the dep, not needing to replace it.
 - **`gpmf-extract` unchanged** (already extracts the whole gpmd track).
-- **Add `extractGoproStreams(path, { streams })`** alongside `extractGoproPoints`; keep the
-  GPS `TrackPoint[]` API as-is (multi-stream needs a per-stream sample shape).
+- **`extractGoproAll(path)` → `{ points, streams }`** (built, exported) — GPS `TrackPoint[]` plus
+  every non-GPS stream as `{ name, units, samples: [{ cts, value }] }`, aux at native rate.
+  `extractGoproPoints` (GPS-only `TrackPoint[]`) is unchanged for existing callers.
+- **Cached**: `readGoproSamples` extracts via `extractGoproAll` and stores `{ meta, points, streams }`
+  (CACHE_V stays 3, additive). Both the lib and the CLI go through it, so both populate the rich
+  cache. `meta` also carries `model`/`firmware` (read from `udta/FIRM`).
 - **Per-model gotchas** for any IMU code: ISO key/scale (`ISOG`×100 vs `ISOE`); ACCL/GYRO
-  **axis conventions differ** (Hero5 GYRO is `(z,x,y)`); sample rates differ. Build a per-model
-  axis/scale map as each model is tested.
+  **axis conventions differ** (Hero5 GYRO is `(z,x,y)`); GYRO rate differs (Hero5 ~400, Hero10 ~200).
+  Branch on `meta.model` (§1) — build the per-model axis/scale map as each model is tested.
 - **Time alignment**: IMU/image streams ride media `cts`; GPS has UTC. Align on `cts` (already
-  extracted for the start-regression).
+  extracted for the start-regression) — payload-precise (§1).
 
 ## 4. Use-case catalog (validate one by one)
 

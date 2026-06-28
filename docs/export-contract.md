@@ -26,7 +26,8 @@ TrackPoint = {
 }
 
 // src/gopro.js
-GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS }
+GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS, model, firmware }
+//   model/firmware read from the MP4 udta FIRM atom (e.g. "HERO5" / "HD5.02.02.60.00"), or null
 ```
 
 ---
@@ -41,8 +42,9 @@ GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS }
 ### A. Surface the existing GoPro functions (they live in `packages/gopro/src/gopro.js`)
 
 ```js
-probeGoproMeta(path)                      // → Promise<GoproMeta>   (cheap moov-only probe)
+probeGoproMeta(path)                      // → Promise<GoproMeta>   (cheap moov-only probe; incl. model/firmware)
 extractGoproPoints(path, { rate? })       // → Promise<TrackPoint[]> (native ~18 Hz; rate in Hz to downsample)
+extractGoproAll(path, { rate? })          // → Promise<{ points, streams }>  (GPS + every non-GPS stream)
 stabilize(points, opts?)                  // → TrackPoint[]          (already exported)
 ```
 
@@ -135,15 +137,20 @@ per file.
 
 ```js
 readGoproSamples(path, {
-  rate?,                       // Hz; omit = native ~18 Hz
+  rate?,                       // Hz; omit = native ~18 Hz (downsamples GPS points only)
   cache?,                      // true (default) | false | { dir }
-}) // → Promise<{ meta, points, fromCache }>   points: [] when no GPS track
+}) // → Promise<{ meta, points, streams, fromCache }>   points: [] / streams: {} when no GPS track
 ```
 
 - `readGoproSamples` is the cached probe+extract that backs `readGoproTelemetry`.
   Both take the same `cache` option; the derivations (timezone, start anchor,
   stabilize) are cheap pure functions over the cached raw points and are **not**
   themselves cached.
+- **`streams`** = every non-GPS GPMF channel (IMU `ACCL`/`GYRO`, `SCEN`, exposure, …)
+  as `{ name, units, samples: [{ cts, value }] }`, kept at native rate — for
+  multi-sensor work (see [`gpmf-sensors.md`](gpmf-sensors.md)). Extracting them costs
+  ~0 extra IO (one shared `gpmd` track; the stream filter is post-parse), so the cache
+  now carries the full telemetry, not just GPS points. `rate` downsamples only `points`.
 - **Default = on, sidecar.** With no `cache` (or `cache: true`) a record is
   written next to the source as `<file>.gpxcache.json`. Pass **`cache: false`**
   for a pure, side-effect-free read (no file writes), or **`cache: { dir }`** to
@@ -153,10 +160,13 @@ readGoproSamples(path, {
   change misses and re-extracts; writes are atomic (temp-then-rename). A hit
   returns `{ meta, points }` **without touching the file at all** (the moov probe
   is skipped too).
-- **What's cached** is the raw extraction (`{ meta, points }`, points carrying
-  `cts`); `probeGoproMeta` (cheap, moov-only) and `stabilize`/tz/anchor are not.
-- **`CACHE_V` discipline**: bump it whenever the cached point shape or extraction
-  output changes, so stale records are auto-invalidated. (v3 added `cts`.)
+- **What's cached** is the raw extraction (`{ meta, points, streams }`, points
+  carrying `cts`, `meta` carrying `model`/`firmware`); `stabilize`/tz/anchor are not.
+- **`CACHE_V` discipline**: bump it whenever the cached shape or extraction output
+  changes, so stale records are auto-invalidated. (v3 added `cts`; `streams` +
+  `model`/`firmware` are later **additive** v3 fields — an older v3 record reads back
+  with them absent, so during multi-sensor iteration stale records are cleared by hand
+  rather than bumped; bump before shipping.)
 
 ---
 
@@ -189,11 +199,11 @@ readGoproSamples(path, {
     was never exercised**. Closing this needs a Hero11+ (or later, GPS9) `.mp4`/
     `.360` sample — none available at time of writing. Re-run the integration test
     against such a file to confirm `fix`/`hdop` before relying on GPS9.
-- **Only the GPS stream** is extracted; accel/gyro/etc. (the >1 Hz non-GPS data)
-  are **not** in this contract's v1. Extending to them (IMU / scene / audio, for
-  multi-sensor cross-validation of the GPS) is designed in
-  [`gpmf-sensors.md`](gpmf-sensors.md) — and costs **zero extra IO** (all streams
-  share the one `gpmd` track; the `stream` filter is post-parse).
+- **Non-GPS streams** (IMU `ACCL`/`GYRO`, scene, exposure, …) are **now extracted and
+  cached** via `extractGoproAll` / `readGoproSamples.streams` — at **zero extra IO**
+  (all streams share the one `gpmd` track; the `stream` filter is post-parse). The
+  GPS-only `readGoproTelemetry` contract (B–E) is unchanged; the streams ride alongside
+  for multi-sensor cross-validation (see [`gpmf-sensors.md`](gpmf-sensors.md)).
 - `probeGoproMeta` (mp4box) overlaps a renderer's own video probe (movie-layers
   uses ffprobe). Both are fine; the renderer picks one. Expose it anyway — useful
   standalone and as the `hasGps` gate.
