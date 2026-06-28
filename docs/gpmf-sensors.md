@@ -53,9 +53,17 @@ energy (±300 ms, as #2/#6 use), but **don't trust a single sample's `cts` for s
 (impacts, vibration, carve dynamics). Decimating 200 Hz → 1 Hz **aliases** (high-freq folds in → a
 meaningless near-gravity reading). Reduce by a windowed **statistic** instead — RMS / peak / variance
 of `|ACCL|−g` per GPS sample — which is what #2/#6 already do, effectively consuming the IMU at GPS
-rate. Keep the **raw** stream in the cache (re-derivable features); GYRO's high rate is needed for #1
-(carve), so don't reduce it. (Hero5 records GYRO at **2×** ACCL — ~400 Hz — so #1 gets finer turn
-dynamics there.)
+rate. Keep the **raw** stream in the cache (re-derivable features); GYRO's high rate feeds the
+orientation / mount work (#10/#11), so don't reduce it (Hero5 records it at **2×** ACCL — ~400 Hz).
+
+**GYRO drift — estimate and remove the bias, never raw-integrate.** Measured on a static clip (Hero5
+sitting on a table): a steady per-axis bias ≈ **1.3 °/s** (plus ~0.2 °/s noise). Integrated to a
+heading that is **~13° off at 10 s, ~79° at 60 s** — so **raw gyro integration only holds for ~10 s**;
+beyond that bias dominates. The bias is **estimable per clip** (the static-period mean) and removable →
+residual drift drops to the random-walk floor (~minutes usable); fusing with an absolute reference
+(`ACCL` gravity for tilt, GPS heading for yaw — the #11 loop) de-drifts it entirely. So **never
+dead-reckon heading from raw gyro** — estimate + subtract bias, then fuse. (One unit, uncalibrated,
+temperature-dependent → order-of-magnitude; re-estimate per clip.)
 
 ## 2. IO cost — reading more streams is free
 
@@ -123,6 +131,7 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
 | 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | UNVERIFIED |
 | 10 | **GYRO heading vs GPS heading → mount type** | `activity` (vehicle vs body) + a *meta*-gate: is camera-heading = travel? | GYRO (+`GRAV`/AHRS for the yaw axis) | both | ★★ | correlate GYRO-yaw heading-change with GPS heading-change over moving segments — **tight ⇒ hard/vehicle** mount (camera ≈ travel), **loose ⇒ soft/body** mount. A high-corr clip *unlocks* GYRO-as-travel-heading (turn-type, dead-reckon); a low-corr clip must **not** use it (the §3 facing caveat) | UNVERIFIED |
+| 11 | **GYRO return-to-center → travel / fall-line direction** | recover course on a *soft* mount (where camera-heading ≠ travel); also gyro bias self-cal | GYRO (+`GRAV`/AHRS) | both | ★★ | accumulate gyro heading over a window; its **time-center ≈ the dominant travel direction** (humans naturally return to facing forward). Window bound: raw gyro drifts ~13°/10 s so it must be bias-removed (per-clip) and/or GPS-de-drifted (the §1 fusion loop). **Ski caveat**: the head faces the fall line, so the center is the *run's descent direction*, not per-carve heading | UNVERIFIED |
 
 ¹ On Hero5 (no `GRAV`/`CORI`) gravity & orientation must be self-estimated from raw `ACCL`/`GYRO`.
 ² `YAVG` (measured luma) is Hero10-only; `SHUT`/`ISO` on both → the proxy itself is portable.
