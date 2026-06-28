@@ -185,7 +185,10 @@ readGoproSamples(path, {
     `.360` sample — none available at time of writing. Re-run the integration test
     against such a file to confirm `fix`/`hdop` before relying on GPS9.
 - **Only the GPS stream** is extracted; accel/gyro/etc. (the >1 Hz non-GPS data)
-  are **not** in this contract's v1.
+  are **not** in this contract's v1. Extending to them (IMU / scene / audio, for
+  multi-sensor cross-validation of the GPS) is designed in
+  [`gpmf-sensors.md`](gpmf-sensors.md) — and costs **zero extra IO** (all streams
+  share the one `gpmd` track; the `stream` filter is post-parse).
 - `probeGoproMeta` (mp4box) overlaps a renderer's own video probe (movie-layers
   uses ffprobe). Both are fine; the renderer picks one. Expose it anyway — useful
   standalone and as the `hasGps` gate.
