@@ -35,18 +35,51 @@ gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cach
 
 ### 1. Re-verify post-refactor extraction (caches predate the monorepo split)
 
-The real 3-day end-to-end validation (124 files; the stack-overflow + GPS
-cold-start `(0,0)` bugs it surfaced are fixed in commit `f581a58`) was **rerun via
-the on-drive sidecar caches**, so it confirmed the write/group/skip/field paths but
-ran them on points extracted *before* the refactor — `CACHE_V` is still `2`. The
-**post-refactor** extraction code (cts / recording-start commits) was therefore
-**not** re-verified. Closing this needs a `--no-cache` (or `CACHE_V` bump) full
-re-extraction (~7 h). Decide whether it's worth the run.
+**Status: full `--no-cache` re-extraction LAUNCHED 2026-06-28 (in progress, ~7 h).**
+Another session can pick up the check when it finishes — see "How to check the
+result" below.
+
+**Why this run exists.** The real 3-day end-to-end validation (124 files; the
+stack-overflow + GPS cold-start `(0,0)` bugs it surfaced are fixed in commit
+`f581a58`) was **rerun via the on-drive sidecar caches**, so it confirmed the
+write/group/skip/field paths but ran them on points extracted *before* the
+refactor — `CACHE_V` is still `2`. The **post-refactor** extraction code (cts /
+recording-start commits) was therefore **not** re-verified. `--no-cache` forces a
+fresh extraction with the current code (it neither reads nor writes the sidecar
+caches), which is exactly what this run re-verifies.
+
+**The run** (background; the drive `/Volumes/ZS14T2025` is a flaky SMB mount —
+`found N` has drifted 124/114/54 across past runs and a file once probed `EISDIR`,
+so expect intermittent partial walks — not a tool bug):
 
 ```sh
 node ~/zrepos/gpx-stabilizer/packages/gopro/src/gopro-cli.js \
   /Volumes/ZS14T2025/p/20260211-ski --out ~/gpx-validate/out --no-cache
 ```
+
+- **Input**: `/Volumes/ZS14T2025/p/20260211-ski` — 124 files, GOPR=Hero5 `j/` +
+  GX=Hero10 `z/`.
+- **Output**: `~/gpx-validate/out` (6 merged GPX expected).
+- If interrupted, just re-run the same command — `--no-cache` makes it idempotent
+  (it always re-extracts from scratch; no resume state to corrupt).
+
+**How to check the result** (whoever lands here after the run finishes). The
+acceptance bar is the same one the cache-based rerun hit, re-confirmed now on
+freshly-extracted points:
+
+- console tail reads `processed=120 skipped=4 failed=0` (the 4 skips = `no GPS
+  track, skip` via the moov probe).
+- `~/gpx-validate/out` holds exactly **6** files = GOPR+GX × 2026-02-11/12/13.
+- each trkpt carries `ele` (MSL), `time`, `speed`, `fix`, `hdop`.
+- `xmllint --noout` is clean on all 6.
+- `(0,0)` null-island residual = 0; the first trkpt of each file is a real fix
+  (the 2026-02-11 files start near `37.54,140.15`).
+- **post-refactor-specific**: points carry `cts`, and start-anchor regression runs
+  (`recordingStartUtc`/`resolveStartUtc`) — confirm no crash and a sane
+  `slope ≈ 1`. Optionally diff the 6 outputs against the prior cache-based run to
+  confirm the post-refactor extraction produces equivalent points.
+
+If all pass, this item is **DONE** — record the outcome and delete it.
 
 ## Ideas parked (not started)
 
