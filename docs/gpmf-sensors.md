@@ -18,8 +18,8 @@ sample values), `io_cost.mjs` (IO measurement). Run them on any model to extend 
 | stream | Hero5 (GOPR) | Hero10 (GX) | meaning |
 |---|---|---|---|
 | `GPS5` | ✓ | ✓ | lat, lon, alt, 2D/3D speed (+ sticky `fix`, `precision`=DOP×100) |
-| `ACCL` | ✓ ~200 Hz | ✓ ~20 Hz | accelerometer m/s² (+ sticky temperature) |
-| `GYRO` | ✓ ~400 Hz | ✓ ~20 Hz | gyroscope rad/s |
+| `ACCL` | ✓ ~200 Hz | ✓ ~200 Hz | accelerometer m/s² (+ sticky temperature) |
+| `GYRO` | ✓ ~400 Hz | ✓ ~200 Hz | gyroscope rad/s |
 | `SHUT` | ✓ | ✓ | exposure / shutter time (s) |
 | ISO | `ISOG` (ISO×100) | `ISOE` (ISO) | sensor gain — **different key & scale** |
 | `GRAV` | — | ✓ | gravity vector (down direction) |
@@ -74,7 +74,7 @@ with zero re-IO (today's cache stores only the GPS points).
 | # | use | target open problem | streams | device | ★ | how to validate | status |
 |---|---|---|---|---|---|---|---|
 | 1 | **GYRO → carve vs spike** | `despike` / ski "real carve or noise?" | GYRO | both | ★★★ | yaw-rate vs GPS heading-change at `despike`-flagged points; real turn ⇒ gyro yaw, spike ⇒ none | UNVERIFIED |
-| 2 | **ACCL → kill teleport false-claims** | `stray` / `outlier` | ACCL (+GRAV+CORI) | both¹ | ★★★ | a GPS jump with ~zero body linear accel = confirmed garbage | UNVERIFIED |
+| 2 | **ACCL → kill teleport false-claims** | `stray` / `outlier` | ACCL (+GRAV+CORI) | both¹ | ★★★ | a GPS jump with ~zero body linear accel = confirmed garbage | **CONFIRM ✓**⁵ |
 | 3 | **SCEN → obstruction (device-independent)** | obstruction detection — hdop fails on GX | SCEN | Hero10 | ★★★ | correlate vegetation/indoor prob with the hdop≥3 spatial clusters (GOPR's hdop knee is the ground truth) | UNVERIFIED |
 | 4 | **GRAV+GYRO → carve lean** | ski `carve` signal | GRAV, GYRO | Hero10 | ★★ | roll (from GRAV) + yaw synchronized through a carve | UNVERIFIED |
 | 5 | **SCEN(indoor)+low-speed+FACE → rest/queue** | temporal activity segmentation (roadmap) | SCEN, FACE, GPS speed | Hero10 | ★★ | indoor/face episodes ↔ stationary runs (the base-area hdop clusters) | UNVERIFIED |
@@ -98,6 +98,16 @@ with zero re-IO (today's cache stores only the GPS points).
   standalone altitude. **Gated**: only worth building if the contract's plain distance-domain
   smoothing proves insufficient — likely overkill for ski descents (the real grade dominates the
   noise), but kept on the list because GPS altitude is the noisiest GPS axis.
+⁵ **Verified 2026-06-28** on `GX065132.MP4` (Hero10, real ~200 Hz ACCL). `|ACCL|`mean ≈ g (sensor
+  sane); IMU linear force correlates with GPS position-acceleration (Pearson r ≈ 0.39 — moderate, as
+  ACCL is an accel/vibration sensor, not a speedometer), and the top real GPS-accel events all have
+  IMU corroboration. A controlled ~700 m teleport injected at the calmest point sent GPS pos-accel to
+  **70 568 m/s²** while IMU stayed **0.77 m/s²** — a **~92 000×** separation, so "high GPS accel ∩
+  flat IMU = garbage" holds with a 5-orders-of-magnitude margin and won't false-positive on real
+  maneuvers. The **CONFIRM** direction (additive drop) is a standalone `compute` module (flavor A,
+  zero core change). The **RESCUE** direction (un-drop a `stray`/`outlier` false positive) needs the
+  proposed `finalize` phase ([`SPEC.md`](../SPEC.md)). Pending: a real cold-start garbage clip (this
+  33 s chapter had no teleport, hence injection); probe `gpx_eval/accl_validate2.mjs`.
 
 ## 5. Strategy
 

@@ -102,6 +102,36 @@ built-ins, in order:
 | `stray` | compute | points far outside the track's spatial bulk (median centre + bulk-radius × factor) — teleport/cluster garbage `outlier`'s single-point detour misses |
 | `activity` | compute | physically-implausible motion (see below) |
 
+### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
+
+**Status: proposed (not implemented).** Today a module exports `repair` / `label` / `compute`. Two
+additions let modules consume **external per-point signals** (IMU / scene / exposure — see
+[`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)) and do **final reconciliation / reconstruction**
+(rescue a false drop, reposition/smooth — see the elevation-reconstruction contract above), **without
+breaking core's zero-dep, source-agnostic, base-is-pure-geometry ethos**. Both stay opt-in; the base
+`stabilize` is unchanged.
+
+- **`aux` in the shared ctx (flavor B).** An optional `opts.aux` namespace (per-point-aligned arrays,
+  e.g. `{ accl, gyro, scene, exposure }`) is threaded into the compute ctx, so *any* module can read
+  an external signal — and *any future* signal (OSM piste, weather, DEM) joins the same way. Core
+  stays source-agnostic: the **caller pre-aligns** the side data onto the point timeline (the
+  `gpx-from-gopro` adapter does this from GPMF `cts`); core only merges, never touches sample rates.
+- **`finalize(out, ctx)` — a 4th phase (the customizable final stage).** Runs **after assemble**,
+  over the fully-assembled points (every `dropReason`, signal, and `aux`). Unlike `compute` (modules
+  independent), `finalize` modules run **sequentially and see each other's results** — the home for
+  cross-module **reconciliation** (un-drop a `stray`/`outlier` false positive when IMU shows real
+  motion — there is otherwise no `removeDrop`), **reconstruction** (reposition / smooth `ele`), and
+  the planned **drop → keep/reposition** decision. The reconstruction tier becomes `finalize` modules.
+- **aux may also ride a module's closure (flavor A).** A module factory `m(acclSamples) → { compute }`
+  closes over external data, so a *standalone* aux module (emit own signals / own drops, e.g. the
+  validated #2 teleport-confirm) needs **no core change at all** — it's just a user module passed via
+  `opts.modules`. Flavor B + `finalize` are for when a module must read aux mid-decision or override
+  another module's drop.
+
+So: **everything stays a module** (a file exports any of `repair` / `label` / `compute` / `finalize`);
+extraction is the adapter's job (mp4 → `gpx-from-gopro`), analysis stays in core, and the cross-sensor
+logic enters through these opt-in seams — core never depends on `gpx-from-gopro` or GoPro libs.
+
 ### Activity classification (`mods/activity.js`)
 
 **Positive listing**: each point is classified into the human-movement activities whose **coupled
