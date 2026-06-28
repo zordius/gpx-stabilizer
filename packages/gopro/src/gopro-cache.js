@@ -10,7 +10,8 @@ import { basename, join, resolve } from "node:path";
 // extraction output changes, so stale records read as a miss and re-extract.
 // 3: points carry `cts` (media offset); the record is { meta, points, streams },
 // where `streams` holds every non-GPS GPMF channel (IMU/scene/exposure/…) as raw
-// cts samples and `meta` also carries `model`/`firmware`. These additions are
+// cts samples and `meta` also carries camera fields (`model`/`firmware`/`serial`/
+// `mediaId`/`highlights`, from the moov udta). These additions are
 // ADDITIVE — an older v3 record without them reads back as `streams: {}` / absent
 // fields (graceful), so while the multi-sensor format is still iterated we clear
 // stale records by hand instead of bumping the version; bump before shipping.

@@ -73,18 +73,34 @@ export function goproModel(firmware) {
  * @param {string} fourcc  e.g. "FIRM"
  * @returns {string | null}
  */
-export function readUdtaAtom(buf, fourcc) {
+export function readUdtaRaw(buf, fourcc) {
   const i = buf.indexOf(fourcc, 0, "latin1");
   if (i < 4) return null;
   const size = buf.readUInt32BE(i - 4); // the 4 bytes before the 4CC are the atom's byte size
   if (size < 8 || i - 4 + size > buf.length) return null;
-  return (
-    buf
-      .subarray(i + 4, i - 4 + size)
-      .toString("latin1")
-      .replace(/\0+$/, "")
-      .trim() || null
-  );
+  return buf.subarray(i + 4, i - 4 + size);
+}
+
+/**
+ * A GoPro `udta` atom read as a trimmed ASCII string (`FIRM`, `LENS`, …), or null.
+ * @param {Buffer} buf
+ * @param {string} fourcc
+ * @returns {string | null}
+ */
+export function readUdtaAtom(buf, fourcc) {
+  const d = readUdtaRaw(buf, fourcc);
+  return d ? d.toString("latin1").replace(/\0+$/, "").trim() || null : null;
+}
+
+// Parse the `HMMT` atom (GoPro highlight tags = the times the user pressed the tag button): a u32
+// count, then that many u32 millisecond offsets. [TBC] format inferred from a count=0 sample; not
+// verified against a clip with real highlights.
+function parseHighlights(buf) {
+  if (!buf || buf.length < 4) return [];
+  const n = buf.readUInt32BE(0);
+  const out = [];
+  for (let k = 0; k < n && 8 + k * 4 <= buf.length; k++) out.push(buf.readUInt32BE(4 + k * 4));
+  return out;
 }
 
 /**
@@ -98,6 +114,9 @@ export function readUdtaAtom(buf, fourcc) {
  * @property {number | null} durationS video duration in seconds
  * @property {string | null} firmware  GoPro firmware string (e.g. "HD5.02.02.60.00"), or null
  * @property {string | null} model     camera model from the firmware (e.g. "HERO5"), or null
+ * @property {string | null} serial    camera serial (udta `CAME`, hex) — tells two same-model bodies apart
+ * @property {string | null} mediaId   global media id (udta `GUMI`, hex) — links a recording's chapter files
+ * @property {number[]} highlights     user highlight-tag offsets in ms (udta `HMMT`); [] if none
  */
 
 /**
@@ -140,8 +159,12 @@ export async function probeGoproMeta(path) {
     const gpmd = tracks.find((t) => t.codec === "gpmd");
     const video = tracks.find((t) => t.type === "video") ?? tracks.find((t) => t.video);
     const durationS = info?.duration && info?.timescale ? info.duration / info.timescale : null;
-    // FIRM is a custom atom deep in moov's udta — read it from the (contiguous) moov bytes above
-    const firmware = readUdtaAtom(Buffer.concat(moovChunks), "FIRM");
+    // GoPro stows camera meta in moov's udta as custom atoms — read them from the moov bytes above
+    // (already in hand, ~0 extra IO): FIRM=firmware, CAME=serial, GUMI=media id, HMMT=highlight tags.
+    const moov = Buffer.concat(moovChunks);
+    const firmware = readUdtaAtom(moov, "FIRM");
+    const came = readUdtaRaw(moov, "CAME");
+    const gumi = readUdtaRaw(moov, "GUMI");
     return {
       hasGps: gpmd != null && gpmd.nb_samples > 0,
       gpmdSamples: gpmd?.nb_samples ?? 0,
@@ -152,6 +175,9 @@ export async function probeGoproMeta(path) {
       durationS,
       firmware,
       model: goproModel(firmware),
+      serial: came ? came.toString("hex") : null,
+      mediaId: gumi ? gumi.toString("hex") : null,
+      highlights: parseHighlights(readUdtaRaw(moov, "HMMT")),
     };
   } finally {
     await fh.close();

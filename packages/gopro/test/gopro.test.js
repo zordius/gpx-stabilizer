@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { goproModel, readUdtaAtom } from "../src/gopro.js";
+import { goproModel, readUdtaAtom, readUdtaRaw } from "../src/gopro.js";
 
 test("goproModel: maps a firmware prefix to the camera model", () => {
   assert.equal(goproModel("HD5.02.02.60.00"), "HERO5"); // verified real Hero5
@@ -23,4 +23,17 @@ test("readUdtaAtom: reads a GoPro udta atom string by 4CC", () => {
   assert.equal(readUdtaAtom(buf, "FIRM"), "HD5.02.02.60.00");
   assert.equal(readUdtaAtom(buf, "NOPE"), null); // absent 4CC
   assert.equal(readUdtaAtom(Buffer.from("FIRM short"), "FIRM"), null); // 4CC too early (no size prefix)
+});
+
+test("readUdtaRaw: returns the raw atom bytes (for binary atoms like CAME)", () => {
+  const head = Buffer.alloc(4);
+  head.writeUInt32BE(8 + 3, 0); // size = 4 (size) + 4 (4CC) + 3 (data)
+  const buf = Buffer.concat([
+    Buffer.from("xxxx"),
+    head,
+    Buffer.from("CAME"),
+    Buffer.from([0xab, 0xcd, 0xef]),
+  ]);
+  assert.equal(readUdtaRaw(buf, "CAME")?.toString("hex"), "abcdef");
+  assert.equal(readUdtaRaw(buf, "NONE"), null);
 });
