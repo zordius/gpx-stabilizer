@@ -198,7 +198,10 @@ assemble.)
   (kept) track, one marker layer per drop reason (`drift` · `stray` · `outlier` · `activity`), and
   device-`hdop` quality overlays (`hdop 2–3`, `hdop ≥3`, plus the stationary-`paused ∩ ≥3`
   "garbage-zone" subset the pipeline currently keeps). Still open: shade the clean line by a signal
-  (e.g. `hs`), and surface `activity.modes`.
+  (e.g. `hs`), and surface `activity.modes`. **What hdop means and whether it's usable is
+  device-dependent** — see [`docs/hdop-notes.md`](docs/hdop-notes.md) (good chips give a clean
+  baseline/obstruction split; poor chips give an unusable noise ramp), which gates any future move to
+  wire hdop into the pipeline.
 - **Drop → keep / reposition, and where framing rides (direction)** — the drop modules only emit a
   **drop signal**; the eventual reconstruction tier (see roadmap: *track smoothing*) is a later stage
   that decides, per dropped point/run, **discard vs reposition** (move it back onto a plausible line)
