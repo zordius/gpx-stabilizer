@@ -121,6 +121,11 @@ TelemetryResult = {
   `hdop` should pass `stabilize: false` and clean downstream, or read them off the raw
   points. (Decision 2026-06-27: keep `stabilize` minimal rather than widen core; revisit
   if a consumer genuinely needs cleaned points *with* those fields.)
+  - **Revisit trigger now met (2026-06-28):** movie-layers' `speed` widget fails its
+    `needs:['speed']` gate under `stabilize: true` (the channel comes back empty).
+    Folded into the elevation-reconstruction contract in [`SPEC.md`](../SPEC.md) —
+    decide there whether the cleaned shape carries `speed`, or the export derives it
+    from `kinematics.velocity.mag` (3D speed already computed in `measure`).
 
 ### E. Caching (opt-in, **on by default**)
 

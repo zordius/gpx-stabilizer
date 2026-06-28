@@ -166,10 +166,71 @@ statistic O(1)/point instead of O(W).
 
 Beyond the base + the eval viewer, still to come:
 
-- track smoothing (resample/smooth the cleaned survivors)
+- track smoothing (resample/smooth the cleaned survivors) — **elevation
+  reconstruction contract specced below**
 - segment classification / lift handling / segment bridging / cluster cleanup
 - OSM validation
 - temporal activity segmentation (smooth per-point `activity.modes` into activity runs)
+
+## Track smoothing — elevation reconstruction (contract) *(added 2026-06-28)*
+
+**Status: proposed (not implemented).** Promotes the roadmap's "track smoothing"
+bullet to a contract. Smoothing of survivors is still absent today — `stabilize`
+removes noise *points*; it never rewrites a survivor's values.
+
+### Why (the finding)
+
+A downstream consumer (movie-layers `provider-gopro` / `provider-gpx`) derives a
+**gradient** channel as `Δele / horizontal-distance` — which this lib deliberately
+leaves to the renderer ([`docs/export-contract.md`](docs/export-contract.md): *gradient
+is the renderer's job*). On real ski footage (`GX065132.MP4`, Hero10, 33 s) the
+derived grade swings **−39 … +26 %** with heavy frame-to-frame jitter, because
+**per-sample GPS elevation noise (±several m)** survives `stabilize`: it drops outlier
+*points* but leaves each kept point's `ele` raw. The consumer already averages slope
+over a ~20 m horizontal baseline and *still* jitters — a windowed *slope* cannot
+recover from a noisy underlying *elevation*. Every consumer would re-implement the
+same fix. Elevation truth, and the kinematic context to smooth it (`profile.vs`,
+along-track distance), live **here** — so the smoothing belongs here, as the
+long-planned opt-in module on the survivors.
+
+### Contract (proposed)
+
+An opt-in module over the cleaned survivors (post-drop), with measure/profile context,
+producing a **slope-stable elevation**:
+
+- **Distance-domain smoothing.** Smooth `ele` over an along-track **length scale in
+  metres** (a `profile.js` PARAM, e.g. `SMOOTH_WIN_M`), *not* a time/index window — so
+  it is robust to variable speed and sample spacing, matching the planar-distance basis
+  `measure` already computes (`cps`/`cpath`). Endpoints use a shrinking window.
+- **Guarantee.** Per-sample vertical noise is reduced so grade = `Δele* / Δdist` over
+  that scale has **bounded jitter** (small mean `|Δgrade|` per metre), while real
+  terrain grade over the scale is preserved (true climbs are not flattened).
+- **Output shape.** Per the module data-model the smoothed series is emitted as a
+  namespaced signal `point.smooth.ele` (raw `ele` untouched in-pipeline). The **export**
+  decides what ships: `stabilize` stays raw by default (base ethos — removal, not
+  rewriting); an opt-in (`opts.smooth`, or the module being enabled) makes the exported
+  `ele` the smoothed value, raw retained under a label if round-trip fidelity is wanted.
+  `stabilize`'s `{lat,lon,ele,time}` shape is unchanged; only the *meaning* of `ele`
+  flips when smoothing is on.
+- **Parameters per activity.** The length scale differs by activity (ski vs walk);
+  defaults tie into the ski-tier work (`profile` PARAMS / `CORE_DEFAULT`).
+
+### Acceptance
+
+Re-derive gradient on `GX065132.MP4` through the consumer: raw = −39…26 % at high
+jitter; smoothed = grade tracking terrain with bounded jitter at a *modest* consumer
+baseline. The movie-layers render is the eval harness.
+
+### Related finding — `stabilize` drops `speed`
+
+The same investigation hit the documented gap in
+[`docs/export-contract.md`](docs/export-contract.md) §D: `stabilize` reduces survivors
+to `{lat,lon,ele,time}`, so a consumer's **speed** channel vanishes under
+`stabilize: true` (movie-layers' speed widget then fails its `needs:['speed']` gate).
+That doc's "revisit if a consumer genuinely needs cleaned points *with* those fields"
+trigger is now **met**. The reconstruction tier is the natural home for the decision:
+carry `speed` through the cleaned shape, or have the export derive it from
+`kinematics.velocity.mag` (3D speed already computed in `measure`). Tracked here.
 
 ## Design notes — per-stage roadmap & open reviews
 
