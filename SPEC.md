@@ -162,7 +162,6 @@ Beyond the base + the eval viewer, still to come:
 - track smoothing (resample/smooth the cleaned survivors)
 - segment classification / lift handling / segment bridging / cluster cleanup
 - OSM validation
-- CLI wiring (`gpx-stabilize`) — currently a stub
 - temporal activity segmentation (smooth per-point `activity.modes` into activity runs)
 
 ## Design notes — per-stage roadmap & open reviews
