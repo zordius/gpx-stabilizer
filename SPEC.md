@@ -214,6 +214,11 @@ producing a **slope-stable elevation**:
   flips when smoothing is on.
 - **Parameters per activity.** The length scale differs by activity (ski vs walk);
   defaults tie into the ski-tier work (`profile` PARAMS / `CORE_DEFAULT`).
+- **Advanced (future, GoPro-only).** GoPro has no barometer (altitude is GPS-derived,
+  the noisiest GPS axis); a complementary filter could fuse low-pass GPS `ele` with
+  high-pass IMU vertical acceleration to constrain the *shape* between samples — gated on
+  plain distance-domain smoothing proving insufficient. Catalogued as candidate #9 in
+  [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) (IMU drift / world-frame caveats there).
 
 ### Acceptance
 

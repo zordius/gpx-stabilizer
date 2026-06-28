@@ -81,6 +81,7 @@ with zero re-IO (today's cache stores only the GPS points).
 | 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | IMU motion energy ≈ 0 ⇒ really stopped (vs GPS drift while moving) | UNVERIFIED |
 | 7 | **exposure (SHUT×ISO) → obstruction / indoor (PORTABLE)** | obstruction detection — the one proxy that works on *both* chips | SHUT, ISO (+`YAVG` on Hero10) | both² | ★★ | per-clip-relative `SHUT×ISO` (or `YAVG`) vs `SCEN` indoor/vegetation prob + GOPR hdop≥3 clusters (ground truth) + known indoor episodes³ | UNVERIFIED |
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
+| 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | UNVERIFIED |
 
 ¹ On Hero5 (no `GRAV`/`CORI`) gravity & orientation must be self-estimated from raw `ACCL`/`GYRO`.
 ² `YAVG` (measured luma) is Hero10-only; `SHUT`/`ISO` on both → the proxy itself is portable.
@@ -91,6 +92,12 @@ with zero re-IO (today's cache stores only the GPS points).
   Physical basis: trees & terrain block light *and* satellites together, so "darker ⇒ more obstructed"
   has real causation. **Indoor is the strong signal** (order-of-magnitude drop); light tree cover is
   the subtle, confounded end.
+⁴ GoPro has **no barometer** — altitude is GPS-derived (so noisy). World-frame vertical accel needs
+  gravity removed + orientation, and double-integration **drifts**, so this is a *shape* constraint
+  fused with GPS (GPS carries the low-frequency truth, IMU the high-frequency motion), **not** a
+  standalone altitude. **Gated**: only worth building if the contract's plain distance-domain
+  smoothing proves insufficient — likely overkill for ski descents (the real grade dominates the
+  noise), but kept on the list because GPS altitude is the noisiest GPS axis.
 
 ## 5. Strategy
 
