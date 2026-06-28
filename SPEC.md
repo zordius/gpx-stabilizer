@@ -211,9 +211,10 @@ statistic O(1)/point instead of O(W).
 
 Beyond the base + the eval viewer, still to come:
 
-- track smoothing (resample/smooth the cleaned survivors) — **elevation
-  smoothing BUILT (`mods/smooth.js`, opt-in via `stabilize`'s `smooth`); resample
-  and the IMU-fusion tier still future (contract below)**
+- track smoothing (resample/smooth the cleaned survivors) — **elevation smoothing
+  BUILT (`mods/smooth.js`, `stabilize` `smooth`) and uniform-grid resampling BUILT
+  (`resample.js`, `stabilizeTrack` `resample`); the IMU-fusion tier still future
+  (contracts below)**
 - segment classification / lift handling / segment bridging / cluster cleanup
 - OSM validation
 - temporal activity segmentation (smooth per-point `activity.modes` into activity runs)
@@ -311,9 +312,9 @@ carry `speed` through the cleaned shape, or have the export derive it from
 
 ## Track resampling — uniform grid (contract) *(added 2026-06-29)*
 
-**Status: designed, not implemented.** The other half of the roadmap's "track smoothing"
-bullet (elevation smoothing is built; this regularises the *grid*). Decided 2026-06-29:
-**time-domain, with `maxGap` splitting.**
+**Status: IMPLEMENTED** (`resample.js` + `stabilizeTrack` `opts.resample`, 2026-06-29).
+The other half of the roadmap's "track smoothing" bullet (elevation smoothing rewrites
+*values*; this regularises the *grid*). **Time-domain, with `maxGap` splitting.**
 
 ### Why
 
@@ -327,8 +328,10 @@ a per-point module. It is a **track→track transform** in the export layer.
 
 ### Contract
 
-A standalone `resample(points, opts)` exported from core, and an opt-in `stabilize`
-`opts.resample` that applies it **after** drop-filtering and elevation smoothing:
+A standalone `resample(points, opts)` exported from core (returns `points[][]` — one or more
+segments, since a split can multiply them), wired into **`stabilizeTrack` `opts.resample`**
+(NOT the single-segment `stabilize`, because the `maxGap` split is expressed as multiple
+`<trkseg>`s — a Track concern), applied **after** drop-filtering and elevation smoothing:
 
 - **Export-layer, last.** Runs on the cleaned (and optionally smoothed) survivors, after
   `analyze` + filter. All drops / signals / IMU **witness** decisions are already settled on
@@ -353,11 +356,22 @@ A standalone `resample(points, opts)` exported from core, and an opt-in `stabili
   witness grid, or skip straight to resample from the de-duplicated survivors — decide when
   wiring aux).
 
-### Acceptance
+### Acceptance (done, 2026-06-29)
 
-On `GX065132`: `stabilize(seg, { smooth: true, resample: { RESAMPLE_HZ: 1 } })` yields a
-strictly-uniform 1 Hz `time` grid with no step larger than `maxGap`, positions tracking the
-cleaned line, and a real time gap rendered as a segment break rather than a straight bridge.
+`gpx_eval/resample_eval.mjs` on `GX065132`,
+`stabilizeTrack(track, { smooth: true, resample: { RESAMPLE_HZ: 1 } })`:
+
+| | segments | points | intra-step |
+|---|---|---|---|
+| cleaned (no resample) | 1 | 57 | {500, 5500} ms (irregular) |
+| **smooth + resample 1 Hz** | 1 | 33 | **{1000} ms (strictly uniform)** |
+| resample 2 Hz | 1 | 66 | {500} ms |
+| + injected 30 s hole | **2** | 33 | {1000} ms |
+
+A strictly-uniform grid; a 5.5 s hole `< maxGap` (10 s) is bridged; an injected 30 s hole
+`> maxGap` splits into two `<trkseg>`s rather than a straight bridge. Unit-tested
+(`test/resample.test.js`): passthrough, interpolation, `RESAMPLE_HZ` step, gap split vs bridge,
+single/empty/untimed, sub-step run. Full core suite 144→146 pass.
 
 ## Design notes — per-stage roadmap & open reviews
 

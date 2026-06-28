@@ -8,6 +8,7 @@ import { analyze } from "./analyze.js";
 import { readGpx, saveGpx } from "./gpx.js";
 import { validateModule } from "./mods/index.js";
 import * as smoothMod from "./mods/smooth.js";
+import { resample } from "./resample.js";
 
 const smoothModule = validateModule("smooth", smoothMod);
 
@@ -45,12 +46,22 @@ export function stabilize(points, opts = {}) {
 
 /**
  * Stabilize every segment of a parsed Track, preserving its metadata.
+ *
+ * With `opts.resample`, each cleaned segment is regularised onto a uniform time grid AFTER cleaning
+ * + smoothing (see ./resample.js); a segment whose interior has a gap longer than `maxGap` splits
+ * into several, so the Track can gain segments. `resample` is `true` for defaults, or an options
+ * object (e.g. `{ RESAMPLE_HZ: 2, maxGap: 5 }`). It is handled here, not in the single-segment
+ * `stabilize`, because the split is expressed as multiple `<trkseg>`s.
  * @param {import("./gpx.js").Track} track
- * @param {Parameters<typeof analyze>[1]} [opts]
- * @returns {import("./gpx.js").Track}  a Track with cleaned segments
+ * @param {Parameters<typeof analyze>[1] & { smooth?, resample?: boolean | Record<string, number> }} [opts]
+ * @returns {import("./gpx.js").Track}  a Track with cleaned (and optionally resampled) segments
  */
 export function stabilizeTrack(track, opts = {}) {
-  const segments = (track?.segments ?? []).map((seg) => stabilize(seg, opts));
+  const { resample: resampleOpts, ...rest } = opts;
+  const cleaned = (track?.segments ?? []).map((seg) => stabilize(seg, rest));
+  const segments = resampleOpts
+    ? cleaned.flatMap((seg) => resample(seg, typeof resampleOpts === "object" ? resampleOpts : {}))
+    : cleaned;
   return { segments, meta: track?.meta ?? {} };
 }
 
