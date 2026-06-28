@@ -54,11 +54,14 @@ geometry-only, portable **core** stabilization (the `gpx-stabilizer` roadmap in
 [`SPEC.md`](SPEC.md) — track smoothing / elevation reconstruction, etc.) comes
 before the GoPro multi-sensor work.
 
-- **Core progress (2026-06-29): elevation smoothing shipped** (`mods/smooth.js`,
-  opt-in `stabilize` `smooth`, commit `395cc92`) — the first survivor-rewriting
-  module. Status + proxy-eval results in [`SPEC.md`](SPEC.md) ("Track smoothing").
-  Core roadmap still open: resample, per-activity smoothing defaults, the true
-  movie-layers-consumer acceptance, then segment classification / lift handling /
+- **Core progress (2026-06-29): track smoothing shipped — both halves.**
+  (1) elevation smoothing (`mods/smooth.js`, `stabilize` `smooth`, `395cc92`) — the
+  first survivor-rewriting module; (2) uniform-grid time-domain resampling
+  (`resample.js`, `stabilizeTrack` `resample`, maxGap-splitting, `18634a4`). Status +
+  eval results in [`SPEC.md`](SPEC.md) ("Track smoothing" / "Track resampling").
+  Core roadmap still open: per-activity smoothing defaults, distance-domain resample
+  variant, the true movie-layers-consumer acceptance (wire `smooth`/`resample` into
+  `provider-gopro`/`provider-gpx`), then segment classification / lift handling /
   OSM / activity segmentation.
 
 - **GPS/IMU module (deferred).** The full non-GPS sensor catalog + the fusion
