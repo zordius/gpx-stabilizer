@@ -106,8 +106,15 @@ with zero re-IO (today's cache stores only the GPS points).
   flat IMU = garbage" holds with a 5-orders-of-magnitude margin and won't false-positive on real
   maneuvers. The **CONFIRM** direction (additive drop) is a standalone `compute` module (flavor A,
   zero core change). The **RESCUE** direction (un-drop a `stray`/`outlier` false positive) needs the
-  proposed `finalize` phase ([`SPEC.md`](../SPEC.md)). Pending: a real cold-start garbage clip (this
-  33 s chapter had no teleport, hence injection); probe `gpx_eval/accl_validate2.mjs`.
+  proposed `finalize` phase ([`SPEC.md`](../SPEC.md)). Probe `gpx_eval/accl_validate2.mjs`.
+  **Confirmed on REAL garbage** (`GX015129.MP4`, a Hero10 cold-start clip: 3122 real + 2694 garbage
+  points): real-track points have GPS pos-accel ≈ IMU force (median ratio **1.8**, p99 **44**), while
+  the wandering-teleport garbage hits GPS pos-accel **10.4 M m/s²** with IMU normal (~2.84) — a GPS/IMU
+  ratio up to **6 M×**, even cleaner than the injection. Two findings: (a) garbage is two kinds —
+  static null-island `(0,0)` (GPS-accel ≈ 0, *not* a teleport, left to `fix=none`) and wandering
+  teleport (the #2 target); (b) a *per-point* flag catches only the entry/exit jumps of a teleport run
+  (its interior points sit close together, low local accel — the same cluster blind spot as `outlier`),
+  so the drop must act at **run/segment** level, not per point. Probe `gpx_eval/accl_real.mjs`.
 
 ## 5. Strategy
 
