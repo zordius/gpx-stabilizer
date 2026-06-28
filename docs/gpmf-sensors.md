@@ -115,6 +115,14 @@ with zero re-IO (today's cache stores only the GPS points).
   teleport (the #2 target); (b) a *per-point* flag catches only the entry/exit jumps of a teleport run
   (its interior points sit close together, low local accel — the same cluster blind spot as `outlier`),
   so the drop must act at **run/segment** level, not per point. Probe `gpx_eval/accl_real.mjs`.
+  **Confirmed on BOTH cameras** (real motion *and* a real teleport in one clip each): Hero5
+  `GOPR5131` and Hero10 `GX015129` — moving points give GPS pos-accel ≈ IMU (ratio **~1.8–1.9**, no
+  false positive), real teleports give GPS ≫ IMU (Hero5 **1.4e8×**, Hero10 **5.3e8×** at the peak
+  jump). Note the device asymmetry from §4: Hero5's clean GPS barely teleports (1 of 70 clips had any
+  far points, and those were a *static* wrong-spot cold-start with a single snap-back to track),
+  whereas Hero10 teleports constantly — but where a jump occurs the signature is identical, so the
+  IMU cross-check is sound on both. (`|ACCL|`-magnitude is frame-invariant, so Hero5's different axis
+  convention doesn't matter.) Probe `gpx_eval/accl_top.mjs`.
 
 ## 5. Strategy
 
