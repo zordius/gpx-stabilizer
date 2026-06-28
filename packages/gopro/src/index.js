@@ -3,7 +3,7 @@
 // gpx-stabilizer package so the contract's "section A" surface stays reachable
 // from this single entry.
 export { stabilize } from "gpx-stabilizer";
-export { extractGoproPoints, probeGoproMeta } from "./gopro.js";
+export { extractGoproAll, extractGoproPoints, probeGoproMeta } from "./gopro.js";
 export {
   readGoproSamples,
   readGoproTelemetry,

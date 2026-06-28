@@ -6,7 +6,7 @@
 import { statSync } from "node:fs";
 import { stabilize } from "gpx-stabilizer";
 import tzlookup from "tz-lookup";
-import { extractGoproPoints, probeGoproMeta } from "./gopro.js";
+import { extractGoproAll, probeGoproMeta } from "./gopro.js";
 import { CACHE_V, readCache, resolveCachePath, writeCache } from "./gopro-cache.js";
 
 function isFiniteNum(n) {
@@ -159,11 +159,14 @@ export function resolveStartUtc(points) {
  * (pure, no file writes) or `cache: { dir }` to keep records in a managed
  * directory instead of beside the media.
  *
- * `points` is `[]` for a video with no GPS track (`meta.hasGps === false`).
+ * `points` is `[]` for a video with no GPS track (`meta.hasGps === false`). The
+ * record also carries `streams` — every non-GPS GPMF channel (IMU `ACCL`/`GYRO`,
+ * `SCEN`, exposure, …) as raw cts-timed samples (`{}` when no GPS track), so the
+ * one extraction populates the cache for later multi-sensor work at ~0 extra IO.
  * @param {string} path
  * @param {{ rate?: number, cache?: boolean | { dir?: string | null } }} [opts]
  *   rate in Hz (omit = native ~18 Hz); cache controls the on-disk record (default on).
- * @returns {Promise<{ meta: import("./gopro.js").GoproMeta, points: import("gpx-stabilizer").TrackPoint[], fromCache: boolean }>}
+ * @returns {Promise<{ meta: import("./gopro.js").GoproMeta, points: import("gpx-stabilizer").TrackPoint[], streams: Record<string, import("./gopro.js").GoproStream>, fromCache: boolean }>}
  */
 export async function readGoproSamples(path, opts = {}) {
   const { rate, cache } = opts;
@@ -179,17 +182,24 @@ export async function readGoproSamples(path, opts = {}) {
       // unstattable -> leave size/mtime 0 (guaranteed miss); probe surfaces the error
     }
     const hit = readCache(cp, ident);
-    if (hit) return { meta: hit.meta, points: hit.points ?? [], fromCache: true };
+    if (hit) {
+      return {
+        meta: hit.meta,
+        points: hit.points ?? [],
+        streams: hit.streams ?? {},
+        fromCache: true,
+      };
+    }
   }
   const meta = await probeGoproMeta(path);
-  const points = meta.hasGps
-    ? await extractGoproPoints(path, groupTimes ? { groupTimes } : {})
-    : [];
+  const { points, streams } = meta.hasGps
+    ? await extractGoproAll(path, groupTimes ? { groupTimes } : {})
+    : { points: [], streams: {} };
   if (cp) {
     const dir = cache && typeof cache === "object" ? (cache.dir ?? null) : null;
-    writeCache(cp, { ...ident, meta, points }, dir);
+    writeCache(cp, { ...ident, meta, points, streams }, dir);
   }
-  return { meta, points, fromCache: false };
+  return { meta, points, streams, fromCache: false };
 }
 
 /**

@@ -120,12 +120,66 @@ export async function extractGoproPoints(path, opts = {}) {
   // Two interpretations of the SAME extraction. timeOut:'date' yields the GPS UTC
   // per sample but strips cts; timeIn:'MP4'/timeOut:'cts' yields the media offset
   // (ms within the video, cts 0 = first frame) but no date. We need both — UTC for
-  // `time`, media cts as the x-axis the start regression extrapolates to 0 — so we
-  // interpret twice and zip by index (same stream + groupTimes ⇒ same sample
-  // order/count; a length guard drops cts if that ever fails to hold).
+  // `time`, media cts as the x-axis the start regression extrapolates to 0.
   const telemetry = await goproTelemetry(extracted, { ...cfg, timeIn: "GPS", timeOut: "date" });
   const mediaTel = await goproTelemetry(extracted, { ...cfg, timeIn: "MP4", timeOut: "cts" });
+  return buildGpsPoints(telemetry, mediaTel);
+}
 
+/**
+ * @typedef {object} GoproStream
+ * @property {string | null} name   stream description (e.g. "Accelerometer")
+ * @property {any} units            stream units, as gopro-telemetry reports them
+ * @property {{ cts: number | null, value: any }[]} samples  media-cts-timed samples
+ */
+
+/**
+ * Extract a GoPro MP4's FULL telemetry: GPS `points` plus every NON-GPS stream
+ * (IMU `ACCL`/`GYRO`, `GRAV`/`CORI`, `SCEN`, exposure `SHUT`/ISO, …) as raw
+ * cts-timed samples, for multi-sensor analysis. One `gpmf-extract` (the IO, done
+ * once) then three cheap parse passes — reading more streams costs ~0 extra IO
+ * (all streams share the one gpmd track; the filter is post-parse). `rate` /
+ * `groupTimes` downsamples only the GPS `points`; **aux streams stay native**
+ * (the IMU's ~200 Hz is the whole point).
+ * @param {string} path
+ * @param {{ rate?: number, groupTimes?: number }} [opts]
+ * @returns {Promise<{ points: import("gpx-stabilizer").TrackPoint[], streams: Record<string, GoproStream> }>}
+ */
+export async function extractGoproAll(path, opts = {}) {
+  const groupTimes = opts.rate ? Math.round(1000 / opts.rate) : opts.groupTimes;
+  const cfg = { stream: ["GPS"], ...(groupTimes ? { groupTimes } : {}) };
+  const extracted = await gpmfExtract(fileFeeder(path));
+  const telemetry = await goproTelemetry(extracted, { ...cfg, timeIn: "GPS", timeOut: "date" });
+  const mediaTel = await goproTelemetry(extracted, { ...cfg, timeIn: "MP4", timeOut: "cts" });
+  // every stream (no filter), on the media-cts clock, at native rate — the aux channels
+  const allTel = await goproTelemetry(extracted, { timeIn: "MP4", timeOut: "cts" });
+  return { points: buildGpsPoints(telemetry, mediaTel), streams: buildAuxStreams(allTel) };
+}
+
+// Collapse every NON-GPS stream of a parsed telemetry object into raw cts-timed
+// samples (GPS is excluded — it's the `points` channel, processed separately).
+function buildAuxStreams(tel) {
+  const out = {};
+  for (const device of Object.values(tel ?? {})) {
+    for (const [key, stream] of Object.entries(device?.streams ?? {})) {
+      if (key.startsWith("GPS")) continue;
+      out[key] = {
+        name: stream.name ?? null,
+        units: stream.units ?? null,
+        samples: (stream.samples ?? []).map((s) => ({
+          cts: typeof s.cts === "number" ? s.cts : null,
+          value: s.value,
+        })),
+      };
+    }
+  }
+  return out;
+}
+
+// Build GPS TrackPoints by zipping the two GPS passes: `telemetry` (timeOut:'date'
+// → UTC `time`) with `mediaTel` (timeOut:'cts' → media `cts`) by sample index (same
+// stream + groupTimes ⇒ same order/count; a length guard drops cts if that fails).
+function buildGpsPoints(telemetry, mediaTel) {
   const mediaCts = [];
   for (const device of Object.values(mediaTel ?? {})) {
     for (const [key, stream] of Object.entries(device?.streams ?? {})) {
@@ -133,7 +187,6 @@ export async function extractGoproPoints(path, opts = {}) {
       for (const s of stream.samples ?? []) mediaCts.push(typeof s.cts === "number" ? s.cts : null);
     }
   }
-
   const points = [];
   for (const device of Object.values(telemetry ?? {})) {
     const streams = device?.streams ?? {};
