@@ -114,8 +114,21 @@ breaking core's zero-dep, source-agnostic, base-is-pure-geometry ethos**. Both s
 - **`aux` in the shared ctx (flavor B).** An optional `opts.aux` namespace (per-point-aligned arrays,
   e.g. `{ accl, gyro, scene, exposure }`) is threaded into the compute ctx, so *any* module can read
   an external signal — and *any future* signal (OSM piste, weather, DEM) joins the same way. Core
-  stays source-agnostic: the **caller pre-aligns** the side data onto the point timeline (the
-  `gpx-from-gopro` adapter does this from GPMF `cts`); core only merges, never touches sample rates.
+  stays source-agnostic: the **caller pre-aligns** the side data onto **the analysis grid** — the
+  post-label survivors (the points compute/witness modules actually see), **NOT** the raw point
+  timeline and **NOT** the resampled export grid (see "Two grids" below). The `gpx-from-gopro` adapter
+  aggregates GPMF `cts` samples (RMS/peak, never decimate) into each survivor's interval; core only
+  merges, never touches sample rates.
+
+  **Two grids (2026-06-29).** There are two distinct position timelines, and conflating them breaks
+  aux alignment: (1) the **analysis grid** — the `oversample`-thinned survivors of *real* GPS fixes,
+  where every drop / signal / IMU **witness** runs; (2) the **export grid** — the uniform points
+  `resample` *synthesises* for consumers (see the resample contract below). Aux aligns to the **analysis
+  grid**: a witness (e.g. ACCL teleport-kill) compares a GPS-derived quantity against IMU, so it needs
+  *real* fixes — a resampled point's position is interpolated, its "GPS acceleration" an artefact. So
+  witness modules run **before** resample, and `resample` is a pure export-layer regulariser,
+  independent of aux. The grid-defining stages (`noTime` / `oversample` / `resample`) own the timeline;
+  everything else is computed relative to whichever grid it belongs to.
 - **`finalize(out, ctx)` — a 4th phase (the customizable final stage).** Runs **after assemble**,
   over the fully-assembled points (every `dropReason`, signal, and `aux`). Unlike `compute` (modules
   independent), `finalize` modules run **sequentially and see each other's results** — the home for
@@ -295,6 +308,56 @@ That doc's "revisit if a consumer genuinely needs cleaned points *with* those fi
 trigger is now **met**. The reconstruction tier is the natural home for the decision:
 carry `speed` through the cleaned shape, or have the export derive it from
 `kinematics.velocity.mag` (3D speed already computed in `measure`). Tracked here.
+
+## Track resampling — uniform grid (contract) *(added 2026-06-29)*
+
+**Status: designed, not implemented.** The other half of the roadmap's "track smoothing"
+bullet (elevation smoothing is built; this regularises the *grid*). Decided 2026-06-29:
+**time-domain, with `maxGap` splitting.**
+
+### Why
+
+Every analyse stage is **per-point**: it labels / measures / signals / drops the *existing*
+points, so cardinality only ever shrinks and the time grid stays whatever the source gave
+(then `oversample`-thinned to an *irregular* ~1 Hz of real fixes). A consumer that samples
+the track at its own cadence — movie-layers reading a position at each **video frame**
+timestamp — wants a *uniform* grid. Producing one means **synthesising** points
+(interpolating between survivors), which changes cardinality and the grid, so it cannot be
+a per-point module. It is a **track→track transform** in the export layer.
+
+### Contract
+
+A standalone `resample(points, opts)` exported from core, and an opt-in `stabilize`
+`opts.resample` that applies it **after** drop-filtering and elevation smoothing:
+
+- **Export-layer, last.** Runs on the cleaned (and optionally smoothed) survivors, after
+  `analyze` + filter. All drops / signals / IMU **witness** decisions are already settled on
+  the **analysis grid** (real fixes); resample only regularises the output. It is therefore
+  **aux-independent** (witnesses need real fixes — a resampled position is interpolated; see
+  "Two grids" above). `analyze` is untouched — its assemble maps signals back by original
+  index, which a cardinality change would break, so resample cannot live inside it.
+- **Time-domain.** One output point per fixed Δt (`RESAMPLE_HZ`, e.g. 1 Hz; or a rate set to
+  the consumer's video frame rate). Position/ele/(speed) are **linearly interpolated** at each
+  grid time from the bracketing survivors. (A distance-domain variant — one point per Δm, for
+  elevation profiles — is a future `opts` flag, not built now.)
+- **`maxGap` splitting.** Interpolating across a large hole (a dropped bad-span, a stop, a
+  GoPro crash break) would **invent** a straight line through missing data. So a gap longer
+  than `maxGap` seconds is **not** bridged: the output splits into separate `<trkseg>`s at the
+  hole — the same session-boundary semantics as the GoPro adapter's GUMI `<trkseg>` split.
+- **Output shape.** Still `{lat,lon,ele,time}` (uniform `time`); cardinality changes. `ele` is
+  the smoothed value when `opts.smooth` is also on (smooth → resample order is automatic:
+  smoothing is a compute signal, resample reads the exported elevation).
+- **Relationship to `oversample`.** `oversample` thins to an *irregular* ~1 Hz by **dropping**
+  real fixes; `resample` regularises to an *exact* grid by **synthesis**. With resample on,
+  `oversample`'s role narrows to pre-thinning the analysis grid (a fork: keep it for the
+  witness grid, or skip straight to resample from the de-duplicated survivors — decide when
+  wiring aux).
+
+### Acceptance
+
+On `GX065132`: `stabilize(seg, { smooth: true, resample: { RESAMPLE_HZ: 1 } })` yields a
+strictly-uniform 1 Hz `time` grid with no step larger than `maxGap`, positions tracking the
+cleaned line, and a real time gap rendered as a segment break rather than a straight bridge.
 
 ## Design notes — per-stage roadmap & open reviews
 
