@@ -21,30 +21,31 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  * Two opt-in survivor-`ele` rewrites (the `{lat,lon,ele,time}` shape is unchanged — only the *meaning*
  * of `ele` flips):
  * - **`opts.smooth`** — distance-domain mean smoothing (`point.smooth.ele`, see ./mods/smooth.js).
- * - **`opts.despike`** — a terrain-preserving grade-change-bounded despike (`point.gradeBound.ele`, see
- *   ./mods/gradeBound.js): removes physically-impossible `ele` spikes without over-flattening real
+ * - **`opts.gradeBound`** — a terrain-preserving grade-change-bounded despike (`point.gradeBound.ele`,
+ *   see ./mods/gradeBound.js): removes physically-impossible `ele` spikes without over-flattening real
  *   terrain. The portable answer to the "stabilize is horizontal-only, ele spikes survive" gap.
+ *   (Named after the module, NOT `despike`, to avoid colliding with the horizontal `despike` builtin.)
  *
  * Each is `true` for defaults or an object of param overrides (e.g. `{ SMOOTH_WIN_M: 50 }` /
  * `{ GRADE_AMAX: 2 }`). They are independent compute signals, so they don't chain in-pipeline; if both
- * are set the export prefers the despike (terrain-preserving) — true despike-then-smooth awaits the
+ * are set the export prefers `gradeBound` (terrain-preserving) — true despike-then-smooth awaits the
  * proposed `finalize` phase.
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number>, despike?: boolean | Record<string, number> }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number> }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { smooth, despike, ...rest } = opts;
+  const { smooth, gradeBound, ...rest } = opts;
   const modules = [...(rest.modules ?? [])];
   if (smooth) modules.push(smoothModule);
-  if (despike) modules.push(gradeBoundModule);
+  if (gradeBound) modules.push(gradeBoundModule);
   const analyzeOpts =
-    smooth || despike
+    smooth || gradeBound
       ? {
           ...rest,
           modules,
           ...(typeof smooth === "object" ? smooth : {}),
-          ...(typeof despike === "object" ? despike : {}),
+          ...(typeof gradeBound === "object" ? gradeBound : {}),
         }
       : rest;
   return analyze(points, analyzeOpts)
@@ -52,8 +53,8 @@ export function stabilize(points, opts = {}) {
     .map((p) => ({
       lat: p.lat,
       lon: p.lon,
-      // despike wins over smooth when both set (terrain-preserving); else whichever is on; else raw
-      ele: (despike ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ?? p.ele,
+      // gradeBound (despike) wins over smooth when both set (terrain-preserving); else whichever; else raw
+      ele: (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ?? p.ele,
       time: p.time,
     }));
 }

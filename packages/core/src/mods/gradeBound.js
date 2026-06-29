@@ -11,7 +11,7 @@
 // (RMS-to-truth stays ~raw where a mean over-flattens), but only catches the impossible spikes —
 // in-bound noise passes (physics can't tell a small real grade-change from a small noise one). So
 // this is a despike, NOT a full smoother. Emits a namespaced signal `point.gradeBound.ele`; the raw
-// `el` is untouched in-pipeline (the export decides — `stabilize`'s `opts.despike`). Params follow the
+// `el` is untouched in-pipeline (the export decides — `stabilize`'s `opts.gradeBound`). Params follow the
 // in-module `g.X ?? default` convention.
 
 export const compute = ({ el, planarStep, dt, g }) => {
