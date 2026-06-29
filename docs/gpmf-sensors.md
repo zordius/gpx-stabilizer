@@ -9,9 +9,15 @@ the GPS-only geometry pipeline — turning "GPS guesses" into "claims with a phy
 
 ## Provenance / how we know
 
-Dumped two real clips: Hero10 `GX065132.MP4` and Hero5 `GP175136.MP4`. Reusable probes live
-(gitignored) under `gpx_eval/`: `dump_streams.mjs` (stream list), `dump_samples.mjs` (real
-sample values), `io_cost.mjs` (IO measurement). Run them on any model to extend the matrix.
+Dumped real clips: Hero10 `GX065132.MP4` (ski, fix3d) and Hero5 `GP175136.MP4` (static/no-fix
+— the end-of-day tail, GP17 of an 18-chapter recording). **Plus 2026-06-29:** two Hero5 *ski*
+chapters with full IMU streams — `GP015136` / `GP045136` (12 min each, fix3d, ACCL ~203 Hz /
+GYRO ~407 Hz) — re-extracted from the SMB archive into a local v3 cache (the chapters' on-disk
+sidecar caches are stale **v2, points-only**; a 4 GB chapter takes ~260 s to stream over SMB).
+Reusable probes live (gitignored) under `gpx_eval/`: `dump_streams.mjs` / `dump_samples.mjs` /
+`io_cost.mjs` (matrix), plus the vibration set — `vib_analyze.mjs` (low/high band split),
+`vib_speed.mjs` (HF energy binned by GPS speed), `vband_climb.mjs` (vertical speed by band).
+Run them on any model to extend the matrix.
 
 ## 1. Stream availability — device-dependent
 
@@ -132,6 +138,7 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 | 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | UNVERIFIED |
 | 10 | **GYRO heading vs GPS heading → mount type** | `activity` (vehicle vs body) + a *meta*-gate: is camera-heading = travel? | GYRO (+`GRAV`/AHRS for the yaw axis) | both | ★★ | correlate GYRO-yaw heading-change with GPS heading-change over moving segments — **tight ⇒ hard/vehicle** mount (camera ≈ travel), **loose ⇒ soft/body** mount. A high-corr clip *unlocks* GYRO-as-travel-heading (turn-type, dead-reckon); a low-corr clip must **not** use it (the §3 facing caveat) | UNVERIFIED |
 | 11 | **GYRO return-to-center → travel / fall-line direction** | recover course on a *soft* mount (where camera-heading ≠ travel); also gyro bias self-cal | GYRO (+`GRAV`/AHRS) | both | ★★ | accumulate gyro heading over a window; its **time-center ≈ the dominant travel direction** (humans naturally return to facing forward). Window bound: raw gyro drifts ~13°/10 s so it must be bias-removed (per-clip) and/or GPS-de-drifted (the §1 fusion loop). **Ski caveat**: the head faces the fall line, so the center is the *run's descent direction*, not per-carve heading | UNVERIFIED |
+| 12 | **ACCL/GYRO high-freq → surface roughness / on-snow vs transport** | `activity` segment classification / **lift handling** (roadmap) | ACCL, GYRO (HF band) | both | ★★ | high-freq vibration (signal − 0.3 s MA) rises with speed **and** surface roughness; at the *same* speed, smooth-groomed ≈ ⅓ the vibration of rough snow. Lift = moderate speed + low vibration + **climbing**; smooth catwalk = same but **descending** — so HF energy + vertical-speed together separate ski / catwalk / lift (speed alone cannot) | **PARTIAL** (measured — see Vibration findings below) |
 
 ¹ On Hero5 (no `GRAV`/`CORI`) gravity & orientation must be self-estimated from raw `ACCL`/`GYRO`.
 ² `YAVG` (measured luma) is Hero10-only; `SHUT`/`ISO` on both → the proxy itself is portable.
@@ -173,6 +180,43 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
   whereas Hero10 teleports constantly — but where a jump occurs the signature is identical, so the
   IMU cross-check is sound on both. (`|ACCL|`-magnitude is frame-invariant, so Hero5's different axis
   convention doesn't matter.) Probe `gpx_eval/accl_top.mjs`.
+
+### Vibration (ACCL/GYRO high-freq) — measured, and what it is NOT *(2026-06-29)*
+
+Investigated for #12 and as input to the #9 elevation oracle. HF = vibration energy = RMS of
+(signal − 0.3 s moving average); probes `gpx_eval/vib_*.mjs`.
+
+- **The IMU clearly sees ski vibration.** Ski (Hero10 `GX065132`) vs static (Hero5 `GP175136`):
+  ACCL HF **2.71 vs 0.39 m/s² (~7×)**, GYRO HF **0.34 vs 0.067 rad/s (~5×)** — well above the
+  stationary noise floor. Motion-coupled and present **regardless of in-video stabilization**
+  (the GPMF IMU is the raw sensor HyperSmooth consumes, not a post-stabilized signal). *Caveat:*
+  this pair is **cross-camera** (Hero10 vs Hero5); the 7× gap is far beyond any plausible
+  noise-floor difference, but a same-body static control would be cleaner.
+- **Vibration is NOT a clean function of speed** — three datasets disagree: Hero10 `GX065132`
+  (33 s) gave a **U-shape** (slow ≈ fast high, mid-cruise low); Hero5 `GP015136` (12 min) gave a
+  clean **monotonic** rise (ACCL **0.92 → 4.30** slow→fast); Hero5 `GP045136` (12 min) **broke
+  monotonic** — its 3–5 m/s band was anomalously low (ACCL 0.63) despite holding the most
+  samples. The confound is **surface roughness / terrain**, not pure noise. ⇒ **Do NOT use
+  vibration as the speed/density proxy** for the adaptive smoothing window (SPEC "per-activity"
+  / the density-adaptive design): use `planarStep` / speed directly. A single short clip
+  misleads — the Hero10 U-shape was a 33 s small-sample artifact, and `GP015136`'s "clean
+  monotonic" reversed on the next chapter. (Fact Discipline: don't conclude from one clip.)
+- **It IS a surface / activity signal** (the real value, → #12). Same speed, smooth-groomed vs
+  rough snow differ **2–3×** in HF — something speed cannot tell apart. A first guess that
+  `GP045136`'s low-vib 3–5 m/s band was a **lift** was **refuted** by `vband_climb.mjs`: that
+  band is **descending −0.96 m/s**, so it's a smooth catwalk, not a lift (a lift climbs). The
+  clean discriminator is therefore **two axes**: HF vibration (smooth vs rough) + GPS vertical
+  speed (up = lift, down = run) → ski / catwalk / lift separate cleanly. Feeds the roadmap's
+  segment classification / lift handling.
+- **For the #9 elevation oracle, vibration is the band to REJECT.** Using IMU vertical as a
+  ground-truth elevation/slope shape means **low-passing out** exactly this HF band first. The
+  plan: an **IMU-as-calibration-oracle** — offline, fuse low-passed IMU vertical (Hero10: via
+  `GRAV`/`CORI`; **Hero5: self-fuse `ACCL`+`GYRO`, no `GRAV`/`CORI`**) to a slope truth, then use
+  it to pick the core smoothing constant that bounds jitter **without over-flattening** real
+  terrain — the gap a jitter-only metric can't close (jitter falls monotonically with window, so
+  it can't see over-flattening). Teacher = GoPro IMU (offline, gopro side); student = core's
+  pure-GPX smoother + the baked constant. Keep the constant physics/density-based (not overfit to
+  one GPS chip's noise) and document its provenance.
 
 ## 5. Strategy
 
