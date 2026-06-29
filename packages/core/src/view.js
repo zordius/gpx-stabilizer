@@ -86,12 +86,14 @@ const flipY = (p) => ({ ...p, y: -p.y });
 
 /**
  * Run the analysis pipeline and split the result into render layers: a faint `raw` line of every
- * input point (background reference), the clean track (kept points as a line), one marker layer
- * per drop reason — `drift`, `stray`, `outlier`, `activity` — plus two GPS-quality overlay layers (`hdop 2–3`,
- * `hdop ≥3`) marking points the device itself flagged as low-precision. All drops render
- * the same (red circles, 0.7 opacity); the separate layers exist only for the legend's per-reason
- * count + toggle. Each dropped point lands in exactly ONE layer by priority drift > outlier >
- * activity. Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
+ * input point (background reference), the clean track (kept points as a line), and one marker layer
+ * per drop reason. The **direct** drops — `drift`, `stray`, `outlier`, `activity` — render **red**;
+ * the **detection/derived** drops get distinct colours — `despike` (aggressive flagger feeding the
+ * bad-span density) is **teal `#0c8`**, `badspan` (the glued-region decision) is **brown `#960`** —
+ * so a glance separates confident drops from the density-driven ones. Plus two GPS-quality overlays
+ * (`hdop 2–3`, `hdop ≥3`). Each dropped point lands in exactly ONE layer by priority drift > stray >
+ * outlier > activity > despike > badspan (direct reasons win, so a multiply-flagged point shows red).
+ * Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
  * The hdop overlays are independent of drop status (a kept point can still be flagged) and self-gate
  * to empty on a track with no `<hdop>`.
  * `opts` flows to `analyze` (e.g. `activities`, param overrides).
@@ -106,9 +108,9 @@ export function analyzedLayers(points, opts = {}) {
   // a dropped point goes to its highest-priority reason's layer (so it isn't drawn twice)
   const droppedBy = (mod, not = []) =>
     out.filter((p) => p.dropReason?.[mod] && !not.some((m) => p.dropReason?.[m])).map(flipY);
-  const dropLayer = (label, mod, not) => ({
+  const dropLayer = (label, mod, not, color = "#c00") => ({
     label,
-    color: "#c00",
+    color, // direct drops are red (#c00); detection/derived drops get their own colour (see below)
     size: 4,
     opacity: 0.7,
     points: droppedBy(mod, not),
@@ -158,6 +160,17 @@ export function analyzedLayers(points, opts = {}) {
     dropLayer("stray", "stray", ["drift"]),
     dropLayer("outlier drop", "outlier", ["drift", "stray"]),
     dropLayer("activity drop", "activity", ["drift", "stray", "outlier"]),
+    // DETECTION / DERIVED drops — not a confident single-point call, so a distinct colour from the
+    // red direct drops above. `despike` is an aggressive flagger that feeds the bad-span density;
+    // `badspan` is the glued-region decision (drops whole high-density garbage stretches). Lower
+    // priority than the direct reasons, so a point with a direct drop still shows red.
+    dropLayer("despike (eval)", "despike", ["drift", "stray", "outlier", "activity"], "#0c8"),
+    dropLayer(
+      "badspan (glue)",
+      "badspan",
+      ["drift", "stray", "outlier", "activity", "despike"],
+      "#960",
+    ),
     // hdop quality overlay: orange = moderately poor (2–3), purple = poor-but-valid (3–99)
     hdopLayer("hdop 2–3", 2, 3, "#f80"),
     hdopLayer("hdop ≥3", 3, 99, "#a0e"),
