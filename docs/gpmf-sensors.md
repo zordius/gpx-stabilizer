@@ -250,8 +250,32 @@ fused with GPS vertical velocity + a slow position anchor.
   `ele` spike that the mean smears has actually been found.
 - *Metric caveat:* the Δ/step jitter is **density-confounded** — raw (dense ~10–18 Hz) vs the
   ~1 Hz survivors aren't comparable; compare on a common grid (the full-stack eval does).
-- *Metric caveat:* the Δ/step jitter is **density-confounded** — raw (dense ~10–18 Hz) vs the
-  ~1 Hz survivors aren't comparable; compare grade **range**, or resample to a common grid first.
+
+### W-calibration sweep — the optimal smoothing window is NOISE-driven, not density *(2026-06-29)*
+
+`gpx_eval/oracle_sweep.mjs`: with the IMU-fused elevation as the terrain **truth**, sweep ±W
+mean-smooth and split the tradeoff — **over-flatten cost** = `RMS(smoothed − fused)` (rises with
+W: real terrain lost) vs **noise** = grade jitter (falls with W). On 4 clips:
+
+| clip | raw jit | fused jit | **noise = raw−fused** | optimal W |
+|---|---|---|---|---|
+| `GP015136` Hero5 | 0.74 | 0.64 | **0.10** | ~10 m |
+| `GP045136` Hero5 | **2.93** | **2.77** | **0.16** | ~10 m |
+| `GX065132` Hero10 | 2.67 | 2.05 | **0.62** | ~30–50 m |
+| `GX055132` Hero10 | 2.00 | 1.36 | **0.64** | ~20–30 m |
+
+- **The optimal W tracks the NOISE level** (low 0.1–0.16 → ~10 m; high 0.6 → ~30 m), and the
+  default ±30 m **over-smooths clean sources** (Hero5 wants ~10 m: at W=30 over-flatten cost is
+  0.73 m vs 0.57 m at W=10 for **zero** extra jitter benefit).
+- **Raw jitter is the WRONG driver.** `GP045136` has *high* raw jitter (2.93) but the fused truth
+  is just as high (2.77) — it's **real terrain (rolls), not noise**; noise is only 0.16 → small W,
+  not big. Setting W from raw jitter would over-flatten real terrain. **Density / speed are also
+  insufficient** — they don't see the noise level either.
+- ⇒ **An adaptive W needs a NOISE estimate, and noise = raw−fused needs the IMU truth to compute
+  (it separates terrain-jitter from noise-jitter).** This **refutes the simple density-adaptive
+  formula** floated for SPEC's per-activity smoothing. Portable-core options without IMU: an `hdop`
+  proxy (device-dependent / unreliable — `hdop-notes.md`) or a fixed compromise; the GoPro path
+  gets the noise estimate (and the fix) for free from IMU-fused `ele` (#9).
 
 ## 5. Strategy
 

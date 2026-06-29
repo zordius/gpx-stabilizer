@@ -265,9 +265,16 @@ producing a **slope-stable elevation**:
   module alone, via `opts.modules`, only surfaces the `point.smooth.ele` signal — it does
   not swap the export). `stabilize`'s `{lat,lon,ele,time}` shape is unchanged; only the
   *meaning* of `ele` flips when `smooth` is on.
-- **Parameters per activity (future).** The length scale should differ by activity
-  (ski vs walk); today there is one default (±30 m), overridable via
-  `opts.smooth = { SMOOTH_WIN_M: n }`. Per-activity defaults tie into the ski-tier work.
+- **Adaptive window (future) — it's NOISE-driven, not density (2026-06-29).** A calibration
+  sweep against an IMU-fused elevation truth (4 clips, `gpx_eval/oracle_sweep.mjs` — detail in
+  [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) "W-calibration sweep") found the optimal `SMOOTH_WIN_M`
+  tracks the **noise level**: clean GPS5 (Hero5) wants ~10 m, noisy Hero10 ~30 m, so the fixed ±30 m
+  default **over-smooths clean sources**. Crucially, the driver is **noise = raw-grade-jitter −
+  fused-truth-jitter**, *not* raw jitter (high jitter can be real terrain — `GP045136`) and *not*
+  density/speed. So a simple density-adaptive formula is **refuted**; an adaptive window needs a
+  noise estimate — the GoPro IMU gives it (the #9 path), a portable core would need an `hdop` proxy
+  (device-dependent) or a per-source-tier default. Until then, one default (±30 m), overridable via
+  `opts.smooth = { SMOOTH_WIN_M: n }`.
 - **Current limitation.** Runs on the post-label valid series, which still contains the
   points the compute-phase drops (outlier/stray/activity) will flag — compute modules are
   independent and don't see each other's drops. Strictly post-drop smoothing awaits the
