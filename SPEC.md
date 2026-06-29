@@ -426,16 +426,25 @@ B) **#4 surface self-consistency** — DONE, FAILED on steep terrain (slope×hor
 C) **#3 vertical-`maDist` noise estimate** — but #1/#4's results predict it inherits the same wall.
 D) **#2 `ele`-outlier** — subsumed by #1's continuous despike.
 
-**Meta-conclusion (2026-06-29, after A+B).** On *steep* terrain (skiing — the use case) the **portable
-geometric** methods all hit a fundamental wall: #1 removes only physically-impossible spikes (in-bound
-noise is indistinguishable from real small terrain); #4 is confounded because the *horizontal* position
-is itself noisy and slope turns that into vertical error. **The thing that genuinely separates vertical
-noise from signal is an independent vertical measurement — the IMU.** So for ski elevation the IMU is
-**re-elevated from "validation tool" back to genuinely valuable** (#9), and the realistic portable base
-stays **plain mean smoothing + grade-bound despike**, accepting the in-bound noise. (On *flat* terrain
-#4 would work — no slope confound.) Lift segmentation remains a precondition (don't compute grade across
-a lift). Acceptance for any future tier: match the IMU-fused truth and/or read clean on an
-elevation-profile viewer.
+**Is xy noise a portable proxy for z noise? (final check, `gpx_eval/corr_xyz.mjs`).** Physically they
+share a source (DOP/geometry — a bad-fix epoch is bad on all axes), so we tested whether the *observable*
+horizontal noise predicts the unobservable vertical noise (z-noise = raw − IMU-fused truth). Result:
+**`hdop` is useless** (r ≈ 0 on every clip); **horizontal `maDist` is only weakly correlated** with
+z-noise — r ≈ 0.35 on clean Hero5 (R² ≈ 0.12), and **≈ 0 on dirty Hero10** (teleports swamp it). Real
+but **too weak to be a usable z-noise estimate** (horizontal `maDist` also carries real turning, and each
+axis has independent noise beyond the common-mode DOP part). So there is **no portable proxy** for the
+vertical noise level.
+
+**Meta-conclusion (2026-06-29, after A+B + the correlation check).** On *steep* terrain (skiing — the
+use case) the **portable geometric** methods all hit a fundamental wall: #1 removes only
+physically-impossible spikes (in-bound noise is indistinguishable from real small terrain); #4 is
+confounded because the *horizontal* position is itself noisy and slope turns that into vertical error;
+and xy↔z correlation is too weak (and `hdop` useless) to estimate the noise level. **The one thing that
+genuinely separates vertical noise from signal is an independent vertical measurement — the IMU.** So for
+ski elevation the IMU is **re-elevated from "validation tool" back to genuinely valuable** (#9), and the
+realistic portable base stays **plain mean smoothing + grade-bound despike**, accepting the in-bound
+noise. (On *flat* terrain #4 would work — no slope confound.) Lift segmentation remains a precondition.
+Acceptance for any future tier: match the IMU-fused truth and/or read clean on an elevation-profile viewer.
 
 ## Track resampling — uniform grid (contract) *(added 2026-06-29)*
 
