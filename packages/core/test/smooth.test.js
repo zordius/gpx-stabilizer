@@ -45,23 +45,3 @@ test("smooth: endpoints use a shrinking one-sided window", () => {
 test("smooth: empty input is handled", () => {
   assert.deepEqual(compute(ctx([], 10, 30)).ele, []);
 });
-
-test("smooth SMOOTH_ROBUST: a window median rejects an ele spike a mean would smear", () => {
-  const el = [0, 1, 2, 100, 4, 5, 6]; // spike at index 3
-  const base = { el, planarStep: new Array(el.length).fill(10) }; // 10 m steps
-  const mean = compute({ ...base, g: { SMOOTH_WIN_M: 25 } }).ele; // ±2 steps
-  const med = compute({ ...base, g: { SMOOTH_WIN_M: 25, SMOOTH_ROBUST: true } }).ele;
-  assert.ok(mean[3] > 20, `mean smears the spike: ${mean[3]}`); // (1+2+100+4+5)/5 = 22.4
-  assert.ok(med[3] < 6, `median rejects the spike: ${med[3]}`); // median([1,2,4,5,100]) = 4
-  assert.equal(med[2], 2); // a neighbour is untouched by the spike (median = el[2])
-});
-
-test("smooth SMOOTH_ROBUST: still preserves a constant-grade ramp", () => {
-  const el = Array.from({ length: 11 }, (_, i) => i);
-  const { ele } = compute({
-    el,
-    planarStep: new Array(11).fill(10),
-    g: { SMOOTH_WIN_M: 25, SMOOTH_ROBUST: true },
-  });
-  for (let i = 2; i <= 8; i++) assert.ok(Math.abs(ele[i] - el[i]) < 1e-9, `i=${i} ${ele[i]}`);
-});

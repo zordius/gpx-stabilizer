@@ -272,19 +272,22 @@ producing a **slope-stable elevation**:
   points the compute-phase drops (outlier/stray/activity) will flag — compute modules are
   independent and don't see each other's drops. Strictly post-drop smoothing awaits the
   proposed `finalize` phase.
-- **Precondition / gap (2026-06-29).** Distance-domain *mean* smoothing assumes the input is
-  **horizontally clean and the `ele` is noisy-but-not-spiky** — true for clean GPS5 (Hero5), but
-  **NOT for dirty Hero10** (many `none`/`2d` fixes, 40–80 m/s teleport spikes). Two gaps surface
-  there: (1) **`stabilize` cleans horizontal only** — `outlier`/`stray` test x/y, so an **`ele`
-  spike survives** and still wrecks a derived grade (±288 % after `stabilize`+`smooth`; a mean
-  barely dents a lone spike). **Partly addressed (2026-06-29):** `smooth`'s `SMOOTH_ROBUST` opt-in
-  swaps the mean for a window **median** — a lone spike no longer shifts the result
-  (`stabilize(pts, { smooth: { SMOOTH_ROBUST: true } })`); a dedicated `ele`-outlier *drop* module
-  is still absent. (2) **Lift segmentation** — a recording interleaves ski runs
-  (descend) and **lift rides** (climb +150 m); per-point ski-grade is meaningless on a lift, so
-  activity/lift segmentation (roadmap "lift handling") must precede per-segment smoothing.
-  Evidence + the IMU-vertical oracle that motivated this: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)
-  ("IMU-vertical elevation oracle").
+- **Precondition / findings (2026-06-29).** Distance-domain *mean* smoothing assumes the input is
+  **horizontally clean** — true for clean GPS5 (Hero5), but dirty Hero10 (many `none`/`2d` fixes,
+  40–80 m/s teleport spikes) must be `stabilize`d first; vertical fusion can't fix horizontal
+  teleports. A full-stack eval (clean → mean / median / trimmed smooth / IMU-fuse, on the same
+  survivor grid) then found:
+  - **Mean is the right smoother.** A window **median makes a derived grade WORSE** (it snaps to
+    sample values → staircase → spikier derivative); a **trimmed mean only ties the mean** (once
+    `stabilize` removes the gross spikes there's no lone spike left to trim). A speculative
+    `SMOOTH_ROBUST` median option was tried and **reverted**. **IMU-vertical fusion** lowers grade
+    jitter best and preserves the clean signal's range, but is GoPro-only (the #9 advanced tier).
+  - **The dirty-Hero10 extremes are mostly LIFT GEOMETRY, not `ele` spikes** — a chapter that
+    climbs +151 m gives ±300–400 % grade that *no* `ele` smoothing fixes (a real steep climb over a
+    short horizontal). So the prerequisite is **activity/lift segmentation** (roadmap "lift
+    handling"), not an `ele` despiker. A dedicated `ele`-outlier *drop* remains a candidate only if
+    a real lone spike that `stabilize` misses *and* the mean smears ever shows up — none yet.
+  Evidence + the IMU oracle: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) ("IMU-vertical elevation oracle").
 - **Advanced (future, GoPro-only).** GoPro has no barometer (altitude is GPS-derived,
   the noisiest GPS axis); a complementary filter could fuse low-pass GPS `ele` with
   high-pass IMU vertical acceleration to constrain the *shape* between samples — gated on

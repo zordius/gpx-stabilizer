@@ -236,13 +236,20 @@ fused with GPS vertical velocity + a slow position anchor.
   (±300 %): vertical fusion smooths `ele` but **cannot fix horizontal teleports** that corrupt the
   grade *denominator*. Horizontal teleports = **witness #2 / `stabilize`**; vertical fusion (#9) =
   `ele` noise on the survivors. Order: de-teleport → then fuse/smooth.
-- **`stabilize` is horizontal-only — `ele` spikes survive (gap).** `outlier`/`stray` test x/y; an
-  `ele` spike passes through and still wrecks the grade after `stabilize`+`smooth` (Hero10 grade
-  stayed ±288 %; a distance-domain *mean* barely dents a lone spike). ⇒ a **robust `ele` step**
-  (ele-outlier drop, or median-not-mean smoothing) is a missing prerequisite for dirty sources.
-- **Lift chapters break per-point grade.** Hero10 recordings interleave **lift rides** (`GX045132`
-  climbs +151 m — real, raw & fused agree) and **ski runs** (`GX055132` descends −151 m). Ski-grade
-  is meaningless on a lift → needs #12 / SPEC "lift handling" segmentation before per-segment smoothing.
+- **Smoother choice (full-stack eval, same survivor grid).** Among clean / mean / median / trimmed
+  smooth / IMU-fuse: **mean wins for grade jitter** (Hero10 2.00→1.14, Hero5 0.74→0.63); a window
+  **median is WORST** (snaps to sample values → staircase → spikier derivative; Hero10 1.90); a
+  **trimmed mean only ties the mean** (no lone spike left once `stabilize` runs). **IMU-fuse** has
+  the lowest jitter *and* best preserves the clean range, but is GoPro-only (#9). A speculative
+  `SMOOTH_ROBUST` median was tried in core and **reverted**.
+- **The dirty-Hero10 extremes are mostly LIFT geometry, not `ele` spikes.** A chapter that climbs
+  +151 m (`GX045132`, real — raw & fused agree) gives ±300–400 % grade that **no `ele` smoothing
+  fixes** (steep climb over short horizontal); the ski-down (`GX055132`, −151 m) is far saner. So
+  the prerequisite is **lift/activity segmentation** (#12 / SPEC "lift handling"), not an `ele`
+  despiker — `stabilize` is horizontal-only (`outlier`/`stray` test x/y) but no surviving lone
+  `ele` spike that the mean smears has actually been found.
+- *Metric caveat:* the Δ/step jitter is **density-confounded** — raw (dense ~10–18 Hz) vs the
+  ~1 Hz survivors aren't comparable; compare on a common grid (the full-stack eval does).
 - *Metric caveat:* the Δ/step jitter is **density-confounded** — raw (dense ~10–18 Hz) vs the
   ~1 Hz survivors aren't comparable; compare grade **range**, or resample to a common grid first.
 
