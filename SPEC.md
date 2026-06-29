@@ -108,6 +108,11 @@ built-ins, in order:
 | `outlier` | compute | GPS spikes: 3-point geometric detour, or speed-change spike |
 | `stray` | compute | points far outside the track's spatial bulk (median centre + bulk-radius × factor) — teleport/cluster garbage `outlier`'s single-point detour misses |
 | `activity` | compute | physically-implausible motion (see below) |
+| `drift` | compute | low-movement scatter (jitter while near-stationary) — the dominant garbage source (~92 % of drops on the 42-workout corpus) |
+| `despike` | compute | **nothing — detection-only signal** (`point.despike.flagged`); see below |
+| `badspan` | post-assemble | every point inside a dense bad-region: a glue **decision** over quality-drop + `despike.flagged` density (analyze.js `glueBadSpans`), not a per-point detector |
+
+**`despike` is detection-only (option C, 2026-06-29).** It emits a `flagged` SIGNAL, never a `dropReason`. On its own despike is a weak/noisy proxy for `drift` (EDA: Jaccard 0.12 vs drift, same signal correlations, ~98 % of its old sole-drops were isolated curve false-positives), so an **isolated** flag must not drop a point. Instead the flag feeds the `badspan` density: a **dense** region of flags still glues into a dropped bad span (despike's real value — catching blobs of garbage `drift` misses), while a lone flag only contributes density and survives. Net on the 42-workout corpus: dropping 12.0 % → 10.6 % (5,039 isolated false-positives kept), `badspan` reach unchanged.
 
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 
