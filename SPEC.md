@@ -345,6 +345,72 @@ keeps `stabilize` minimal — `speed` is NOT carried through** (base ethos: remo
 field-widening); a consumer that needs per-sample speed derives it (from positions, or reads
 the raw points). The `export-contract.md` §D "revisit" trigger is hereby closed.
 
+## Vertical analysis — the B-decomposition vertical half (design; pending experiment) *(added 2026-06-29)*
+
+**Status: blueprint — each insight below is designed and to be validated one by one against the
+IMU-fused truth (`gpx_eval/oracle_*.mjs`) and/or the human eye (an elevation-profile viewer).**
+
+### Why this exists — "noise is noise"
+
+Distance-domain mean smoothing (above) is a blunt start. The deeper finding (W-calibration sweep,
+`gpmf-sensors.md`): **with GPS alone you cannot tell noise from real signal** — the optimal smoothing
+is *noise-driven*, and noise can't be measured from one noisy channel (high grade-jitter can be real
+terrain — `GP045136` — or noise — `GX065132`). You need **another input**. We have four, three of
+them **portable (no IMU)** — and the **human eye** (the project's ultimate criterion; an
+elevation-profile render is the 2-D track viewer's missing vertical twin). The IMU-fused elevation is
+thereby demoted from "needed" to a **validation oracle**.
+
+After the **B decomposition** (planar 2-D kinematics + a separate vertical 1-D axis — built, see
+Layer 2), the vertical analysis is parameterised by the *cleaner* horizontal distance: **grade =
+Δel / planarStep**. Its building blocks, each an analog of a horizontal insight (or genuinely
+vertical-only):
+
+### 1. Grade-change bound — *local* physical constraint (analog of the turn-rate / `activity` envelope)
+
+Grade can't jump: `|d(grade)/d(dist)| × hs² = vertical acceleration`, which is physically bounded for
+any body/vehicle. A grade-change **spike is therefore noise**, regardless of activity. **Speed-adaptive
+for free** — the bound lives in *acceleration*, so faster ⇒ tighter grade-change (the thing the failed
+per-activity-W tuning tried to do by hand). Use as a **reconstruction target**, not a naive per-point
+detector (the 2nd derivative of noisy `el` is itself noisy): *find the `ele` closest to raw whose
+grade-change stays within the physical bound everywhere* — removes impossible spikes, preserves
+in-bound real terrain (no over-flatten). Bound value = a physical constant (tolerable vertical accel),
+not a per-source tuning. **Pending: validate the reconstruction reproduces the IMU-fused truth.**
+
+### 2. `ele`-outlier — *local* single-point spike (analog of `outlier`)
+
+`outlier`/`stray` test x/y only, so an `ele` spike survives `stabilize` (the documented gap). The
+vertical analog of `outlier`'s 3-point detour: a point whose `ele` detours from the local line is an
+`ele` spike → drop (or correct). Fills the gap a mean smoother can't (a mean barely dents a lone spike).
+
+### 3. Vertical `maDist` = a *portable noise estimate* (split the 3-D `maDist`)
+
+`profile.maDist` is the distance off the moving-average line (currently a 3-D x/y/el blob). Split it
+into **horizontal** and **vertical** jitter; the **vertical** jitter (Δel off the smooth line) is a
+*portable, runtime* estimate of the `ele` noise level — the missing input the noise-driven adaptive
+window needs (≈ the `raw − fused` the IMU gave us, without the IMU).
+
+### 4. Terrain-surface self-consistency — *global* constraint (genuinely vertical-only; no horizontal analog)
+
+For non-flight movement the terrain is a **single-valued surface `z = f(x,y)`**: the track passing the
+*same* (x,y) twice **must** read the same `ele`; a mismatch is noise. Unlike 1–3 (local), this is a
+**global** self-consistency check — and **strongest for repetitive activities** (ski laps revisit each
+(x,y) many times → a clean terrain model by robust vote; deviations = noise). Caveats: **gate on
+non-flight** (`activity` classifies it; exclude jumps/airtime); a **robust vote, not hard equality**
+(bridges / overpasses / multi-level are rare legitimate exceptions); "same (x,y)" means *near* in the
+horizontal-noise radius — and the `ele` **spread among near-coincident points is itself a noise
+estimate** (complements #3). **Needs revisits** → a single down-run has few; exploit it by assembling a
+**multi-lap day** (the 18-chapter Hero5 day). No horizontal analog — horizontally, revisiting a point
+is normal; only the vertical is locked by the surface.
+
+### Experiment order (then one by one)
+
+A) **#1 grade-change reconstruction** first — local, single-clip, has the IMU truth to check against.
+B) **#4 surface self-consistency** next — global, needs the assembled multi-lap day; the most powerful
+and most portable for ski data. C) **#3 vertical-`maDist` noise estimate** wired into an adaptive
+window once a noise→W mapping exists. D) **#2 `ele`-outlier** as a cheap pre-step. Acceptance for each:
+match the IMU-fused truth and/or read clean on the elevation-profile viewer; lift segmentation remains
+a precondition (don't compute grade across a lift).
+
 ## Track resampling — uniform grid (contract) *(added 2026-06-29)*
 
 **Status: IMPLEMENTED** (`resample.js` + `stabilizeTrack` `opts.resample`, 2026-06-29).
