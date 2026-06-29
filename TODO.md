@@ -59,10 +59,13 @@ before the GoPro multi-sensor work.
   first survivor-rewriting module; (2) uniform-grid time-domain resampling
   (`resample.js`, `stabilizeTrack` `resample`, maxGap-splitting, `18634a4`). Status +
   eval results in [`SPEC.md`](SPEC.md) ("Track smoothing" / "Track resampling").
-  Core roadmap still open: per-activity smoothing defaults, distance-domain resample
-  variant, the true movie-layers-consumer acceptance (wire `smooth`/`resample` into
-  `provider-gopro`/`provider-gpx`), then segment classification / lift handling /
-  OSM / activity segmentation.
+  **Consumer acceptance PASSED (2026-06-29):** movie-layers `provider-gopro` adopted
+  `smooth` (their `cd0ebb8`, now default) — real `gradientSamples` gave −39.4…26.3 % →
+  −11.8…11.2 %, matching the proxy; `resample` not needed there (per-frame + maxGap-dim);
+  the "stabilize drops speed" item is **resolved consumer-side** (their GPS-derived speed
+  fallback fires) — lib keeps `stabilize` minimal. Core roadmap still open: per-activity
+  smoothing defaults, distance-domain resample variant, then segment classification /
+  lift handling / OSM / activity segmentation.
 
 - **IMU oracle / Hero10 explored — DEFERRED (2026-06-29).** Built a complementary-filter
   IMU-vertical elevation oracle and ran a full-stack eval (mean/median/trimmed smooth vs

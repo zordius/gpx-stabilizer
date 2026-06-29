@@ -311,20 +311,25 @@ baseline on the stabilized `GX065132` track (57 survivors), raw `ele` vs smoothe
 | smooth ±50 m | −8.0…4.6 % | 12.6 | 0.58 % |
 
 raw matches the contract's −39…26 % / high-jitter; ±30 m cuts jitter 2.7× and span 2.5×
-while staying small enough to track terrain (≈3.5 s of skiing). This is a *proxy* (the
-eval's own grade derivation); the **true acceptance through the movie-layers consumer is
-still pending** (wiring `smooth` into `provider-gopro` / `provider-gpx`).
+while staying small enough to track terrain (≈3.5 s of skiing).
 
-### Related finding — `stabilize` drops `speed`
+**True consumer acceptance — PASSED (2026-06-29).** Wired into movie-layers `provider-gopro`
+(their commit `cd0ebb8`, smoothing now their default) and re-derived through the real
+`gradientSamples` (windowM 20 m) on `GX065132`: gradient **−39.4…26.3 % (raw) → −11.8…11.2 %
+(smoothed)** — matches this proxy exactly. The contract's acceptance is met end-to-end, not
+just by proxy. (`resample` was evaluated and **not adopted** by that consumer — its per-frame
+render + per-channel `maxGap` dim already covers gap handling; resample stays available for
+consumers that want hole-splitting.)
 
-The same investigation hit the documented gap in
-[`docs/export-contract.md`](docs/export-contract.md) §D: `stabilize` reduces survivors
-to `{lat,lon,ele,time}`, so a consumer's **speed** channel vanishes under
-`stabilize: true` (movie-layers' speed widget then fails its `needs:['speed']` gate).
-That doc's "revisit if a consumer genuinely needs cleaned points *with* those fields"
-trigger is now **met**. The reconstruction tier is the natural home for the decision:
-carry `speed` through the cleaned shape, or have the export derive it from
-`kinematics.velocity.mag` (3D speed already computed in `measure`). Tracked here.
+### Related finding — `stabilize` drops `speed` — RESOLVED (consumer-side, 2026-06-29)
+
+`stabilize` reduces survivors to `{lat,lon,ele,time}`, so a consumer's **speed** channel
+vanishes under `stabilize: true`. **Resolved at the movie-layers acceptance:** the consumer's
+own **GPS-derived speed fallback** fires under `stabilize:{smooth:true}` (its `speed` channel
+read 0–34.1 km/h, matching the device's 0.3–35.2), so the speed gauge still renders. **The lib
+keeps `stabilize` minimal — `speed` is NOT carried through** (base ethos: removal, not
+field-widening); a consumer that needs per-sample speed derives it (from positions, or reads
+the raw points). The `export-contract.md` §D "revisit" trigger is hereby closed.
 
 ## Track resampling — uniform grid (contract) *(added 2026-06-29)*
 

@@ -131,11 +131,12 @@ TelemetryResult = {
   `hdop` should pass `stabilize: false` and clean downstream, or read them off the raw
   points. (Decision 2026-06-27: keep `stabilize` minimal rather than widen core; revisit
   if a consumer genuinely needs cleaned points *with* those fields.)
-  - **Revisit trigger now met (2026-06-28):** movie-layers' `speed` widget fails its
-    `needs:['speed']` gate under `stabilize: true` (the channel comes back empty).
-    Folded into the elevation-reconstruction contract in [`SPEC.md`](../SPEC.md) —
-    decide there whether the cleaned shape carries `speed`, or the export derives it
-    from `kinematics.velocity.mag` (3D speed already computed in `measure`).
+  - **RESOLVED (2026-06-29):** decided **not** to carry `speed` — the consumer derives it.
+    At the movie-layers acceptance, `provider-gopro`'s GPS-derived speed fallback fired under
+    `stabilize:{smooth:true}` (its `speed` channel read 0–34.1 km/h vs the device's 0.3–35.2),
+    so the gauge still renders. `stabilize` stays minimal (`{lat,lon,ele,time}`); a consumer
+    needing per-sample speed derives it or reads the raw points. See [`SPEC.md`](../SPEC.md)
+    ("Related finding — stabilize drops speed").
 - **Elevation smoothing (`stabilize: { smooth: true }`) — NEW 2026-06-29.** Smooths each
   survivor's `ele` over an along-track distance window (default ±30 m), so a gradient
   derived as `Δele / distance` has **bounded jitter** (the raw GPS `ele` is the noisiest
