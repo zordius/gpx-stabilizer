@@ -64,6 +64,17 @@ before the GoPro multi-sensor work.
   `provider-gopro`/`provider-gpx`), then segment classification / lift handling /
   OSM / activity segmentation.
 
+- **IMU oracle / Hero10 explored — DEFERRED (2026-06-29).** Built a complementary-filter
+  IMU-vertical elevation oracle and ran a full-stack eval (mean/median/trimmed smooth vs
+  IMU-fuse) on real Hero5 + Hero10 ski chapters (re-extracted from SMB, gitignored
+  `gpx_eval/hero5cache/`). Findings (detail: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)
+  "IMU-vertical elevation oracle" + `SPEC.md` smoothing precondition): **mean is the right
+  smoother** (a `SMOOTH_ROBUST` median was tried + reverted — staircase hurts grade);
+  **IMU-fuse helps only on clean input** and is GoPro-only (#9). **Hero10 GPS is too dirty**
+  (many `none`/`2d`, 40–80 m/s teleports) and its grade extremes are mostly **lift geometry**,
+  not `ele` noise. **Decision: don't chase Hero10 now.** The real prerequisite it exposes is
+  **lift / activity segmentation** (roadmap "lift handling") — deferred with the GPS/IMU work.
+
 - **GPS/IMU module (deferred).** The full non-GPS sensor catalog + the fusion
   analysis live in [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). It is a
   **GoPro-only opt-in module** (via the aux / `finalize` hooks, §3 + `SPEC.md`),
