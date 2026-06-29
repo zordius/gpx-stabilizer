@@ -1,14 +1,19 @@
 // Compute module "despike" — flag suspicious points in two DERIVATIVE spaces, each with the test
 // that fits it (proven empirically: a global robust baseline works for speed but RUNS AWAY on turn,
-// which is zero-dominated). Detection only — aggressive on purpose; the pipeline-level bad-span glue
-// (see analyze.js) makes the keep/drop decision, so isolated false flags are tolerated here.
+// which is zero-dominated). **DETECTION ONLY (option C, 2026-06-29)** — despike emits a `flagged`
+// SIGNAL, NOT a drop: it feeds the bad-span density (analyze.js `glueBadSpans`), which makes the
+// keep/drop decision. So a DENSE region of flags is dropped (as a span) but an ISOLATED flag
+// survives — because on its own despike is a weak/noisy proxy for `drift` (EDA: Jaccard 0.12, same
+// signals, ~98% of its old sole-drops were isolated curve false-positives). This is what the module
+// always claimed to do; before C its `drop` reason actually removed every flagged point.
 //   turn  : ABSOLUTE thresholds (a turn has a physical limit at ski speed) —
 //           (a) reversal: a >=REV out-and-back pair whose turns cancel (heading resumes) = a jut;
 //           (b) lone hairpin: a single vertex turning >=LONE (well past real carves) = a one-sided spike.
 //   speed : RELATIVE (no absolute scale: lift-slow vs ski-fast) — a robust IRLS-LOESS baseline of
 //           log segment-length + global-MAD residual; a point whose BOTH adjacent segments are
 //           length-outliers is displaced.
-// Tunable via g.DESPIKE_*. Returns { drop } indexed by kept point (the "despike" drop reason).
+// Tunable via g.DESPIKE_*. Returns { flagged } indexed by point — a signal (`point.despike.flagged`),
+// not a drop; bad-span glue reads it as density.
 
 const median = (a) => {
   const s = [...a].sort((x, y) => x - y);
@@ -84,13 +89,13 @@ export const compute = (ctx) => {
   const KS = g.DESPIKE_KS ?? 3.5; // speed log-baseline MAD factor (aggressive)
   const W = g.DESPIKE_W ?? 30; // speed baseline half-window
   const JUT = g.DESPIKE_JUT ?? 3; // m: absolute influence gate — only drop a jump that would pull the line this far off
-  const drop = new Array(n).fill(null);
-  if (n < 3) return { drop };
-  // each detector tags its own key on the point's drop context (rev/lone/speed may co-occur), so the
-  // per-step contribution stays inspectable in the output instead of collapsing into one reason.
+  const flagged = new Array(n).fill(null);
+  if (n < 3) return { flagged };
+  // each detector tags its own key on the point's flag context (rev/lone/speed may co-occur), so the
+  // per-step contribution stays inspectable in the signal instead of collapsing into one reason.
   const flag = (k, key, val) => {
-    if (!drop[k]) drop[k] = {};
-    drop[k][key] = val;
+    if (!flagged[k]) flagged[k] = {};
+    flagged[k][key] = val;
   };
 
   const wrap = (a) => Math.atan2(Math.sin(a), Math.cos(a));
@@ -151,5 +156,5 @@ export const compute = (ctx) => {
     if (jut > JUT) flag(k, "speed", true);
   }
 
-  return { drop };
+  return { flagged };
 };

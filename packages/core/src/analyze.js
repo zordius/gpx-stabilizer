@@ -87,7 +87,10 @@ export function glueBadSpans(points, g) {
   const m = timed.length;
   if (m === 0) return points;
   const time = timed.map((i) => points[i].time);
-  const flag = timed.map((i) => isQualityDropped(points[i]));
+  // bad-span density counts both quality DROPS and despike's detection-only `flagged` signal — despike
+  // emits a flag, not a drop (it's a noisy proxy for drift), so a DENSE region of flags still glues into
+  // a bad span here, while an isolated flag contributes density but is never dropped on its own.
+  const flag = timed.map((i) => isQualityDropped(points[i]) || points[i].despike?.flagged != null);
 
   // sliding-window flag density (two pointers over the timed points)
   const bad = new Array(m).fill(false);

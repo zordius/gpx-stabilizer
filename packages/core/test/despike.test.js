@@ -9,11 +9,11 @@ const mk = (g) => compute({ x: [0, 1, 0.134, -0.732], y: [0, 0, 0.5, 1.0], n: 4,
 test("despike: DESPIKE_PROFILE switches the lone-hairpin threshold (core conservative, ski aggressive)", () => {
   const core = mk({}); // default profile = core (LONE 160°) → a ~150° turn is a real corner, kept
   const ski = mk({ DESPIKE_PROFILE: "ski" }); // ski (LONE 120°) → 150° exceeds it, flagged
-  assert.equal(core.drop[1], null);
-  assert.ok(ski.drop[1]?.lone !== undefined);
+  assert.equal(core.flagged[1], null);
+  assert.ok(ski.flagged[1]?.lone !== undefined);
 });
 
 test("despike: per-key g.DESPIKE_* overrides the profile", () => {
   const overridden = mk({ DESPIKE_LONE: 120 }); // force a low lone threshold despite the core profile
-  assert.ok(overridden.drop[1]?.lone !== undefined);
+  assert.ok(overridden.flagged[1]?.lone !== undefined);
 });
