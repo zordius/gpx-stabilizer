@@ -408,14 +408,34 @@ estimate** (complements #3). **Needs revisits** → a single down-run has few; e
 **multi-lap day** (the 18-chapter Hero5 day). No horizontal analog — horizontally, revisiting a point
 is normal; only the vertical is locked by the surface.
 
+**Experiment B done — FAILED on steep terrain (2026-06-29, `gpx_eval/surface_b.mjs`).** The full Hero5
+day (9 chapters, 11 237 survivors) has only 27 multi-pass cells; validating the surface-median against
+the IMU-fused truth on GP01: **RMS(surface-median − truth) = 4.31 m vs RMS(raw − truth) = 0.42 m** — the
+surface is *10× worse* than just trusting raw. Cause: **slope × horizontal-noise confound** — a 12 m
+cell on a ~50 % ski slope spans several metres of *real* elevation, so two passes "at the same (x,y)
+within the horizontal-noise radius" differ in `ele` mostly because they're at different heights *on the
+slope*, not because of vertical noise. So the revisit `ele` spread is **mostly the slope confound, not
+vertical noise** (correcting the precheck read). A proper form would need a local terrain **plane fit**
+(not bin-and-median) — but even that is limited because the horizontal position is itself noisy on a
+slope. **B works on flat terrain; it's confounded exactly where skiing needs it (steep).**
+
 ### Experiment order (then one by one)
 
-A) **#1 grade-change reconstruction** first — local, single-clip, has the IMU truth to check against.
-B) **#4 surface self-consistency** next — global, needs the assembled multi-lap day; the most powerful
-and most portable for ski data. C) **#3 vertical-`maDist` noise estimate** wired into an adaptive
-window once a noise→W mapping exists. D) **#2 `ele`-outlier** as a cheap pre-step. Acceptance for each:
-match the IMU-fused truth and/or read clean on the elevation-profile viewer; lift segmentation remains
-a precondition (don't compute grade across a lift).
+A) **#1 grade-change reconstruction** — DONE (terrain-preserving despike; in-bound noise passes).
+B) **#4 surface self-consistency** — DONE, FAILED on steep terrain (slope×horizontal-noise confound).
+C) **#3 vertical-`maDist` noise estimate** — but #1/#4's results predict it inherits the same wall.
+D) **#2 `ele`-outlier** — subsumed by #1's continuous despike.
+
+**Meta-conclusion (2026-06-29, after A+B).** On *steep* terrain (skiing — the use case) the **portable
+geometric** methods all hit a fundamental wall: #1 removes only physically-impossible spikes (in-bound
+noise is indistinguishable from real small terrain); #4 is confounded because the *horizontal* position
+is itself noisy and slope turns that into vertical error. **The thing that genuinely separates vertical
+noise from signal is an independent vertical measurement — the IMU.** So for ski elevation the IMU is
+**re-elevated from "validation tool" back to genuinely valuable** (#9), and the realistic portable base
+stays **plain mean smoothing + grade-bound despike**, accepting the in-bound noise. (On *flat* terrain
+#4 would work — no slope confound.) Lift segmentation remains a precondition (don't compute grade across
+a lift). Acceptance for any future tier: match the IMU-fused truth and/or read clean on an
+elevation-profile viewer.
 
 ## Track resampling — uniform grid (contract) *(added 2026-06-29)*
 
