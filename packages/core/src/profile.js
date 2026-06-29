@@ -137,25 +137,25 @@ export function localShape(x, y, hs, g) {
 }
 
 /**
- * Block 5 — high-frequency jitter: distance from the moving-average line, plus the cumulative 3D
- * unit step vectors `cu` that the windows block differences for windowed wander.
+ * Block 5 — high-frequency jitter: distance from the moving-average line, plus the cumulative
+ * **planar (2D)** unit step vectors `cu` that the windows block differences for windowed wander.
+ * `cu` is horizontal-only (B decomposition: heading is a horizontal concept; verified the 3D→2D
+ * change is a no-op for `drift` at its current threshold — `gpx_eval/wander_compare.mjs`).
+ * (`maDist` is still the 3D x/y/el jitter — no drop module consumes it; splitting it into a
+ * horizontal + a vertical noise-estimate is a separate item, SPEC "Vertical analysis" #3.)
  */
 export function jitter(x, y, el, g) {
   const n = x.length;
   const cux = new Array(n);
   const cuy = new Array(n);
-  const cuz = new Array(n);
   cux[0] = 0;
   cuy[0] = 0;
-  cuz[0] = 0;
   for (let i = 1; i < n; i++) {
     const dxu = x[i] - x[i - 1];
     const dyu = y[i] - y[i - 1];
-    const dzu = el[i] - el[i - 1];
-    const lu = Math.max(Math.sqrt(dxu * dxu + dyu * dyu + dzu * dzu), 1e-9);
+    const lu = Math.max(Math.hypot(dxu, dyu), 1e-9); // planar step length (heading is horizontal)
     cux[i] = cux[i - 1] + dxu / lu;
     cuy[i] = cuy[i - 1] + dyu / lu;
-    cuz[i] = cuz[i - 1] + dzu / lu;
   }
   const xma = smooth(x, g.SW);
   const yma = smooth(y, g.SW);
@@ -164,7 +164,7 @@ export function jitter(x, y, el, g) {
   for (let i = 0; i < n; i++) {
     maDist[i] = Math.sqrt((x[i] - xma[i]) ** 2 + (y[i] - yma[i]) ** 2 + (el[i] - zma[i]) ** 2);
   }
-  return { maDist, cu: { x: cux, y: cuy, z: cuz } };
+  return { maDist, cu: { x: cux, y: cuy } };
 }
 
 /**
@@ -184,8 +184,7 @@ export function windows(x, y, t, cu, g) {
     if (ns >= 3) {
       const rx = cu.x[hi] - cu.x[lo];
       const ry = cu.y[hi] - cu.y[lo];
-      const rz = cu.z[hi] - cu.z[lo];
-      wander[i] = 1.0 - Math.sqrt(rx * rx + ry * ry + rz * rz) / ns;
+      wander[i] = 1.0 - Math.hypot(rx, ry) / ns; // planar (2D) circular variance — heading is horizontal
     }
     const l2 = searchLeft(t, t[i] - g.NETD_WIN);
     const h2 = Math.min(n - 1, searchLeft(t, t[i] + g.NETD_WIN));
