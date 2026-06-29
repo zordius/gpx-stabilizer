@@ -51,12 +51,19 @@ projects **every** point so dropped points still get a position.
   compressed by `cos(lat0)`), elevation interpolated (`el`), time (`t`). **Planar x/y never uses
   altitude.**
 - **block 2 `deltas`** — per-step **planar** distance `planarStep = hypot(Δx, Δy)` and `dt` (floored at 1 s).
-- **block 3 `kinematics`** — the 3D **derivative tower** of position. Physics-named, each order the
-  same shape `{ vec, dir, mag }` (vector, 3D unit direction, magnitude):
-  - `velocity` = Δposition / Δt (m/s) — `mag` is 3D speed, `dir` the heading.
+- **block 3 `kinematics`** — the **planar (x/y) derivative tower** of position. Physics-named, each
+  order the same shape `{ vec, dir, mag }` (2-D vector, unit heading, magnitude):
+  - `velocity` = Δ(x,y) / Δt (m/s) — `mag` is *horizontal* speed, `dir` the heading.
   - `acceleration` = Δvelocity / Δt (m/s²) — the 2nd derivative; `[0]` is the zero vector.
   - (A `jerk` order would slot in identically, but 3rd-order differences of 1 Hz GPS are dominated by
     noise, so it is intentionally not computed.)
+- **block 3b `verticalRate`** — vertical speed `vz = Δel / Δt` (m/s), the **separate vertical axis**.
+  **The B decomposition (2026-06-29):** GPS horizontal and vertical errors are different processes
+  (VDOP ≈ 2–3× HDOP) and horizontal is a 2-D coupled curve, so the tower is horizontal-only and the
+  vertical is its own 1-D axis — *not* folded into a 3-D vector (which would mix the two noise scales;
+  that 3-D `mag` was why the old `activity` `accel` bound had to be "kept generous"). The vertical's
+  natural parameter is the *cleaner* horizontal distance — the along-track **grade** (Δel / planarStep)
+  and its physical bound live in the (upcoming) vertical analysis, not here.
 
 ### Layer 3 — `profile.js` (window-level descriptors)
 

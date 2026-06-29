@@ -60,15 +60,15 @@ function fits(box, f) {
   );
 }
 
-/** Heading change (rad) between step k and k-1 from the unit velocity directions; 0 at the start. */
+/** Heading change (rad) between step k and k-1 from the unit (planar) velocity directions; 0 at start. */
 function turnAt(dir, k) {
   if (k < 1) return 0;
-  const dot = dir.x[k] * dir.x[k - 1] + dir.y[k] * dir.y[k - 1] + dir.z[k] * dir.z[k - 1];
+  const dot = dir.x[k] * dir.x[k - 1] + dir.y[k] * dir.y[k - 1];
   return Math.acos(Math.min(1, Math.max(-1, dot)));
 }
 
 export const compute = (ctx) => {
-  const { el, velocity, acceleration, n, g } = ctx;
+  const { el, velocity, acceleration, vz, n, g } = ctx;
   const enabled = (g.activities ?? CORE_DEFAULT).filter((name) => ACTIVITIES[name]);
   const modes = new Array(n).fill(null);
   const drop = new Array(n).fill(null);
@@ -78,8 +78,8 @@ export const compute = (ctx) => {
     const f = {
       alt: el[p],
       hspeed: speedOf(ctx, p), // device <speed> if present, else |horizontal velocity|
-      vspeed: velocity.vec.z[p],
-      accel: acceleration.mag[p],
+      vspeed: vz[p], //          the separate vertical axis (Δel/Δt), not a velocity-vector component
+      accel: acceleration.mag[p], // PLANAR acceleration now (vertical is its own axis — see B decomp)
       turn: turnAt(velocity.dir, p),
     };
     const matched = enabled.filter((name) => fits(ACTIVITIES[name], f));

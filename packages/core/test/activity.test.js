@@ -9,14 +9,15 @@ function ctxFor({ alt = 1000, hspeed = 0, vspeed = 0, accel = 0 }, g = {}) {
   return {
     el: [alt, alt],
     n: 2,
+    vz: dup(vspeed), // the separate vertical axis (B decomposition) — feeds the vspeed envelope
     velocity: {
-      vec: { x: dup(hspeed), y: dup(0), z: dup(vspeed) },
-      dir: { x: dup(1), y: dup(0), z: dup(0) },
-      mag: dup(Math.hypot(hspeed, vspeed)),
+      vec: { x: dup(hspeed), y: dup(0) }, // planar
+      dir: { x: dup(1), y: dup(0) },
+      mag: dup(hspeed), // horizontal speed
     },
     acceleration: {
-      vec: { x: dup(accel), y: dup(0), z: dup(0) },
-      dir: { x: dup(1), y: dup(0), z: dup(0) },
+      vec: { x: dup(accel), y: dup(0) },
+      dir: { x: dup(1), y: dup(0) },
       mag: dup(accel),
     },
     g,

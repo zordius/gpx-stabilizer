@@ -1,8 +1,10 @@
 // Point-level measurement — the pure, parameter-free core (ported from the Python prototype's L1
 // CORE first step, gpx_stabilize.py 216–261). It projects each point to local meters and takes
-// adjacent-pair deltas plus the 3D kinematic derivatives (velocity, acceleration); every value
-// depends only on a point and its immediate neighbour (O(1)/point, no window), so this layer needs
-// no tuning params. `deltas` is planar (x/y); `kinematics` adds the 3D derivative tower. Windowed
+// adjacent-pair deltas plus the PLANAR kinematic derivatives (velocity, acceleration) and a separate
+// vertical rate; every value depends only on a point and its immediate neighbour (O(1)/point, no
+// window), so this layer needs no tuning params. `deltas` is planar (x/y); `kinematics` is the
+// horizontal-only derivative tower and `verticalRate` is the separate vertical axis (B decomposition:
+// horizontal and vertical GPS errors are different processes — see SPEC). Windowed
 // descriptors live in ./profile.js;
 // screening/modules/labelling in ./analyze.js. `measure()` runs the numbered blocks below; each
 // block is its own exported pure function (unit-testable in isolation).
@@ -51,9 +53,10 @@ function interpEle(raw) {
  * is still projected (so excluded points get `xAll/yAll`). Returns the per-point primitive bundle
  * that profile.js turns into windowed descriptors and analyze.js assembles back onto the points.
  *
- * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `planarStep`; and
- * the 3D kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
- * (vector, unit direction, magnitude); and `speed` = the device `<speed>` per valid point (or null).
+ * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `planarStep`; the
+ * PLANAR kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
+ * (horizontal vector, heading, magnitude); the separate vertical speed `vz` (m/s, Δel/Δt); and `speed`
+ * = the device `<speed>` per valid point (or null).
  * Every array is per-point length `valid.length` — the per-step quantities are padded so the last
  * point reuses the previous step's value, so consumers index directly by point (no n−1 offset).
  *
@@ -63,7 +66,8 @@ function interpEle(raw) {
 export function measure(points, valid) {
   const { xAll, yAll, x, y, el, t } = project(points, valid); // block 1
   const { dt, planarStep } = deltas(x, y, t); //                block 2
-  const { velocity, acceleration } = kinematics(x, y, el, dt); // block 3
+  const { velocity, acceleration } = kinematics(x, y, dt); //   block 3 — PLANAR (x/y only)
+  const vz = verticalRate(el, dt); //                           block 3b — the separate vertical axis
   const speed = valid.map((i) => points[i].speed ?? null); //   device <speed> per valid point, or null
   // Align every per-step array to per-point length n: the last point reuses the previous step's
   // value ("same as its neighbour"), so all bundle arrays index directly by point — no n-1 offset.
@@ -78,6 +82,7 @@ export function measure(points, valid) {
     planarStep: padLast(planarStep),
     velocity: padOrder(velocity),
     acceleration: padOrder(acceleration),
+    vz: padLast(vz),
     speed,
     n: valid.length,
   };
@@ -88,11 +93,11 @@ function padLast(a) {
   return a.length ? [...a, a[a.length - 1]] : a;
 }
 
-/** padLast applied to a derivative-order record's component arrays. */
+/** padLast applied to a derivative-order record's component arrays (planar x/y). */
 function padOrder(o) {
   return {
-    vec: { x: padLast(o.vec.x), y: padLast(o.vec.y), z: padLast(o.vec.z) },
-    dir: { x: padLast(o.dir.x), y: padLast(o.dir.y), z: padLast(o.dir.z) },
+    vec: { x: padLast(o.vec.x), y: padLast(o.vec.y) },
+    dir: { x: padLast(o.dir.x), y: padLast(o.dir.y) },
     mag: padLast(o.mag),
   };
 }
@@ -148,50 +153,59 @@ export function deltas(x, y, t) {
 }
 
 /**
- * Block 3 — the 3D kinematic derivative tower of position (the first 3D quantities here; deltas
- * above is planar). `velocity` = Δposition / Δt (m/s); `acceleration` = Δvelocity / Δt (m/s², the
- * second derivative of position) — its [0] is the zero vector (no previous step). Each order is the
- * same shape `{ vec, dir, mag }`: the vector, its 3D unit direction, and its magnitude — so
- * `velocity.mag` is the 3D speed and `velocity.dir` the heading. Add a `jerk` order the same way if
- * ever needed — but 3rd-order differences of 1 Hz GPS are dominated by noise.
+ * Block 3 — the **planar (x/y)** kinematic derivative tower of position. GPS horizontal and vertical
+ * errors are different processes (VDOP ≈ 2–3× HDOP) and horizontal is a 2-D coupled curve, so the
+ * tower is horizontal-only and elevation is a *separate* axis (`verticalRate`, parameterised by the
+ * cleaner horizontal distance — the B decomposition; see SPEC). `velocity` = Δ(x,y) / Δt (m/s);
+ * `acceleration` = Δvelocity / Δt (m/s², its [0] the zero vector). Each order is `{ vec, dir, mag }`:
+ * the 2-D vector, its unit heading, and its magnitude — so `velocity.mag` is the *horizontal* speed
+ * and `velocity.dir` the heading. A `jerk` order would slot in the same way (3rd-order 1 Hz GPS = noise).
  */
-export function kinematics(x, y, el, dt) {
+export function kinematics(x, y, dt) {
   const s = Math.max(0, x.length - 1); // one value per step
-  // order 1 — velocity = Δposition / Δt
+  // order 1 — velocity = Δ(x,y) / Δt
   const velocity = derivOrder(s, (i) => {
     const h = dt[i] || 1;
-    return [(x[i + 1] - x[i]) / h, (y[i + 1] - y[i]) / h, (el[i + 1] - el[i]) / h];
+    return [(x[i + 1] - x[i]) / h, (y[i + 1] - y[i]) / h];
   });
   // order 2 — acceleration = Δvelocity / Δt (zero at the first step)
   const v = velocity.vec;
   const acceleration = derivOrder(s, (i) => {
-    if (i === 0) return [0, 0, 0];
+    if (i === 0) return [0, 0];
     const h = dt[i] || 1;
-    return [(v.x[i] - v.x[i - 1]) / h, (v.y[i] - v.y[i - 1]) / h, (v.z[i] - v.z[i - 1]) / h];
+    return [(v.x[i] - v.x[i - 1]) / h, (v.y[i] - v.y[i - 1]) / h];
   });
   return { velocity, acceleration };
 }
 
-/** Build one derivative-order record `{ vec, dir, mag }` from a per-step vector function. */
+/**
+ * Block 3b — vertical speed `Δel / Δt` per step (m/s): the **separate vertical axis** (B decomposition).
+ * Kept apart from the planar tower because vertical GPS noise is a different, larger process; the
+ * along-track *grade* (Δel / horizontal distance) and its physical bound live in the vertical analysis.
+ */
+export function verticalRate(el, dt) {
+  const s = Math.max(0, el.length - 1);
+  const vz = new Array(s);
+  for (let i = 0; i < s; i++) vz[i] = (el[i + 1] - el[i]) / (dt[i] || 1);
+  return vz;
+}
+
+/** Build one planar derivative-order record `{ vec, dir, mag }` from a per-step (x,y) vector function. */
 function derivOrder(s, vecAt) {
   const vx = new Array(s);
   const vy = new Array(s);
-  const vz = new Array(s);
   const dx = new Array(s);
   const dy = new Array(s);
-  const dz = new Array(s);
   const mag = new Array(s);
   for (let i = 0; i < s; i++) {
-    const [ax, ay, az] = vecAt(i);
+    const [ax, ay] = vecAt(i);
     vx[i] = ax;
     vy[i] = ay;
-    vz[i] = az;
-    const m = Math.hypot(ax, ay, az);
+    const m = Math.hypot(ax, ay);
     mag[i] = m;
     const inv = m > 1e-9 ? 1 / m : 0; // a zero vector has no direction
     dx[i] = ax * inv;
     dy[i] = ay * inv;
-    dz[i] = az * inv;
   }
-  return { vec: { x: vx, y: vy, z: vz }, dir: { x: dx, y: dy, z: dz }, mag };
+  return { vec: { x: vx, y: vy }, dir: { x: dx, y: dy }, mag };
 }
