@@ -272,6 +272,17 @@ producing a **slope-stable elevation**:
   points the compute-phase drops (outlier/stray/activity) will flag — compute modules are
   independent and don't see each other's drops. Strictly post-drop smoothing awaits the
   proposed `finalize` phase.
+- **Precondition / gap (2026-06-29).** Distance-domain *mean* smoothing assumes the input is
+  **horizontally clean and the `ele` is noisy-but-not-spiky** — true for clean GPS5 (Hero5), but
+  **NOT for dirty Hero10** (many `none`/`2d` fixes, 40–80 m/s teleport spikes). Two gaps surface
+  there: (1) **`stabilize` cleans horizontal only** — `outlier`/`stray` test x/y, so an **`ele`
+  spike survives** and still wrecks a derived grade (±288 % after `stabilize`+`smooth`; a mean
+  barely dents a lone spike). A **robust `ele` step is missing** — an `ele`-outlier drop, or
+  **median-not-mean** smoothing. (2) **Lift segmentation** — a recording interleaves ski runs
+  (descend) and **lift rides** (climb +150 m); per-point ski-grade is meaningless on a lift, so
+  activity/lift segmentation (roadmap "lift handling") must precede per-segment smoothing.
+  Evidence + the IMU-vertical oracle that motivated this: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)
+  ("IMU-vertical elevation oracle").
 - **Advanced (future, GoPro-only).** GoPro has no barometer (altitude is GPS-derived,
   the noisiest GPS axis); a complementary filter could fuse low-pass GPS `ele` with
   high-pass IMU vertical acceleration to constrain the *shape* between samples — gated on

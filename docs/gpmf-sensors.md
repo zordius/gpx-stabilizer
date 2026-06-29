@@ -135,7 +135,7 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 | 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | IMU motion energy ≈ 0 ⇒ really stopped (vs GPS drift while moving) | UNVERIFIED |
 | 7 | **exposure (SHUT×ISO) → obstruction / indoor (PORTABLE)** | obstruction detection — the one proxy that works on *both* chips | SHUT, ISO (+`YAVG` on Hero10) | both² | ★★ | per-clip-relative `SHUT×ISO` (or `YAVG`) vs `SCEN` indoor/vegetation prob + GOPR hdop≥3 clusters (ground truth) + known indoor episodes³ | UNVERIFIED |
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
-| 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | UNVERIFIED |
+| 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | **PARTIAL** (oracle v1 — see below) |
 | 10 | **GYRO heading vs GPS heading → mount type** | `activity` (vehicle vs body) + a *meta*-gate: is camera-heading = travel? | GYRO (+`GRAV`/AHRS for the yaw axis) | both | ★★ | correlate GYRO-yaw heading-change with GPS heading-change over moving segments — **tight ⇒ hard/vehicle** mount (camera ≈ travel), **loose ⇒ soft/body** mount. A high-corr clip *unlocks* GYRO-as-travel-heading (turn-type, dead-reckon); a low-corr clip must **not** use it (the §3 facing caveat) | UNVERIFIED |
 | 11 | **GYRO return-to-center → travel / fall-line direction** | recover course on a *soft* mount (where camera-heading ≠ travel); also gyro bias self-cal | GYRO (+`GRAV`/AHRS) | both | ★★ | accumulate gyro heading over a window; its **time-center ≈ the dominant travel direction** (humans naturally return to facing forward). Window bound: raw gyro drifts ~13°/10 s so it must be bias-removed (per-clip) and/or GPS-de-drifted (the §1 fusion loop). **Ski caveat**: the head faces the fall line, so the center is the *run's descent direction*, not per-carve heading | UNVERIFIED |
 | 12 | **ACCL/GYRO high-freq → surface roughness / on-snow vs transport** | `activity` segment classification / **lift handling** (roadmap) | ACCL, GYRO (HF band) | both | ★★ | high-freq vibration (signal − 0.3 s MA) rises with speed **and** surface roughness; at the *same* speed, smooth-groomed ≈ ⅓ the vibration of rough snow. Lift = moderate speed + low vibration + **climbing**; smooth catwalk = same but **descending** — so HF energy + vertical-speed together separate ski / catwalk / lift (speed alone cannot) | **PARTIAL** (measured — see Vibration findings below) |
@@ -217,6 +217,34 @@ Investigated for #12 and as input to the #9 elevation oracle. HF = vibration ene
   it can't see over-flattening). Teacher = GoPro IMU (offline, gopro side); student = core's
   pure-GPX smoother + the baked constant. Keep the constant physics/density-based (not overfit to
   one GPS chip's noise) and document its provenance.
+
+### IMU-vertical elevation oracle (#9) — v1 works on CLEAN input *(2026-06-29)*
+
+First complementary filter (`gpx_eval/oracle_v1.mjs`): gravity direction = the **low-pass of
+`ACCL` itself** (not `GRAV` — Hero10 `ACCL`/`GRAV` axis conventions don't align, giving a wrong
+baseline `|g|`≈3.6; ACCL-only gives `|g|`≈9.8 **and** works on Hero5, which has no `GRAV`).
+Vertical linear accel = high-pass `ACCL` on that axis (zero-mean ⇒ no integration-bias drift),
+fused with GPS vertical velocity + a slow position anchor.
+
+- **Works on clean input.** Net elevation tracks GPS with no drift (Hero5 `GP015136`: −347.9 m
+  fused vs −348.2 m raw over a 348 m descent). On the noisy Hero10 *best-case* clip `GX065132`
+  it cuts 20 m grade jitter ~2.4× (1.05→0.43); on the already-clean Hero5 clip it barely helps
+  (raw jitter 0.11) — IMU vertical earns its keep **only when GPS `ele` is noisy**, matching #9's
+  "gated on plain smoothing being insufficient."
+- **Needs clean GPS first — two separate IMU jobs.** On **raw dirty Hero10** (`GX045132`/
+  `GX055132`: many `none`/`2d` fixes, 40–80 m/s teleport spikes) fused grade is still garbage
+  (±300 %): vertical fusion smooths `ele` but **cannot fix horizontal teleports** that corrupt the
+  grade *denominator*. Horizontal teleports = **witness #2 / `stabilize`**; vertical fusion (#9) =
+  `ele` noise on the survivors. Order: de-teleport → then fuse/smooth.
+- **`stabilize` is horizontal-only — `ele` spikes survive (gap).** `outlier`/`stray` test x/y; an
+  `ele` spike passes through and still wrecks the grade after `stabilize`+`smooth` (Hero10 grade
+  stayed ±288 %; a distance-domain *mean* barely dents a lone spike). ⇒ a **robust `ele` step**
+  (ele-outlier drop, or median-not-mean smoothing) is a missing prerequisite for dirty sources.
+- **Lift chapters break per-point grade.** Hero10 recordings interleave **lift rides** (`GX045132`
+  climbs +151 m — real, raw & fused agree) and **ski runs** (`GX055132` descends −151 m). Ski-grade
+  is meaningless on a lift → needs #12 / SPEC "lift handling" segmentation before per-segment smoothing.
+- *Metric caveat:* the Δ/step jitter is **density-confounded** — raw (dense ~10–18 Hz) vs the
+  ~1 Hz survivors aren't comparable; compare grade **range**, or resample to a common grid first.
 
 ## 5. Strategy
 
