@@ -28,13 +28,20 @@
 // full-stack eval showed a window MEDIAN makes a derived GRADE *worse* — it snaps to actual sample
 // values (staircase), and grade = its derivative = spikier. A trimmed mean merely tied the plain
 // mean (once `stabilize` removes the gross spikes there's no lone spike left to trim), and the
-// remaining Hero10 extremes are LIFT geometry (a real steep climb), a segmentation problem no `ele`
-// smoothing fixes. So the boxcar MEAN stays the one method; see gpmf-sensors.md.
+// remaining dirty-GPS extremes are real sustained steep climbs over a short horizontal (e.g. a
+// mechanical lift / ascent — any source, not a sport), a segmentation problem no `ele` smoothing
+// fixes. So the boxcar MEAN stays the one method; see gpmf-sensors.md.
+//
+// SMOOTH_WIN_M is the single aggressiveness DIAL (half-window, m): SMALL ⇒ light (keeps per-sample
+// noise), LARGE ⇒ aggressive (over-flattens real terrain). There is no universally "right" value — it
+// trades noise for fidelity and depends on the source's noise level, so tune by testing the extremes
+// (the default is a neutral middle, not a claim). The method is pure geometry — **sport-agnostic** (it
+// applies to any descending-slope motion: hiking, MTB, ski, driving …); it does not consult `activity`.
 export const compute = ({ el, planarStep, g }) => {
   const n = el.length;
   const ele = new Array(n);
   if (n === 0) return { ele };
-  const win = g?.SMOOTH_WIN_M ?? 30; // along-track half-window (m)
+  const win = g?.SMOOTH_WIN_M ?? 30; // along-track half-window (m) — the aggressiveness dial (above)
 
   // cumulative along-track planar distance: cpath[i] = Σ planarStep[0..i-1] (non-decreasing)
   const cpath = new Array(n);

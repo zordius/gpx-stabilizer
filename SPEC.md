@@ -260,7 +260,12 @@ producing a **slope-stable elevation**:
   along-track distance from `measure`'s planar `planarStep` and boxcar-means within ±win
   via an O(n) two-pointer sweep; endpoints use a naturally shrinking window. **As built**
   the param follows the in-module `g.SMOOTH_WIN_M ?? 30` convention (like stray's
-  `STRAY_*`, overridable via opts), *not* a `profile.js` PARAM.
+  `STRAY_*`, overridable via opts), *not* a `profile.js` PARAM. **`SMOOTH_WIN_M` is the single
+  aggressiveness DIAL** — small ⇒ light (keeps noise), large ⇒ aggressive (over-flattens real
+  terrain); no universally-right value (it trades noise for fidelity per the source's noise level,
+  which — the campaign showed — can't be auto-estimated portably), so it is tuned by testing the
+  ends. The method is **sport-agnostic** pure geometry (any descending-slope motion — hiking, MTB,
+  ski, driving); core stays sport-independent and does not consult `activity`.
 - **Guarantee.** Per-sample vertical noise is reduced so grade = `Δele* / Δdist` over
   that scale has **bounded jitter** (small mean `|Δgrade|` per metre), while real
   terrain grade over the scale is preserved (true climbs are not flattened). Verified by
