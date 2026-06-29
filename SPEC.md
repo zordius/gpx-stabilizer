@@ -299,8 +299,9 @@ producing a **slope-stable elevation**:
   - **The dirty-Hero10 extremes are mostly LIFT GEOMETRY, not `ele` spikes** — a chapter that
     climbs +151 m gives ±300–400 % grade that *no* `ele` smoothing fixes (a real steep climb over a
     short horizontal). So the prerequisite is **activity/lift segmentation** (roadmap "lift
-    handling"), not an `ele` despiker. A dedicated `ele`-outlier *drop* remains a candidate only if
-    a real lone spike that `stabilize` misses *and* the mean smears ever shows up — none yet.
+    handling"), not an `ele` despiker. **A terrain-preserving `ele` despiker now exists anyway**
+    (`stabilize` `opts.despike` / `mods/gradeBound.js`, the grade-change bound) for the lone-spike
+    case `stabilize` misses — validated to remove impossible spikes without over-flattening.
   Evidence + the IMU oracle: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) ("IMU-vertical elevation oracle").
 - **Advanced (future, GoPro-only).** GoPro has no barometer (altitude is GPS-derived,
   the noisiest GPS axis); a complementary filter could fuse low-pass GPS `ele` with
@@ -380,7 +381,9 @@ it works as designed and reveals its limit. It PROVABLY preserves terrain — RM
 its jitter reduction is MODEST (2.93→2.73, 2.67→2.26) because it only removes physically-IMPOSSIBLE
 grade-change spikes; in-bound noise passes — physics can't tell a small real grade-change from a small
 noise one ("noise is noise" again). So grade-bound is a *terrain-preserving despike* (the continuous
-form of #2), NOT a full smoother — in-bound noise needs another input (#4 surface, or the IMU #9).**
+form of #2), NOT a full smoother — in-bound noise needs another input (#4 surface, or the IMU #9).
+IMPLEMENTED as `mods/gradeBound.js` + `stabilize`'s `opts.despike` (the campaign's one validated,
+portable keeper — the iterative curvature clamp; `GRADE_AMAX` default 1.5 m/s²).**
 
 ### 2. `ele`-outlier — *local* single-point spike (analog of `outlier`)
 

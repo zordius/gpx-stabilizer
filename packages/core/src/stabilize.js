@@ -6,40 +6,54 @@
 
 import { analyze } from "./analyze.js";
 import { readGpx, saveGpx } from "./gpx.js";
+import * as gradeBoundMod from "./mods/gradeBound.js";
 import { validateModule } from "./mods/index.js";
 import * as smoothMod from "./mods/smooth.js";
 import { resample } from "./resample.js";
 
 const smoothModule = validateModule("smooth", smoothMod);
+const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
 
 /**
  * Stabilize one segment's points: analyze, drop every point that picked up a `dropReason`, and
  * reduce the survivors back to plain track points (the analysis signals are not carried into output).
  *
- * With `opts.smooth`, the opt-in elevation-smoothing module is appended and the exported `ele` is the
- * slope-stable smoothed value (`point.smooth.ele`); the `{lat,lon,ele,time}` shape is unchanged — only
- * the *meaning* of `ele` flips. `opts.smooth` is `true` for defaults, or an object of param overrides
- * (e.g. `{ SMOOTH_WIN_M: 50 }`) merged into the analysis params.
+ * Two opt-in survivor-`ele` rewrites (the `{lat,lon,ele,time}` shape is unchanged — only the *meaning*
+ * of `ele` flips):
+ * - **`opts.smooth`** — distance-domain mean smoothing (`point.smooth.ele`, see ./mods/smooth.js).
+ * - **`opts.despike`** — a terrain-preserving grade-change-bounded despike (`point.gradeBound.ele`, see
+ *   ./mods/gradeBound.js): removes physically-impossible `ele` spikes without over-flattening real
+ *   terrain. The portable answer to the "stabilize is horizontal-only, ele spikes survive" gap.
+ *
+ * Each is `true` for defaults or an object of param overrides (e.g. `{ SMOOTH_WIN_M: 50 }` /
+ * `{ GRADE_AMAX: 2 }`). They are independent compute signals, so they don't chain in-pipeline; if both
+ * are set the export prefers the despike (terrain-preserving) — true despike-then-smooth awaits the
+ * proposed `finalize` phase.
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number> }} [opts]
- *   modules + activity/measurement overrides, plus the `smooth` toggle
+ * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number>, despike?: boolean | Record<string, number> }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { smooth, ...rest } = opts;
-  const analyzeOpts = smooth
-    ? {
-        ...rest,
-        modules: [...(rest.modules ?? []), smoothModule],
-        ...(typeof smooth === "object" ? smooth : {}),
-      }
-    : rest;
+  const { smooth, despike, ...rest } = opts;
+  const modules = [...(rest.modules ?? [])];
+  if (smooth) modules.push(smoothModule);
+  if (despike) modules.push(gradeBoundModule);
+  const analyzeOpts =
+    smooth || despike
+      ? {
+          ...rest,
+          modules,
+          ...(typeof smooth === "object" ? smooth : {}),
+          ...(typeof despike === "object" ? despike : {}),
+        }
+      : rest;
   return analyze(points, analyzeOpts)
     .filter((p) => !p.dropReason)
     .map((p) => ({
       lat: p.lat,
       lon: p.lon,
-      ele: smooth ? (p.smooth?.ele ?? p.ele) : p.ele,
+      // despike wins over smooth when both set (terrain-preserving); else whichever is on; else raw
+      ele: (despike ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ?? p.ele,
       time: p.time,
     }));
 }
