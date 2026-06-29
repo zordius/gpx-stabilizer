@@ -374,7 +374,13 @@ per-activity-W tuning tried to do by hand). Use as a **reconstruction target**, 
 detector (the 2nd derivative of noisy `el` is itself noisy): *find the `ele` closest to raw whose
 grade-change stays within the physical bound everywhere* — removes impossible spikes, preserves
 in-bound real terrain (no over-flatten). Bound value = a physical constant (tolerable vertical accel),
-not a per-source tuning. **Pending: validate the reconstruction reproduces the IMU-fused truth.**
+not a per-source tuning. **Experiment A done (2026-06-29, `gpx_eval/grade_recon.mjs`, a_max≈1–2 m/s²):
+it works as designed and reveals its limit. It PROVABLY preserves terrain — RMS-to-fused-truth stays
+≈ raw, where mean ±30 m over-flattens badly (`GP045136`: mean RMS 6.11 m vs grade-bound 1.50 m). But
+its jitter reduction is MODEST (2.93→2.73, 2.67→2.26) because it only removes physically-IMPOSSIBLE
+grade-change spikes; in-bound noise passes — physics can't tell a small real grade-change from a small
+noise one ("noise is noise" again). So grade-bound is a *terrain-preserving despike* (the continuous
+form of #2), NOT a full smoother — in-bound noise needs another input (#4 surface, or the IMU #9).**
 
 ### 2. `ele`-outlier — *local* single-point spike (analog of `outlier`)
 
