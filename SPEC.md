@@ -277,8 +277,10 @@ producing a **slope-stable elevation**:
   **NOT for dirty Hero10** (many `none`/`2d` fixes, 40–80 m/s teleport spikes). Two gaps surface
   there: (1) **`stabilize` cleans horizontal only** — `outlier`/`stray` test x/y, so an **`ele`
   spike survives** and still wrecks a derived grade (±288 % after `stabilize`+`smooth`; a mean
-  barely dents a lone spike). A **robust `ele` step is missing** — an `ele`-outlier drop, or
-  **median-not-mean** smoothing. (2) **Lift segmentation** — a recording interleaves ski runs
+  barely dents a lone spike). **Partly addressed (2026-06-29):** `smooth`'s `SMOOTH_ROBUST` opt-in
+  swaps the mean for a window **median** — a lone spike no longer shifts the result
+  (`stabilize(pts, { smooth: { SMOOTH_ROBUST: true } })`); a dedicated `ele`-outlier *drop* module
+  is still absent. (2) **Lift segmentation** — a recording interleaves ski runs
   (descend) and **lift rides** (climb +150 m); per-point ski-grade is meaningless on a lift, so
   activity/lift segmentation (roadmap "lift handling") must precede per-segment smoothing.
   Evidence + the IMU-vertical oracle that motivated this: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)

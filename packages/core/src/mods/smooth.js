@@ -24,27 +24,37 @@
 // mean within its window. Strictly post-drop smoothing awaits the proposed `finalize` phase (SPEC);
 // for the per-sample-noise case this module targets, the effect is minor.
 
+const median = (el, lo, hi) => {
+  const w = el.slice(lo, hi).sort((a, b) => a - b);
+  const h = w.length >> 1;
+  return w.length % 2 ? w[h] : (w[h - 1] + w[h]) / 2;
+};
+
 export const compute = ({ el, planarStep, g }) => {
   const n = el.length;
   const ele = new Array(n);
   if (n === 0) return { ele };
   const win = g?.SMOOTH_WIN_M ?? 30; // along-track half-window (m)
+  // `SMOOTH_ROBUST` swaps the boxcar mean for a window MEDIAN — robust to `ele` spikes (a lone
+  // spike doesn't shift the median, where a mean barely dents it). Recommended for dirty sources
+  // (noisy GPS5 altitude / Hero10) whose `ele` carries spikes `stabilize` (horizontal-only) can't
+  // drop; the mean default is kept for clean inputs and round-trip stability. See SPEC precondition.
+  const robust = g?.SMOOTH_ROBUST ?? false;
 
   // cumulative along-track planar distance: cpath[i] = Σ planarStep[0..i-1] (non-decreasing)
   const cpath = new Array(n);
   cpath[0] = 0;
   for (let i = 1; i < n; i++) cpath[i] = cpath[i - 1] + planarStep[i - 1];
 
-  // boxcar mean over the ±win-metre neighbourhood via a two-pointer sweep (cpath is sorted, so
-  // both window edges advance monotonically → O(n) overall). The point itself is always in
-  // window (distance 0), so the divisor is never zero.
+  // two-pointer sweep of the ±win-metre window [lo, hi) (cpath is sorted, so both edges advance
+  // monotonically). The point itself is always in window (distance 0), so the window is never empty.
   let lo = 0;
   let hi = 0;
   let sum = 0;
   for (let i = 0; i < n; i++) {
     while (lo < n && cpath[i] - cpath[lo] > win) sum -= el[lo++];
     while (hi < n && cpath[hi] - cpath[i] <= win) sum += el[hi++];
-    ele[i] = sum / (hi - lo);
+    ele[i] = robust ? median(el, lo, hi) : sum / (hi - lo);
   }
   return { ele };
 };
