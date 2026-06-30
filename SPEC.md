@@ -21,6 +21,71 @@ in.gpx ──▶ [ base: remove noise points ] ──▶ out.gpx     (default; s
 
 ---
 
+## Core vs GoPro/IMU module — the placement rule *(decided 2026-06-30)*
+
+Which tier a capability belongs to is decided by **one question**:
+
+> **Can pure GPS geometry separate signal from noise for this decision?**
+> - **Yes → core** — a clean geometric answer (a drop, a signal, a coarse split).
+> - **No, it hits the "noise is noise" wall → GoPro/IMU module** — a decision one noisy GPS
+>   channel cannot make robustly needs an *independent physical witness* (the IMU); it is a
+>   deferred, GoPro-only module behind the aux / `finalize` seam (see the module-model section),
+>   **never** the base.
+
+This is the vertical-analysis meta-conclusion (below) promoted from a *finding* to the **placement
+criterion**: on steep terrain every portable geometric method fails because a single noisy channel
+cannot tell its own noise from real signal, and only an independent measurement breaks it. The same
+logic settles every core-vs-module question. **Shape: core proposes from geometry; the IMU witnesses
+when geometry is ambiguous** (the "witness, not reconstructor" model — [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)
+§7). So a feature often **splits** across the boundary — the geometric half is a core signal, the
+disambiguation is a GoPro witness.
+
+Worked placements (decided 2026-06-30):
+
+| concern | geometry enough? | tier |
+|---|---|---|
+| implausible-motion drop (activity envelope) | yes — the union box | **core** |
+| powered-vehicle envelope (car / moto / train / sail) | yes — clean GPS (open sky, rigid mount) + distinctive envelope; IMU adds ~nothing | **core** — one merged box, "one mod" |
+| `carve` geometric signal (S-arc density) | yes | **core signal** (already in `profile.js`) |
+| carve **real-vs-spike** decision | **no** — a gentle-carve spike looks geometrically like a real arc | GoPro (#1 centripetal `ACCL`) |
+| lift vs descent — coarse split | partial — `vspeed` sign only | **core** (coarse) |
+| lift vs flat-skate / catwalk (is self-power present?) | **no** — poling micro-motion is sub-1 Hz, below GPS | GoPro (#12 vibration) |
+| teleport-kill · elevation-noise fusion · obstruction | **no** | GoPro (#2 / #9 / #3 / #7) |
+
+**Strategic payoff — this is what lets core converge.** When core owns only what geometry resolves
+cleanly, its definition-of-done is **bounded and finishable**; the open-ended, chase-forever work
+(carve-confirm, lift, elevation fusion) all lives behind the witness seam. Generalising ski (below)
+is the same move: it pulls ski's hard part out of *core's* scope.
+
+**Carve tier correction.** [`docs/core-ski-split.md`](docs/core-ski-split.md) defers "`carve`"
+wholesale to ski-stabilizer. Under this rule that over-reaches: the carve **signal** is pure geometry
+and stays in core (it already lives in `profile.js`); only carve's **drop/decision use** is deferred
+(it needs the IMU witness). Read that doc's "defer carve" as "defer carve's *judgement use*, not the
+signal."
+
+**Carve is not ski-specific — generalise it.** `carve` measures **sustained, alternating-arc
+(S-swing) density** — a pure-geometry signature of *rhythmic turning*, of which a ski carve is only
+the most typical source. Two general uses (both core, both portable):
+
+- **Real-turn-vs-spike for any arc sport.** The role it plays in ski `despike` — "is this sharp turn a
+  legitimate arc or a GPS spike?" — applies unchanged to snowboard, longboard / skateboard, surf /
+  wakeboard, MTB flow & berms, motorcycle twisties, inline slalom, and to **zigzag** patterns
+  (sailing tack/gybe, autocross/cone slalom): a turn that is part of a rhythmic arc run is likely
+  real, an isolated reversal is likely noise.
+- **A stage-2 segmentation input.** Per-point `modes` is non-discriminative, but carve is a *temporal*
+  signature: **high carve = actively working the terrain** (carving descent), **low carve + descending
+  = a straight glide** (catwalk / schuss / road). Paired with the `vspeed` sign it is the core-side
+  geometric input that the lift/activity segmentation needs — it supplies exactly the "is the rider
+  *doing* something while descending?" axis that `vspeed` alone cannot.
+
+Limits: carve detects **alternating** arcs, not a single sustained curve (a highway ramp / roundabout
+/ lone hairpin is `straight`/`turn`'s job, not carve); and the arc wavelength must be resolvable at
+the sample rate — broad multi-second ski carves are fine, **tight sub-second slalom aliases** at ~1 Hz
+GPS. As a position-geometry signal it is portable (core), but coarse; the real-vs-noise *confirmation*
+in ambiguous cases still wants the IMU witness (#1).
+
+---
+
 ## Architecture
 
 Two things ship today: **stabilize** (clean a GPX) and a **viewer** (render tracks to HTML/SVG).
@@ -174,6 +239,46 @@ enabled activity** is dropped as `implausible`.
   by default (`walking · running · cycling · driving · rail · skiing · flight`); specials
   (`skydive · coaster`) are defined but opt-in via `opts.activities` (CLI later).
 - `paused` (window-level) handles the "not moving" state — not an activity box.
+
+### Activity envelope — the additive-power model *(decided 2026-06-30)*
+
+The per-vehicle boxes above are the *implementation*; the **reasoning model** behind which envelopes
+are legitimate is **additive power** — at any instant the available power is a sum, not a category:
+
+```
+available power = human (weak, ever-present floor) + gravity (variable, slope-dependent) + engine (present / absent)
+```
+
+- **human** — the weak floor any moving person has; walking/running is its full-power form.
+- **gravity** — dominates on a slope (drives ski / board / MTB to ~35 m/s, `vspeed` to −8); absent on
+  the flat.
+- **engine** — raises top speed to ~95 m/s on the ground, or opens the airborne envelope.
+
+Orthogonal to power is the **離地 / airborne** axis (`alt` + `vspeed` reach), which only the airborne
+group opens. Consequences:
+
+- **Ski is bimodal, not a special case.** Slope present → the gravity high-speed end; slope
+  insufficient → it falls back to the weak-human floor (≈ a clumsy walk — *"when gravity is
+  insufficient, the signature is weak human power"*). Its box is the **union** of the two ends, which
+  the current numbers already cover (`hspeed 0–35 ⊃ walking 0–2.5`, `vspeed ±8 ⊃ walking ±1`), so
+  **stage-1 needs no numeric change** — the model just stops treating ski as a snowflake, which is what
+  lets core converge.
+- **Powered ground vehicles merge into one box.** `driving` + `rail` (+ motorcycle / sail) overlap
+  heavily; for core's only decision (drop-if-outside-*all*) a single "powered ground vehicle" box
+  suffices — the "one mod" finish. *Cost (per the coupled-box rule): a merged box widens the cross-axis
+  corners, admitting a few high-speed ∩ high-accel ∩ sharp-turn spike-corners the separate boxes
+  reject — but `outlier` / `despike` / `stray` catch those anyway (defense in depth).*
+- **The four power-classes are also the stage-2 category space.** human / no-engine-gravity /
+  powered-ground / airborne are the coarse classes a future contextual **commit**
+  ([`docs/core-ski-split.md`](docs/core-ski-split.md) stage 2) would resolve a *segment* to — a better
+  routing key (for despike profiles, lift handling) than the seven vehicle names, since per-point
+  `modes` is non-discriminative (99.7 % of points fit something, most fit 5–6 at once).
+
+**Coverage gap the model exposes.** The current `flight` box requires `hspeed 60–300`, so **slow /
+hovering airborne craft — helicopter hover, hang-glider / paraglider — do not fit it**; widen the
+airborne group's lower `hspeed` when adding them. Note "離地" is **not directly observable** from GPS
+(a low-slow hover ≈ standing still geometrically), so it is *inferred* from the `alt` / `vspeed` /
+`hspeed` envelope, never measured.
 
 ### `stabilize.js` (top-level base feature)
 
