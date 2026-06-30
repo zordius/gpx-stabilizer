@@ -4,6 +4,12 @@ Two release tiers, to keep general GPS cleanup from getting entangled with
 skiing-specific logic (the two purposes interfere — e.g. "is this sharp turn a
 spike or a real ski carve?").
 
+> **Now effectively three tiers (2026-06-30).** A GoPro/IMU **witness** module joined
+> core and ski-stabilizer (signals that need an independent measurement — teleport-kill,
+> carve-confirm, elevation fusion). The general rule for which tier any capability
+> belongs to lives in [`SPEC.md`](../SPEC.md) ("Core vs GoPro/IMU module — the placement
+> rule"); this doc still covers the **core ↔ ski** split specifically.
+
 - **core (ship first)** — GENERAL GPS noise removal only. "Good enough":
   under-removing subtle spikes is acceptable and deferred. Must not bake in
   skiing concepts/parameters.
