@@ -25,15 +25,7 @@ function ctxFor({ alt = 1000, hspeed = 0, vspeed = 0, accel = 0 }, g = {}) {
 }
 
 test("activity registry: core defaults are everyday land travel + flight; specials are opt-in", () => {
-  assert.deepEqual(CORE_DEFAULT, [
-    "walking",
-    "running",
-    "cycling",
-    "driving",
-    "rail",
-    "skiing",
-    "flight",
-  ]);
+  assert.deepEqual(CORE_DEFAULT, ["walking", "running", "cycling", "powered", "skiing", "flight"]);
   assert.ok(ACTIVITIES.skydive && !CORE_DEFAULT.includes("skydive")); // defined but not default
 });
 
@@ -62,6 +54,15 @@ test("activity: flight needs the coupled box; skydive must be opted in", () => {
   );
 });
 
+test("activity: the merged `powered` box covers the old driving+rail regimes", () => {
+  // town driving: ~30 m/s, gentle turn — the old `driving` regime
+  assert.ok(compute(ctxFor({ hspeed: 30, accel: 3 })).modes[0].includes("powered"));
+  // fast train: ~80 m/s on the ground, low accel/turn — the old `rail` regime, below flight's floor
+  const train = compute(ctxFor({ alt: 500, hspeed: 80, accel: 2 }));
+  assert.ok(train.modes[0].includes("powered"));
+  assert.equal(train.drop[0], null);
+});
+
 test("activity: uses device <speed> for hspeed when present (overrides position-derived)", () => {
   // computed horizontal velocity is ~0 (stationary geometry), but the device says 80 m/s
   const ctx = ctxFor({ hspeed: 0, accel: 2 });
@@ -80,6 +81,6 @@ test("activity: integrates as a core builtin — a clean ski-speed track keeps e
     time: i * 1000,
   }));
   const out = analyze(pts);
-  for (const p of out) assert.equal(p.dropReason, undefined); // all explained (skiing/driving/…)
+  for (const p of out) assert.equal(p.dropReason, undefined); // all explained (skiing/powered/…)
   assert.ok(out[10].activity.modes.length > 0); // and positively labelled
 });

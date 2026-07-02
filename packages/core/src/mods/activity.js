@@ -21,8 +21,13 @@ export const ACTIVITIES = {
   walking: { alt: [null, 9000], hspeed: [0, 2.5], vspeed: [-1, 1], accel: [0, 3], turn: [0, PI] },
   running: { alt: [null, 9000], hspeed: [0, 12], vspeed: [-1, 1], accel: [0, 4], turn: [0, PI] },
   cycling: { alt: [null, 4500], hspeed: [0, 25], vspeed: [-3, 3], accel: [0, 4], turn: [0, 2.5] },
-  driving: { alt: [null, 4500], hspeed: [0, 40], vspeed: [-3, 3], accel: [0, 10], turn: [0, 2.0] },
-  rail: { alt: [null, 2500], hspeed: [0, 95], vspeed: [-3, 3], accel: [0, 3], turn: [0, 1.5] },
+  // powered ground/water vehicle — the additive-power "engine present, on the ground" class. One
+  // merged box (union of the old `driving`+`rail`, and the home for motorcycle/sail): for core's only
+  // decision (drop-if-outside-*all*) the heavily-overlapping per-vehicle boxes need not be separate.
+  // Cost of the merge (per the coupled-box rule): the union widens the cross-axis corners, admitting a
+  // few high-speed ∩ high-accel ∩ sharp-turn spike-corners the separate boxes rejected — but
+  // `outlier`/`despike`/`stray` catch those anyway (defense in depth). See SPEC "additive-power model".
+  powered: { alt: [null, 4500], hspeed: [0, 95], vspeed: [-3, 3], accel: [0, 10], turn: [0, 2.0] },
   skiing: { alt: [null, 5000], hspeed: [0, 35], vspeed: [-8, 8], accel: [0, 15], turn: [0, 2.7] },
   flight: {
     alt: [null, 13000],
@@ -37,15 +42,7 @@ export const ACTIVITIES = {
 };
 
 /** Activities enabled by default in core (everyday land travel + flight); specials are opt-in. */
-export const CORE_DEFAULT = [
-  "walking",
-  "running",
-  "cycling",
-  "driving",
-  "rail",
-  "skiing",
-  "flight",
-];
+export const CORE_DEFAULT = ["walking", "running", "cycling", "powered", "skiing", "flight"];
 
 const inBox = (v, [lo, hi]) => (lo == null || v >= lo) && (hi == null || v <= hi);
 
