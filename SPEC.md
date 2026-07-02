@@ -263,11 +263,14 @@ group opens. Consequences:
   the current numbers already cover (`hspeed 0–35 ⊃ walking 0–2.5`, `vspeed ±8 ⊃ walking ±1`), so
   **stage-1 needs no numeric change** — the model just stops treating ski as a snowflake, which is what
   lets core converge.
-- **Powered ground vehicles merge into one box.** `driving` + `rail` (+ motorcycle / sail) overlap
-  heavily; for core's only decision (drop-if-outside-*all*) a single "powered ground vehicle" box
-  suffices — the "one mod" finish. *Cost (per the coupled-box rule): a merged box widens the cross-axis
-  corners, admitting a few high-speed ∩ high-accel ∩ sharp-turn spike-corners the separate boxes
-  reject — but `outlier` / `despike` / `stray` catch those anyway (defense in depth).*
+- **Powered ground vehicles merge into one box. IMPLEMENTED (2026-07-01).** `driving` + `rail`
+  (+ motorcycle / sail) overlap heavily; for core's only decision (drop-if-outside-*all*) a single
+  "powered ground vehicle" box suffices — the "one mod" finish. Built as the `powered` activity in
+  `mods/activity.js` (union of the old `driving`+`rail`: `alt ≤4500 · hspeed 0–95 · vspeed ±3 ·
+  accel 0–10 · turn 0–2.0`), replacing both names in `CORE_DEFAULT`. *Cost (per the coupled-box rule):
+  a merged box widens the cross-axis corners, admitting a few high-speed ∩ high-accel ∩ sharp-turn
+  spike-corners the separate boxes reject — but `outlier` / `despike` / `stray` catch those anyway
+  (defense in depth).*
 - **The four power-classes are also the stage-2 category space.** human / no-engine-gravity /
   powered-ground / airborne are the coarse classes a future contextual **commit**
   ([`docs/core-ski-split.md`](docs/core-ski-split.md) stage 2) would resolve a *segment* to — a better

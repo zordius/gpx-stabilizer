@@ -56,6 +56,16 @@ box — drops only motion fitting NO activity), `drift` (stationary GPS drift),
 Let users SELECT a profile per activity — walking, driving, etc. — just like ski.
 The exact "general" threshold numbers still need picking.
 
+**Data-availability blocker (2026-07-01).** This is *not* ready to build — the numbers
+can't be derived from what we have, they'd be estimated. The only local tracks are one
+batch of ski GoPro clips (`gpx_eval/hero5cache/`), so any walking/cycling/driving/rail/
+flight profile value would be a pure guess, and the smoothing eval (`smooth_eval.mjs`)
+scores grade *jitter* (self-consistency), not error-vs-truth. It also depends on stage-2
+segmentation (below) — a mixed-activity track can't route a per-activity profile without
+committed per-segment labels. So per-activity **smoothing** defaults specifically: revisit
+only after segmentation lands *and* multi-activity tracks exist. (For **elevation**
+smoothing, SPEC further argues the right knob is noise-driven, not activity-driven.)
+
 How the activity gets decided is itself a **two-stage** model — and only stage 2
 can route profiles:
 
@@ -82,11 +92,13 @@ boxes; available power is a sum — **human** (weak, ever-present floor) **+ gra
 That collapses the menu to **human / no-engine-gravity / powered-ground / airborne**,
 which is what a stage-2 segment should commit to (a better, lower-cardinality routing
 key than `walking·driving·rail·…`). Two consequences for this audit:
-- **Powered ground vehicles merge into one box.** `driving` + `rail` (+ motorcycle/
-  sail) overlap heavily; for core's only decision (drop-if-outside-*all*) a single
-  "powered ground vehicle" box suffices — IMU adds ~nothing (clean GPS), so it stays
-  core, one mod. Cost: a merged box widens cross-axis corners (a few spike-corners the
-  separate boxes reject get admitted), but `outlier`/`despike`/`stray` catch those.
+- **Powered ground vehicles merge into one box. DONE (2026-07-01).** `driving` + `rail`
+  (+ motorcycle/sail) overlap heavily; for core's only decision (drop-if-outside-*all*) a
+  single "powered ground vehicle" box suffices — IMU adds ~nothing (clean GPS), so it
+  stays core, one mod. Built as the `powered` box in `mods/activity.js` (union of the old
+  two), replacing both in `CORE_DEFAULT`. Cost: a merged box widens cross-axis corners (a
+  few spike-corners the separate boxes reject get admitted), but `outlier`/`despike`/
+  `stray` catch those.
 - **Ski is bimodal, not a snowflake.** Gravity end (fast descent) ∪ weak-human floor
   (flat/skate ≈ a clumsy walk) — the current numbers already cover the union, so
   stage-1 boxes need no change; the model just stops special-casing ski, which lets

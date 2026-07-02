@@ -24,10 +24,21 @@ one place, not two).
   module**. The boundary is now a rule: [`SPEC.md`](SPEC.md) "Core vs GoPro/IMU module
   — the placement rule".
 - **Core roadmap, remaining** — apply the **additive-power activity model**
-  ([`SPEC.md`](SPEC.md): e.g. merge the powered-vehicle boxes, four power-classes as the
-  stage-2 commit space); per-activity smoothing defaults; distance-domain resample
-  variant; then **segment classification / lift handling / activity segmentation** (the
-  shared precondition the elevation work kept hitting) and OSM validation.
+  ([`SPEC.md`](SPEC.md)): powered-vehicle box merge **DONE** (`powered` in
+  `mods/activity.js`, 2026-07-01); still open — four power-classes as the stage-2
+  commit space; distance-domain resample variant; then **segment classification / lift
+  handling / activity segmentation** (the shared precondition the elevation work kept
+  hitting) and OSM validation.
+- **Per-activity smoothing defaults — BLOCKED, don't treat as ready-to-build.** Two
+  gaps: (a) no data to *derive* it — the only local tracks are one batch of ski GoPro
+  clips (`gpx_eval/hero5cache/`), so walking/cycling/driving/rail/flight values would be
+  pure estimates, and `smooth_eval.mjs` measures grade *jitter* (self-consistency), not
+  error-vs-truth; (b) it needs **segment segmentation** first — a mixed-activity track
+  can't decide *which* per-activity params to apply without committed per-segment
+  labels. Also note `smooth` is deliberately **sport-agnostic** today
+  ([`packages/core/src/mods/smooth.js`](packages/core/src/mods/smooth.js)), and SPEC says
+  the right knob is **noise-driven, not activity-driven** ([`SPEC.md`](SPEC.md) "Adaptive
+  window"). Revisit only after segmentation lands and multi-activity tracks exist.
 - **GPS/IMU module (deferred, GoPro-only)** — lead with the **witness** uses: #2 ACCL
   teleport-kill (validated, both cameras) and #1 ACCL-centripetal carve-vs-spike — not
   full INS reconstruction. Catalog + per-signal status:
