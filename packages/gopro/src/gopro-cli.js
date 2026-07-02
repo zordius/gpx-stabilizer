@@ -146,7 +146,16 @@ for (const file of videos) {
   }
 
   const fam = family(file);
-  const fix = points.find((p) => !(p.lat === 0 && p.lon === 0)) ?? points[0];
+  const fix = points.find((p) => !(p.lat === 0 && p.lon === 0));
+  if (!fix) {
+    // Every sample is a (0,0) pre-lock placeholder — the GPS never got a position fix (indoor /
+    // no sky view). buildGroups would drop them all and skip the resulting empty group anyway;
+    // catch it here so the log is honest. A fallback date off points[0] would be the GoPro's
+    // pre-satellite clock default (e.g. 2021), which reads deceptively like a real misdated file.
+    console.error(`  no real fix, skip: ${basename(file)} (0/${points.length} fixed)`);
+    skipped++;
+    continue;
+  }
   const tz = decideTZ(medianLon(points));
   const date = fix.time != null ? localDate(fix.time, tz) : null;
   if (date == null) {
