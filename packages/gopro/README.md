@@ -20,9 +20,11 @@ npm install gpx-from-gopro
 gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
 ```
 
-Recurses directories for video files, groups by camera family + local date, and writes one merged
-`<YYYYMMDD>-<family>.gpx` per group. A per-file extraction cache (keyed by size+mtime+rate) lets a
-killed run resume without re-extracting. `--rate HZ` downsamples from the native ~18 Hz; `--tz HOURS`
+Recurses directories for video files, groups by camera body (serial, falling back to filename
+family) + local date, and writes one merged `<YYYYMMDD>-<family>.gpx` per group — within it, points
+split into one `<trkseg>` per recording session (keyed on the filename file-number, with a time-gap
+split for restarts/dropouts). A per-file extraction cache (keyed by size+mtime+rate) lets a killed
+run resume without re-extracting. `--rate HZ` downsamples from the native ~18 Hz; `--tz HOURS`
 overrides the longitude-guessed local date.
 
 ## Library — telemetry export
