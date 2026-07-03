@@ -630,6 +630,40 @@ A strictly-uniform grid; a 5.5 s hole `< maxGap` (10 s) is bridged; an injected 
 (`test/resample.test.js`): passthrough, interpolation, `RESAMPLE_HZ` step, gap split vs bridge,
 single/empty/untimed, sub-step run. Full core suite 144→146 pass.
 
+## Segment / lift segmentation — corpus findings *(added 2026-07-04)*
+
+First data-grounded look at the roadmap's **segment classification / lift handling** precondition,
+run on a real multi-day ski corpus (2026-02-11 & -13, GX/Hero10 bodies; `gpx_eval/seg_explore.mjs`
+— stabilize each recording, window `vspeed`/`hspeed`/`turn-rate` over ±15 s, segment by
+`vspeed`-sign hysteresis, roll up per-episode stats). Consistent across 5 segments / 2 days:
+
+- **`vspeed` SIGN is the robust lift/descent axis.** LIFT always `+`, RUN always `−`, physical both
+  ways — confirms the "coarse split = `vspeed` sign" placement (core, geometry-only). This is the
+  backbone signal.
+- **Low `turn-rate` + steady moderate speed marks a lift.** A cable line is straight (turn
+  ~0.3–0.5 rad/s) and steady; a run turns. This is the core-side `carve`/turn input that
+  distinguishes a *lift* climb from a hiking climb or slow milling — but it is only meaningful
+  **post-stabilize** (raw 18 Hz heading saturates to noise).
+- **Must run POST-stabilize.** On raw points, GPS teleports blew `hspeed` up to 594–3286 m/s and
+  heading to pure jitter; after `stabilize` (survivors ~1 Hz) both became physical (hspeed 5–16 m/s,
+  turn 0.3–1.1). So segmentation belongs at the cleaned/`finalize` position, never on raw points.
+- **FLAT is not a real class — it's a residue grab-bag** (base milling + catwalks + transitions):
+  erratic `hspeed` (1.3–15.8) and the highest turn. Model **lift** and **descent**; let "neither"
+  fall out and sub-classify later (catwalk = straight low-carve descent vs carving run).
+- **`vspeed` magnitude is diluted by a measurement artifact, not by skiing.** With a fixed ±0.3 m/s
+  "FLAT" dead-band on *raw* elevation, gentle climb/descent leaks into FLAT (a day's total climb ≠
+  total descent, the difference sitting in FLAT). Fix: derive `vspeed` from the **smoothed** elevation
+  (`mods/smooth.js`), not raw, and treat FLAT as sustained-near-zero (hysteresis), not a dead-band.
+- **Fragmentation is only at transitions.** Sustained lift/run already appear as clean multi-minute
+  blocks; naive per-point thresholding adds ~1-min slivers → wants hysteresis (sustained-sign
+  entry/exit) + a minimum-episode + sliver-merge to recover the true ~3–5 min episodes.
+
+**Design direction (next):** a post-stabilize `lift`/`segment` module — primary axis = sign of
+**smoothed**-elevation `vspeed` over a window with hysteresis; confirm lift via low `turn` + steady
+speed; emit a per-segment label (climb/descent first, then the four power-classes). This is the
+core-side half of the stage-2 coarse split ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
+*Thresholds in the eval are first-look guesses, not tuned.*
+
 ## Design notes — per-stage roadmap & open reviews
 
 Working notes on where each pipeline stage is headed. "review" = revisit the design before adding to
