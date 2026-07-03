@@ -7,8 +7,10 @@
 //   same-model bodies shot on the same day stay separate; falls back to the filename family
 //   (GOPR/GP = old, GX/GH = new) for files without a serial. Crash-fragmented files still merge
 //   (same serial+date), so a session GoPro split across a crash is rejoined into the day's file.
-// - Within a day's file, points split into one <trkseg> per recording session (udta GUMI): an
-//   uncrashed activity is one segment; a crash (new GUMI) shows as a segment break, same file.
+// - Within a day's file, points split into one <trkseg> per recording session, keyed on the
+//   filename file-number (a recording's chapters share it), with a within-session time-gap
+//   split for restarts/dropouts: an uncrashed activity is one segment; a crash (new file-number)
+//   shows as a segment break, same file. (GUMI is per-chapter on some bodies, so unused here.)
 // - Local date: timezone from the median longitude of the first valid fixes (round(lon/15)),
 //   snapped to the machine's local timezone when within 1 hour; override with --tz.
 // - One merged <YYYYMMDD>-<family>.gpx per group (a short serial suffix is added only when two
@@ -19,7 +21,7 @@
 import { mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
 import { saveGpx } from "gpx-stabilizer";
-import { buildGroups, family } from "./group.js";
+import { buildGroups, family, fileNumber } from "./group.js";
 import { readGoproSamples } from "./telemetry.js";
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
@@ -163,9 +165,9 @@ for (const file of videos) {
     skipped++;
     continue;
   }
-  // Hand the grouping inputs to buildGroups: serial (CAME) splits cameras,
-  // mediaId (GUMI) splits recording sessions into <trkseg>s. See ./group.js.
-  entries.push({ family: fam, date, serial: meta.serial, mediaId: meta.mediaId, points });
+  // Hand the grouping inputs to buildGroups: serial (CAME) splits cameras, the filename
+  // file-number splits recording sessions into <trkseg>s (+ a time-gap split). See ./group.js.
+  entries.push({ family: fam, date, serial: meta.serial, session: fileNumber(file), points });
   const tag = meta.serial ? `${date}-${fam}#${meta.serial.slice(0, 4)}` : `${date}-${fam}`;
   console.log(`  ${basename(file)}: ${points.length} pts -> ${tag}${fromCache ? " (cached)" : ""}`);
   ok++;

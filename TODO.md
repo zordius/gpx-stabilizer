@@ -47,13 +47,18 @@ one place, not two).
 
 ## Open validation items (unique to here — not tracked in SPEC)
 
-- **GUMI session split is [TBC].** The GUMI-per-`<trkseg>` split assumes a recording's
-  chapters share a GUMI and a crash starts a new one — inferred, not verified (the two
-  local clips are single-chapter, single-camera). Validate against a real multi-chapter
-  set (and two same-model bodies for the serial collision-suffix path) when such files
-  exist. The serial **merge key** is correct regardless; only the per-session **segment
-  split** depends on this assumption. (`buildGroups` in `src/group.js`; unit-tested with
-  synthetic entries in `test/group.test.js`.)
+- **GUMI session split — RESOLVED (2026-07-03): the GUMI assumption was FALSE, split
+  re-keyed to file-number.** Validated against a real multi-day / multi-camera ski corpus
+  (124 clips, both a `1dafbb` Hero10/GX and a `c871` GOPR body). Finding: GUMI is
+  **per-chapter on the Hero10** (each ~12-min chapter gets a fresh GUMI even mid-recording,
+  ~1 s apart), so the old GUMI-per-`<trkseg>` split **over-split** a continuous GX run into
+  17 segments where the GOPR body (GUMI per session) correctly showed 2. Fix: session key is
+  now the **filename file-number** (a recording's chapters share it — signal B) plus a
+  within-session **time-gap sub-split** (>120 s — signal A); GUMI is no longer used. GX days
+  now split 2 / 3 / 3 (was 17 / 17 / 16), GOPR unchanged. `buildGroups` + `fileNumber` in
+  `src/group.js`; real-corpus A+B tests in `test/group.test.js`. *Still open: the crash →
+  new-file-number half is inferred (this corpus has no confirmed crash), and the end-to-end
+  CLI write of the new counts is unconfirmed pending an external-volume remount.*
 - **GPS9 (Hero11+) fix/hdop unverified** — read from `value[7..8]` but no Hero11+
   hardware to confirm the `hdop` scale. Authoritative gap notes:
   [`docs/export-contract.md`](docs/export-contract.md) ("Flag for the implementer") and

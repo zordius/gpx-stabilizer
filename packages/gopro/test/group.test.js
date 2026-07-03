@@ -1,9 +1,10 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildGroups, family } from "../src/group.js";
+import { buildGroups, family, fileNumber } from "../src/group.js";
 
 // minimal TrackPoint
 const pt = (lat, lon, time) => ({ lat, lon, time });
+const GAP = 200_000; // > BIG_GAP_MS (120 s) — forces a within-session time split
 
 test("family: maps a GoPro filename to its camera family", () => {
   assert.equal(family("GOPR1234.MP4"), "GOPR"); // session first file
@@ -13,10 +14,20 @@ test("family: maps a GoPro filename to its camera family", () => {
   assert.equal(family("/path/to/DJI_0001.MP4"), "DJI"); // unknown -> leading letters
 });
 
+test("fileNumber: the 4-digit recording id a recording's chapters share", () => {
+  assert.equal(fileNumber("GOPR5134.MP4"), "5134"); // first chapter
+  assert.equal(fileNumber("GP015134.MP4"), "5134"); // GOPR continuation -> same number
+  assert.equal(fileNumber("GP105134.MP4"), "5134"); // 10th chapter -> still same
+  assert.equal(fileNumber("GX015131.MP4"), "5131"); // newer scheme, chapter 01
+  assert.equal(fileNumber("GX115131.MP4"), "5131"); // chapter 11 -> same recording
+  assert.equal(fileNumber("/a/b/GX015132.MP4"), "5132"); // next recording
+  assert.equal(fileNumber("weird.mov"), null); // no 4-digit tail -> fallback
+});
+
 test("buildGroups: two same-model bodies on one day split by serial, names disambiguated", () => {
   const { groups } = buildGroups([
-    { family: "GX", date: "20260628", serial: "aaaa1111", mediaId: "m1", points: [pt(1, 1, 10)] },
-    { family: "GX", date: "20260628", serial: "bbbb2222", mediaId: "m2", points: [pt(2, 2, 20)] },
+    { family: "GX", date: "20260628", serial: "aaaa1111", session: "5131", points: [pt(1, 1, 10)] },
+    { family: "GX", date: "20260628", serial: "bbbb2222", session: "5131", points: [pt(2, 2, 20)] },
   ]);
   assert.equal(groups.length, 2);
   const names = groups.map((g) => g.name).sort();
@@ -26,7 +37,7 @@ test("buildGroups: two same-model bodies on one day split by serial, names disam
 
 test("buildGroups: a lone camera keeps the readable <date>-<family> name (no serial suffix)", () => {
   const { groups } = buildGroups([
-    { family: "GX", date: "20260628", serial: "aaaa1111", mediaId: "m1", points: [pt(1, 1, 10)] },
+    { family: "GX", date: "20260628", serial: "aaaa1111", session: "5131", points: [pt(1, 1, 10)] },
   ]);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].name, "20260628-GX");
@@ -34,26 +45,40 @@ test("buildGroups: a lone camera keeps the readable <date>-<family> name (no ser
 
 test("buildGroups: no serial -> falls back to family grouping", () => {
   const { groups } = buildGroups([
-    { family: "GOPR", date: "20260628", serial: null, mediaId: null, points: [pt(1, 1, 10)] },
-    { family: "GOPR", date: "20260628", serial: null, mediaId: null, points: [pt(2, 2, 20)] },
+    { family: "GOPR", date: "20260628", serial: null, session: "5131", points: [pt(1, 1, 10)] },
+    { family: "GOPR", date: "20260628", serial: null, session: "5131", points: [pt(2, 2, 20)] },
   ]);
   assert.equal(groups.length, 1); // both merge by family+date
   assert.equal(groups[0].name, "20260628-GOPR");
-  assert.equal(groups[0].segments.length, 1); // no GUMI -> single fallback segment
+  assert.equal(groups[0].segments.length, 1); // one recording -> one segment
   assert.equal(groups[0].segments[0].length, 2);
 });
 
-test("buildGroups: GUMI splits recording sessions into <trkseg>s, ordered by start time", () => {
+test("buildGroups (B): a recording's chapters share a file-number -> one merged segment", () => {
+  // the Hero10 over-split fix: many chapters of one continuous recording, contiguous in time
   const { groups } = buildGroups([
-    // later session listed first; chapters of session A span two files (same mediaId)
-    { family: "GX", date: "20260628", serial: "s1", mediaId: "B", points: [pt(5, 5, 500)] },
-    { family: "GX", date: "20260628", serial: "s1", mediaId: "A", points: [pt(1, 1, 100)] },
-    { family: "GX", date: "20260628", serial: "s1", mediaId: "A", points: [pt(2, 2, 200)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(3, 3, 300)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(2, 2, 200)] },
+  ]);
+  assert.equal(groups.length, 1);
+  assert.equal(groups[0].segments.length, 1); // all one recording
+  assert.deepEqual(
+    groups[0].segments[0].map((p) => p.time),
+    [100, 200, 300], // chapters merged and time-sorted
+  );
+});
+
+test("buildGroups (B): different file-numbers are separate sessions, ordered by start time", () => {
+  const { groups } = buildGroups([
+    // later recording listed first; recording 5131 spans two chapter files (same number)
+    { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [pt(5, 5, 500)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(2, 2, 200)] },
   ]);
   assert.equal(groups.length, 1);
   const segs = groups[0].segments;
-  assert.equal(segs.length, 2); // session A + session B
-  // segment A is earlier -> comes first; its two chapter files merged & time-sorted
+  assert.equal(segs.length, 2);
   assert.deepEqual(
     segs[0].map((p) => p.time),
     [100, 200],
@@ -65,13 +90,58 @@ test("buildGroups: GUMI splits recording sessions into <trkseg>s, ordered by sta
   assert.equal(groups[0].startMs, 100);
 });
 
-test("buildGroups: a crash (new GUMI, same serial+date) rejoins into one daily file, two segments", () => {
+test("buildGroups (B): back-to-back recordings with a tiny gap still split (file-number partitions)", () => {
+  // two separate presses, only 50 ms apart — a pure time split would wrongly merge; the
+  // file-number keeps them apart (A may only sub-split within a number, never merge across).
   const { groups } = buildGroups([
-    { family: "GX", date: "20260628", serial: "s1", mediaId: "before", points: [pt(1, 1, 100)] },
-    { family: "GX", date: "20260628", serial: "s1", mediaId: "after", points: [pt(2, 2, 300)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [pt(2, 2, 150)] },
+  ]);
+  assert.equal(groups[0].segments.length, 2);
+});
+
+test("buildGroups: a crash (new file-number, same serial+date) rejoins into one daily file, two segments", () => {
+  const { groups } = buildGroups([
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
+    { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [pt(2, 2, 300)] },
   ]);
   assert.equal(groups.length, 1); // one file (rejoined)
   assert.equal(groups[0].segments.length, 2); // crash shows as a segment break
+});
+
+test("buildGroups (A): a large time gap within one file-number sub-splits (restart / dropout hole)", () => {
+  const { groups } = buildGroups([
+    {
+      family: "GX",
+      date: "20260628",
+      serial: "s1",
+      session: "5131",
+      points: [pt(1, 1, 0), pt(1, 1, 1000), pt(2, 2, 1000 + GAP)],
+    },
+  ]);
+  const segs = groups[0].segments;
+  assert.equal(segs.length, 2); // the > BIG_GAP jump breaks the session
+  assert.deepEqual(
+    segs[0].map((p) => p.time),
+    [0, 1000],
+  );
+  assert.deepEqual(
+    segs[1].map((p) => p.time),
+    [1000 + GAP],
+  );
+});
+
+test("buildGroups (A): with no file-number, the time gap is the sole session clusterer", () => {
+  const { groups } = buildGroups([
+    {
+      family: "DJI",
+      date: "20260628",
+      serial: null,
+      session: null,
+      points: [pt(1, 1, 100), pt(1, 1, 200), pt(2, 2, 200 + GAP)],
+    },
+  ]);
+  assert.equal(groups[0].segments.length, 2); // near points cluster; the far one splits off
 });
 
 test("buildGroups: drops (0,0) placeholder fixes; an all-placeholder session is skipped", () => {
@@ -80,14 +150,14 @@ test("buildGroups: drops (0,0) placeholder fixes; an all-placeholder session is 
       family: "GX",
       date: "20260628",
       serial: "s1",
-      mediaId: "real",
+      session: "5131",
       points: [pt(0, 0, 1), pt(1, 1, 100)],
     },
     {
       family: "GX",
       date: "20260629",
       serial: "s1",
-      mediaId: "dead",
+      session: "5132",
       points: [pt(0, 0, 1), pt(0, 0, 2)],
     },
   ]);

@@ -30,7 +30,8 @@ GoproMeta = { hasGps, gpmdSamples, width, height, codec, fps, durationS,
               model, firmware, serial, mediaId, highlights }
 //   model/firmware from the MP4 udta FIRM atom (e.g. "HERO5" / "HD5.02.02.60.00"), or null.
 //   serial = body serial (udta CAME, hex) — tells two same-model bodies apart;
-//   mediaId = recording id (udta GUMI, hex) — shared by a recording's chapter files;
+//   mediaId = udta GUMI (hex); shared per recording on some bodies but PER-CHAPTER on
+//     others (Hero10) — so it is NOT the session-split key (that's the filename file-number);
 //   highlights = user tag-button times (udta HMMT, ms array). All null/[] when absent.
 ```
 

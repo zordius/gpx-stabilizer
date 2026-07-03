@@ -5,6 +5,11 @@ import { basename } from "node:path";
 
 const PLACEHOLDER = (p) => p.lat === 0 && p.lon === 0; // null-island pre-lock fix
 
+// A single continuous recording's kept points are contiguous (chapter rollover is ~1 s); only a
+// real break — a stop/restart a shared file-number missed, or a GPS-fix dropout that left no
+// surviving points — exceeds this. Split there into a new <trkseg>. See buildGroups (signal A).
+const BIG_GAP_MS = 120_000;
+
 /**
  * Camera "family" from a GoPro filename: the coarse identity used when a file has
  * no body serial. A session's first file (GOPR####) and its continuation chapters
@@ -23,11 +28,25 @@ export function family(file) {
 }
 
 /**
+ * GoPro recording "file-number": the 4-digit id a recording's chapters share, so it keys a
+ * recording session. `GOPR5134` / `GP015134` → "5134"; `GX015131` / `GX115131` → "5131" (the
+ * leading 2 digits are the chapter index). A new recording — or a crash restart — gets a fresh
+ * number. Null when the name has no 4-digit tail (an unknown scheme falls back to a time split).
+ * @param {string} file
+ * @returns {string | null}
+ */
+export function fileNumber(file) {
+  const m = basename(file).match(/(\d{4})\.[^.]+$/);
+  return m ? m[1] : null;
+}
+
+/**
  * @typedef {object} GroupEntry one extracted file's grouping inputs
  * @property {string} family    filename family (see {@link family})
  * @property {string} date      local date YYYYMMDD
  * @property {string | null} serial    body serial (udta CAME), or null
- * @property {string | null} mediaId   recording-session id (udta GUMI), or null
+ * @property {string | null} session   recording id = filename file-number (a recording's
+ *   chapters share it; a new recording / crash restart gets a new one), or null
  * @property {import("gpx-stabilizer").TrackPoint[]} points
  */
 
@@ -46,10 +65,16 @@ export function family(file) {
  *   filename `family` otherwise. `date` keeps each group to a single day, so a
  *   session GoPro split across a crash (several files, same serial+date) is
  *   rejoined into the day's file.
- * - **Segments = recording sessions.** Within a group, points split into one
- *   segment per `mediaId` (udta GUMI): an uncrashed activity is one segment, a
- *   crash (new GUMI) shows as a segment break — all still in the one daily file.
- *   Files with no GUMI share a single fallback segment (the old one-segment shape).
+ * - **Segments = recording sessions**, split by two composed signals:
+ *   - **(B) file-number** — the primary key: a recording's chapters share it, so they merge;
+ *     a new recording or a crash restart gets a new number, so it splits. (Replaces the old
+ *     udta-GUMI key, which is per-chapter on some bodies (Hero10) and over-splits — see
+ *     TODO.md.) `session` is null when the filename has no parseable number.
+ *   - **(A) time gap** — a refinement applied *within* each file-number: a jump > BIG_GAP_MS
+ *     between kept points starts a new segment (a same-number restart, or a dropout hole). It
+ *     only ever sub-splits, never merges across file-numbers; for files with no number it is the
+ *     sole clusterer (they share one fallback bucket that A then cleaves by time).
+ *   A crash still lands in the one daily file (merge key is serial+date) as a separate segment.
  * - Placeholder (0,0) pre-lock fixes are dropped per segment; a session that never
  *   locks drops to empty, and a group with no real fix lands in `skipped`.
  *
@@ -57,7 +82,7 @@ export function family(file) {
  * @returns {{ groups: GpxGroup[], skipped: string[] }}
  */
 export function buildGroups(entries) {
-  // gkey -> { date, family, serial, segs: Map<sessionKey, points[]> }
+  // gkey -> { date, family, serial, sessions: Map<fileNumber, points[]> }
   const groups = new Map();
   for (const e of entries) {
     const gkey = e.serial ? `${e.date}|s:${e.serial}` : `${e.date}|f:${e.family}`;
@@ -66,15 +91,16 @@ export function buildGroups(entries) {
         date: e.date,
         family: e.family,
         serial: e.serial ?? null,
-        segs: new Map(),
+        sessions: new Map(),
       });
     }
-    const segs = groups.get(gkey).segs;
-    const skey = e.mediaId ?? "__nogumi__";
-    if (!segs.has(skey)) segs.set(skey, []);
+    const sessions = groups.get(gkey).sessions;
+    // (B) bucket by file-number; files with none share one fallback bucket that (A) below splits.
+    const skey = e.session ?? "__nofilenum__";
+    if (!sessions.has(skey)) sessions.set(skey, []);
     // loop-push, not push(...points): a file can carry tens of thousands of points
     // and spreading that many args overflows the call stack.
-    const bucket = segs.get(skey);
+    const bucket = sessions.get(skey);
     for (const p of e.points) bucket.push(p);
   }
 
@@ -93,11 +119,20 @@ export function buildGroups(entries) {
     const base = `${g.date}-${g.family}`;
     const name = clash.get(base) > 1 && g.serial ? `${base}-${g.serial.slice(0, 8)}` : base;
     const segments = [];
-    for (const pts of g.segs.values()) {
+    for (const pts of g.sessions.values()) {
       const clean = pts.filter((p) => !PLACEHOLDER(p));
       if (clean.length === 0) continue;
       clean.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-      segments.push(clean);
+      // (A) sub-split this session wherever consecutive kept points jump more than BIG_GAP_MS.
+      let run = [clean[0]];
+      for (let i = 1; i < clean.length; i++) {
+        if ((clean[i].time ?? 0) - (clean[i - 1].time ?? 0) > BIG_GAP_MS) {
+          segments.push(run);
+          run = [];
+        }
+        run.push(clean[i]);
+      }
+      segments.push(run);
     }
     if (segments.length === 0) {
       skipped.push(name);
