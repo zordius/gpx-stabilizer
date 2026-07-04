@@ -14,7 +14,7 @@
   "author": "zordius",
   "type": "module",
   "bin": {
-    "gpx-stabilize": "src/cli.js"
+    "gpx-stabilizer": "src/cli.js"
   },
   "exports": "./src/index.js",
   "files": [

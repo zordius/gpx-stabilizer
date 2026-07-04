@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-// gpx-stabilize CLI — by default, stabilize each input GPX to a cleaned file; visualisation is opt-in.
-//   gpx-stabilize FILE.gpx [...]                 -> cleaned <name>.stabilized.gpx per input (the product)
-//   gpx-stabilize FILE.gpx [...] --html [FILE]    -> ONE interactive HTML viewer (all files, default out.html)
-//   gpx-stabilize FILE.gpx [...] --png [--width N] [--height N]  -> one PNG per input (needs @resvg/resvg-js)
+// gpx-stabilizer CLI — by default, stabilize each input GPX to a cleaned file; visualisation is opt-in.
+//   gpx-stabilizer FILE.gpx [...]                 -> cleaned <name>.stabilized.gpx per input (the product)
+//   gpx-stabilizer FILE.gpx [...] --html [FILE]    -> ONE interactive HTML viewer (all files, default out.html)
+//   gpx-stabilizer FILE.gpx [...] --png [--width N] [--height N]  -> one PNG per input (needs @resvg/resvg-js)
 //   --out DIR sets the output directory for the cleaned GPX / PNG (default ".").
 //   --config FILE.json passes a whole analyze config (params + disable list); --disable name,... skips
 //   built-in modules (merged onto the config). Both feed analyze() so runs are reproducible from JSON.
@@ -30,7 +30,7 @@ const files = argv.filter((a) => !a.startsWith("--") && /\.gpx$/i.test(a));
 
 if (!files.length) {
   console.error(
-    "usage: gpx-stabilize FILE.gpx [...] [--html [FILE]] [--png [--width N] [--height N]]" +
+    "usage: gpx-stabilizer FILE.gpx [...] [--html [FILE]] [--png [--width N] [--height N]]" +
       " [--out DIR] [--mode core|ski] [--config FILE.json] [--disable name,...]",
   );
   process.exit(1);
