@@ -57,11 +57,16 @@ stabilizeGpx("in.gpx", "out.gpx", { DESPIKE_PROFILE: "ski", CARVE: true });
 
 ## CLI
 
+No install needed:
+
 ```sh
-gpx-stabilize FILE.gpx [...]                # → <name>.stabilized.gpx per input (the cleaned track)
-gpx-stabilize FILE.gpx [...] --html [out.html]   # → one interactive HTML viewer for all inputs
-gpx-stabilize FILE.gpx [...] --png         # → one PNG per input (needs @resvg/resvg-js)
+npx gpx-stabilizer FILE.gpx [...]                # → <name>.stabilized.gpx per input
+npx gpx-stabilizer FILE.gpx [...] --html [out.html]   # → one interactive HTML viewer
+npx gpx-stabilizer FILE.gpx [...] --png          # → one PNG per input (needs @resvg/resvg-js)
 ```
+
+Once installed (`npm install [-g] gpx-stabilizer`), drop the `npx` prefix and just run
+`gpx-stabilizer ...`.
 
 Options: `--out DIR` · `--mode core|ski` (default `core`; `ski` = ski-tuned despike + carve + kink) ·
 `--config FILE.json` (a full analyze config) · `--disable name,...` (skip built-in modules).

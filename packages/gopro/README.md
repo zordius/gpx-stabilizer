@@ -16,9 +16,14 @@ npm install gpx-from-gopro
 
 ## CLI
 
+No install needed:
+
 ```sh
-gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
+npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
 ```
+
+Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
+`gpx-from-gopro ...`.
 
 Recurses directories for video files, groups by camera body (serial, falling back to filename
 family) + local date, and writes one merged `<YYYYMMDD>-<family>.gpx` per group — within it, points

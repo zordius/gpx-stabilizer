@@ -15,14 +15,25 @@ package consumes core via the workspace link, so the two develop together withou
 > not yet smoothed/repositioned). CLIs ship now (see below); trajectory smoothing is the next tier —
 > see [`SPEC.md`](SPEC.md).
 
+## Quick start — no install
+
+```sh
+npx gpx-stabilizer FILE.gpx [...]        # clean a GPX
+npx gpx-from-gopro <dir|file.mp4> [...]  # pull GPS out of a GoPro video
+```
+
 ## Install
 
 ```sh
-npm install   # at the repo root: links both workspaces, installs Biome (dev) + the gopro package's deps
+npm install gpx-stabilizer      # zero runtime deps
+npm install gpx-from-gopro      # pulls the GoPro extraction libs + core
 ```
 
-When published, `npm i gpx-stabilizer` pulls **no runtime deps**; `npm i gpx-from-gopro` pulls the
-GoPro libraries (and core as a dependency).
+Or globally, to get the bare CLI command: `npm install -g gpx-stabilizer` / `npm install -g
+gpx-from-gopro` (then drop the `npx`/`npx -p ...` prefix below).
+
+*(Contributing to this repo instead? See [Development](#development) at the bottom — that's a
+separate, monorepo-local setup.)*
 
 ---
 
@@ -71,10 +82,13 @@ stabilizeGpx("in.gpx", "out.gpx", { DESPIKE_PROFILE: "ski", CARVE: true });
 ## CLI
 
 ```sh
-gpx-stabilize FILE.gpx [...]                # → <name>.stabilized.gpx per input (the cleaned track)
-gpx-stabilize FILE.gpx [...] --html [out.html]   # → one interactive HTML viewer for all inputs
-gpx-stabilize FILE.gpx [...] --png         # → one PNG per input (needs @resvg/resvg-js)
+npx gpx-stabilizer FILE.gpx [...]                # → <name>.stabilized.gpx per input
+npx gpx-stabilizer FILE.gpx [...] --html [out.html]   # → one interactive HTML viewer
+npx gpx-stabilizer FILE.gpx [...] --png          # → one PNG per input (needs @resvg/resvg-js)
 ```
+
+Once installed (`npm install [-g] gpx-stabilizer`), drop the `npx` prefix and just run
+`gpx-stabilizer ...`.
 
 Options: `--out DIR` · `--mode core|ski` (default `core`; `ski` = ski-tuned despike + carve + kink) ·
 `--config FILE.json` (a full analyze config) · `--disable name,...` (skip built-in modules).
@@ -103,8 +117,11 @@ never load whole into RAM.
 ## CLI
 
 ```sh
-gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
+npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
 ```
+
+Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
+`gpx-from-gopro ...`.
 
 Recurses directories for video files, groups by camera body (serial, falling back to filename
 family) + local date, and writes one merged `<YYYYMMDD>-<family>.gpx` per group — within it, points
@@ -134,12 +151,17 @@ package for convenience.
 
 ---
 
-## Develop
+## Development
+
+For contributors working in this monorepo — not needed just to use the published packages (see
+[Quick start](#quick-start--no-install) / [Install](#install) above).
 
 ```sh
-npm test            # runs `node --test` in every workspace
-npm run lint        # biome check (config + Biome live at the repo root)
-npm run format      # biome format --write
+git clone https://github.com/zordius/gpx-stabilizer.git
+npm install     # at the repo root: links both workspaces, installs Biome (dev) + the gopro package's deps
+npm test        # runs `node --test` in every workspace
+npm run lint    # biome check (config + Biome live at the repo root)
+npm run format  # biome format --write
 ```
 
 Architecture and design rationale: [`SPEC.md`](SPEC.md). Monorepo layout rationale:
