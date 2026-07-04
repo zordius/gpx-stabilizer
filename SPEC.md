@@ -683,6 +683,27 @@ per-activity output-smoothing and feeds it the labels (see the two-smoothings no
 core-side half of the stage-2 coarse split ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
 *Thresholds in the eval are first-look guesses, not tuned.*
 
+**Per-activity output-smoothing — explored, NOT built (negative result, 2026-07-04).** With the
+`segment` module in place, explored whether each segment type wants a different elevation-smoothing
+window (`gpx_eval/segsmooth_eval.mjs`, across Hero10-GX + Hero5-GOPR + a FitoTrack phone track of the
+same days). Findings:
+- A first pass *seemed* to show "a descent gets worse when smoothed" (a plateau/upturn that would have
+  set a conservative run window) — but that was a **metric artifact**: a fixed 20 m grade baseline is
+  under-resolved on fast/sparse descents (~12 m/point) vs slow/dense lifts (~2–4 m/point). Resampling
+  each episode to a uniform 5 m grid before smoothing/grading removed it.
+- Corrected, across all three sources: grade jitter **decreases monotonically with window for every
+  type**, curves roughly parallel (raw→80 m ≈ 3–4× drop); raw noise orders **lift > descent > flat**
+  but no type shows a plateau in 0–80 m.
+- So grade-jitter gives **no basis for a per-type window** — a single window (the existing `smooth`
+  ~30 m) already does most of the noise reduction for all types. The genuine per-type rationale is
+  *fidelity* (don't erase a run's real terrain), which is **unmeasurable without ground-truth
+  elevation** (GoPro has no barometer; DEM/OSM is future). Same data-limited wall as the roadmap's
+  "per-activity smoothing defaults", now with sharper evidence.
+
+**Decision: do not build a per-type output-smoother** on unjustified numbers. `segment` labels stay
+useful for other ends (lift-handling in the elevation-reconstruction tier, activity segmentation,
+display) — just not for tuning grade smoothing. Revisit only if a fidelity/truth signal appears.
+
 ## Design notes — per-stage roadmap & open reviews
 
 Working notes on where each pipeline stage is headed. "review" = revisit the design before adding to
