@@ -182,6 +182,54 @@ test("analyze: a label module's non-drop key rides on the point (kept) as a name
   assert.equal(typeof out[0].hs, "number"); // and the point is kept, with full signals
 });
 
+test("analyze: a finalize module runs after assemble over the fully-assembled points", () => {
+  let sawSignals = false;
+  const fin = {
+    name: "fin",
+    finalize: (out, ctx) => {
+      sawSignals = typeof out[2].hs === "number" && Array.isArray(ctx.hs); // assembled + ctx visible
+      for (const p of out) p.tag = "seen"; // mutate in place (no return)
+    },
+  };
+  const out = analyze(track({ n: 5, dlon: STEP5 }), { modules: [fin] });
+  assert.ok(sawSignals);
+  assert.equal(out[0].tag, "seen");
+  assert.equal(out[4].tag, "seen");
+});
+
+test("analyze: finalize runs last — it sees earlier phases' drops", () => {
+  const dropper = {
+    name: "dropper",
+    compute: (ctx) => ({ drop: ctx.x.map((_, k) => (k === 2 ? { why: 1 } : null)) }),
+  };
+  let sawDrop = false;
+  const fin = {
+    name: "fin",
+    finalize: (out) => {
+      sawDrop = out.some((p) => p.dropReason?.dropper);
+    },
+  };
+  analyze(track({ n: 5, dlon: STEP5 }), { modules: [dropper, fin] });
+  assert.ok(sawDrop); // the compute-phase drop was already on the points when finalize ran
+});
+
+test("analyze: finalize modules run sequentially and see each other's mutations", () => {
+  const first = {
+    name: "first",
+    finalize: (out) => {
+      for (const p of out) p.n = (p.n ?? 0) + 1;
+    },
+  };
+  const second = {
+    name: "second",
+    finalize: (out) => {
+      for (const p of out) p.n = (p.n ?? 0) * 10;
+    },
+  };
+  const out = analyze(track({ n: 5, dlon: STEP5 }), { modules: [first, second] });
+  assert.equal(out[0].n, 10); // (0+1)*10 — second ran after first and saw its mutation
+});
+
 test("analyze: excluded points get no module data", () => {
   const m = { name: "m", compute: (ctx) => ({ a: ctx.hs }) };
   const out = analyze(

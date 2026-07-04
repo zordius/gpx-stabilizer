@@ -29,10 +29,12 @@ test("mods: builtins are the named modules, routed by callback", () => {
 });
 
 test("validateModule: rejects a module with no callbacks", () => {
-  assert.throws(() => validateModule("bad", {}), /repair, label and\/or compute/);
+  assert.throws(() => validateModule("bad", {}), /repair, label, compute, finalize/);
   assert.throws(() => validateModule("", { compute: () => ({}) }), /non-empty string/);
   const ok = validateModule("ok", { repair: () => {} });
   assert.equal(ok.name, "ok");
+  const fin = validateModule("fin", { finalize: () => {} }); // finalize-only is a valid module
+  assert.equal(typeof fin.finalize, "function");
 });
 
 test("loadModule: a bare name falls back to the internal mods file", async () => {

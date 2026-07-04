@@ -5,7 +5,7 @@
 // is the union of the measure and profile bundles.
 //
 // There is no status field: a point belongs in the clean track iff it has NO `dropReason`. Drops are
-// recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`). Three module
+// recorded as `dropReason = { reasonKey: context }` + `dropCount` (via `addDrop`). Four module
 // phases:
 //   - `repair(points, edit)`: rewrite original values BEFORE anything reads them (dequantizeTime). Each
 //     `edit(point, field, value)` overwrites the field and logs provenance in `point.edited`
@@ -15,6 +15,10 @@
 //     other keys ride on the point as namespaced labels.
 //   - `compute(ctx)`: run on the per-point context after the blocks (outlier, activity, drift, kink).
 //     Non-`drop` keys attach as `point[name][key]` (signals); `drop` flags a point that WAS measured.
+//   - `finalize(out, ctx)`: SEQUENTIAL pass over the fully-assembled points (after every drop, incl.
+//     badspan). Unlike compute, finalize modules run in order and see the assembled points + each
+//     other's mutations — cross-module reconciliation / reconstruction / segmentation. Mutates in
+//     place. No built-ins use it yet, so base `stabilize` is unchanged (the loop is a no-op).
 // Built-in modules (./mods) always run; caller modules are appended via `opts.modules`.
 
 import { measure } from "./measure.js";
@@ -51,6 +55,10 @@ export function analyze(points, opts = {}) {
 
   const result = assemble(pts, bags, valid, ctx, modData);
   if (!disable.includes("badspan")) glueBadSpans(result, ctx.g ?? {});
+  // finalize phase: sequential post-assemble pass. Modules run in order and see the fully-assembled
+  // points (every dropReason/signal) AND each other's mutations — the home for reconciliation,
+  // reconstruction, and segmentation. No built-ins use it, so this is a no-op for base stabilize.
+  for (const mod of all) if (mod.finalize) mod.finalize(result, ctx);
   return result;
 }
 

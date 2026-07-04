@@ -181,7 +181,9 @@ built-ins, in order:
 
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 
-**Status: proposed (not implemented).** Today a module exports `repair` / `label` / `compute`. Two
+**Status: the `finalize` phase is IMPLEMENTED (2026-07-04); `aux` threading (flavor B) and the
+cross-module reconciliation helpers (e.g. a `removeDrop`) remain proposed** — added when a consumer
+needs them. Today a module exports `repair` / `label` / `compute` / `finalize`. Two
 additions let modules consume **external per-point signals** (IMU / scene / exposure — see
 [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md)) and do **final reconciliation / reconstruction**
 (rescue a false drop, reposition/smooth — see the elevation-reconstruction contract above), **without
@@ -206,12 +208,15 @@ breaking core's zero-dep, source-agnostic, base-is-pure-geometry ethos**. Both s
   witness modules run **before** resample, and `resample` is a pure export-layer regulariser,
   independent of aux. The grid-defining stages (`noTime` / `oversample` / `resample`) own the timeline;
   everything else is computed relative to whichever grid it belongs to.
-- **`finalize(out, ctx)` — a 4th phase (the customizable final stage).** Runs **after assemble**,
-  over the fully-assembled points (every `dropReason`, signal, and `aux`). Unlike `compute` (modules
-  independent), `finalize` modules run **sequentially and see each other's results** — the home for
-  cross-module **reconciliation** (un-drop a `stray`/`outlier` false positive when IMU shows real
-  motion — there is otherwise no `removeDrop`), **reconstruction** (reposition / smooth `ele`), and
-  the planned **drop → keep/reposition** decision. The reconstruction tier becomes `finalize` modules.
+- **`finalize(out, ctx)` — a 4th phase (the customizable final stage). IMPLEMENTED (2026-07-04).**
+  Runs **after assemble** (and after `badspan`), over the fully-assembled points (every `dropReason`,
+  signal; `aux` once threaded). Unlike `compute` (modules independent), `finalize` modules run
+  **sequentially and see each other's results** — the home for cross-module **reconciliation** (un-drop
+  a `stray`/`outlier` false positive when IMU shows real motion — there is otherwise no `removeDrop`),
+  **reconstruction** (reposition / smooth `ele`), **segmentation** (label lift/run then feed
+  per-activity output-smoothing), and the planned **drop → keep/reposition** decision. Built in
+  `analyze.js` as a mutate-in-place loop over any `finalize`-exporting module; no built-in uses it yet,
+  so base `stabilize` is unchanged. The reconstruction/segmentation tiers become `finalize` modules.
 - **aux may also ride a module's closure (flavor A).** A module factory `m(acclSamples) → { compute }`
   closes over external data, so a *standalone* aux module (emit own signals / own drops, e.g. the
   validated #2 teleport-confirm) needs **no core change at all** — it's just a user module passed via
@@ -673,8 +678,8 @@ run on a real multi-day ski corpus (2026-02-11 & -13, GX/Hero10 bodies; `gpx_eva
 **detection-denoised** (windowed) `vspeed` with hysteresis; confirm lift via low `turn` + steady
 speed; emit a per-segment label (climb/descent first, then the four power-classes). It runs **before**
 per-activity output-smoothing and feeds it the labels (see the two-smoothings note above). Both are
-`finalize`-phase modules (sequential, see each other) — `finalize` is proposed but not yet built
-(§ "Module model"), so it is segmentation's real prerequisite, alongside cleaning. This is the
+`finalize`-phase modules (sequential, see each other) — the `finalize` phase is now built
+(§ "Module model"), so the seam segmentation needs exists; cleaning is the remaining prerequisite. This is the
 core-side half of the stage-2 coarse split ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
 *Thresholds in the eval are first-look guesses, not tuned.*
 

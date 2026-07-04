@@ -8,6 +8,10 @@
 //     key excludes the point from the time series (recorded as a drop reason under the module's
 //     name); other keys ride on the point as namespaced labels. Runs per raw point, pre-measurement.
 //   - compute(ctx)           → { [signalKey]: array, drop?: (null|context)[] }. Runs post-measurement.
+//   - finalize(out, ctx)     → post-assemble SEQUENTIAL pass over the fully-assembled points. Unlike
+//     compute (modules independent, same ctx), finalize modules run in order and see the assembled
+//     points AND each other's mutations — the home for cross-module reconciliation, reconstruction,
+//     and segmentation. Mutates `out` in place (no return). Runs after every drop, incl. badspan.
 // A module joins a phase by exposing that phase's callback (one, or several).
 
 import { basename, resolve } from "node:path";
@@ -22,9 +26,11 @@ import * as oversample from "./oversample.js";
 import * as stray from "./stray.js";
 
 /**
- * @typedef {{ repair?: Function, label?: Function, compute?: Function }} ModuleDef  a module's exports
- * @typedef {{ name: string, repair?: Function, label?: Function, compute?: Function }} Module
+ * @typedef {{ repair?: Function, label?: Function, compute?: Function, finalize?: Function }} ModuleDef  a module's exports
+ * @typedef {{ name: string, repair?: Function, label?: Function, compute?: Function, finalize?: Function }} Module
  */
+
+const PHASES = ["repair", "label", "compute", "finalize"];
 
 /**
  * Validate a module file's exports and pair them with a name. Throws on a malformed module.
@@ -34,15 +40,21 @@ import * as stray from "./stray.js";
  */
 export function validateModule(name, def) {
   if (!name || typeof name !== "string") throw new Error("module name must be a non-empty string");
-  if (["repair", "label", "compute"].every((k) => typeof def[k] !== "function")) {
-    throw new Error(`module "${name}" must export repair, label and/or compute`);
+  if (PHASES.every((k) => typeof def[k] !== "function")) {
+    throw new Error(`module "${name}" must export ${PHASES.join(", ")} (one or more)`);
   }
-  for (const k of ["repair", "label", "compute"]) {
+  for (const k of PHASES) {
     if (def[k] != null && typeof def[k] !== "function") {
       throw new Error(`module "${name}".${k} must be a function`);
     }
   }
-  return { name, repair: def.repair, label: def.label, compute: def.compute };
+  return {
+    name,
+    repair: def.repair,
+    label: def.label,
+    compute: def.compute,
+    finalize: def.finalize,
+  };
 }
 
 /** The built-in modules (the general "core" pipeline), named after their files and validated.
