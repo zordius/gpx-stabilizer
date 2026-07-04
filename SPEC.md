@@ -652,15 +652,29 @@ run on a real multi-day ski corpus (2026-02-11 & -13, GX/Hero10 bodies; `gpx_eva
   fall out and sub-classify later (catwalk = straight low-carve descent vs carving run).
 - **`vspeed` magnitude is diluted by a measurement artifact, not by skiing.** With a fixed ±0.3 m/s
   "FLAT" dead-band on *raw* elevation, gentle climb/descent leaks into FLAT (a day's total climb ≠
-  total descent, the difference sitting in FLAT). Fix: derive `vspeed` from the **smoothed** elevation
-  (`mods/smooth.js`), not raw, and treat FLAT as sustained-near-zero (hysteresis), not a dead-band.
+  total descent, the difference sitting in FLAT). Fix: feed the sign test a **detection-denoised**
+  `vspeed` (a windowed Δele/Δt the segmenter computes for itself — coarse, throwaway, sport-agnostic),
+  and treat FLAT as sustained-near-zero (hysteresis), not a dead-band.
+- **Two elevation smoothings — do NOT conflate them, and mind the order.** (1) *Detection-denoise* —
+  the cheap internal `vspeed` window above, whose only job is to read the lift/descent structure; it
+  never rewrites the shipped `ele`. (2) *Output-smooth* — the final shipped `ele`, which per-activity
+  smoothing wants to tune per segment (a lift's monotonic climb tolerates aggressive smoothing; a
+  run's real terrain does not). These are different steps: the correct pipeline order is **stabilize
+  (drop noise points) → segment (label lift/run off detection-denoised `vspeed`) → per-activity
+  output-smooth (keyed on the labels)**. So labeling "this is a lift" *precedes* and *feeds* the
+  output-smoothing — the benefit is not lost. The earlier shorthand "segmentation runs post-smooth"
+  was imprecise: it runs post-**stabilize**, not post-output-smooth (confirmed — `seg_explore` gets
+  clean LIFT`+`/RUN`−` on `stabilize(raw)` with **no** output-smooth, using only its own window).
 - **Fragmentation is only at transitions.** Sustained lift/run already appear as clean multi-minute
   blocks; naive per-point thresholding adds ~1-min slivers → wants hysteresis (sustained-sign
   entry/exit) + a minimum-episode + sliver-merge to recover the true ~3–5 min episodes.
 
-**Design direction (next):** a post-stabilize `lift`/`segment` module — primary axis = sign of
-**smoothed**-elevation `vspeed` over a window with hysteresis; confirm lift via low `turn` + steady
-speed; emit a per-segment label (climb/descent first, then the four power-classes). This is the
+**Design direction (next):** a post-stabilize `lift`/`segment` module — primary axis = sign of a
+**detection-denoised** (windowed) `vspeed` with hysteresis; confirm lift via low `turn` + steady
+speed; emit a per-segment label (climb/descent first, then the four power-classes). It runs **before**
+per-activity output-smoothing and feeds it the labels (see the two-smoothings note above). Both are
+`finalize`-phase modules (sequential, see each other) — `finalize` is proposed but not yet built
+(§ "Module model"), so it is segmentation's real prerequisite, alongside cleaning. This is the
 core-side half of the stage-2 coarse split ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
 *Thresholds in the eval are first-look guesses, not tuned.*
 
