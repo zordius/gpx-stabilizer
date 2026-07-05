@@ -179,6 +179,8 @@ built-ins, in order:
 
 **`despike` is detection-only (option C, 2026-06-29).** It emits a `flagged` SIGNAL, never a `dropReason`. On its own despike is a weak/noisy proxy for `drift` (EDA: Jaccard 0.12 vs drift, same signal correlations, ~98 % of its old sole-drops were isolated curve false-positives), so an **isolated** flag must not drop a point. Instead the flag feeds the `badspan` density: a **dense** region of flags still glues into a dropped bad span (despike's real value — catching blobs of garbage `drift` misses), while a lone flag only contributes density and survives. Net on the 42-workout corpus: dropping 12.0 % → 10.6 % (5,039 isolated false-positives kept), `badspan` reach unchanged.
 
+**`badspan` density-dilution bug — FIXED (2026-07-05).** The density calc's denominator was every `time != null` point, which on a high-native-sample-rate source (e.g. a Hero10's raw ~10 Hz GPS5, `oversample`-thinned to ~2 Hz survivors) includes the policy-dropped raw duplicates alongside the sparse survivor sequence — diluting a window's flag density ~10× and keeping `badspan` from ever firing even when every survivor in the window was quality-flagged. Confirmed on real footage (`GX065132.MP4`'s despike-dense tail, [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) "#6"): 0 → 12 points glued after the fix. Fix: exclude policy-only-dropped points (`oversample`/`noTime`) from the density population entirely, not just from the flag count — `analyze.js`'s `isPolicyOnlyDropped`. Regression-tested in `analyze.test.js`.
+
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 
 **Status: the `finalize` phase is IMPLEMENTED (2026-07-04); `aux` threading (flavor B) and the

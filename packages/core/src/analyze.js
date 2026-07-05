@@ -73,14 +73,28 @@ function isQualityDropped(p) {
   return false;
 }
 
+/** True if every one of the point's drop reasons is policy/structural (oversample/noTime) — a
+ * point that was never really a density-calc candidate, as opposed to one genuinely measured and
+ * found bad. A kept point (no dropReason) is NOT policy-only (it participates normally). */
+function isPolicyOnlyDropped(p) {
+  if (!p.dropReason) return false;
+  for (const key in p.dropReason) if (!POLICY_DROPS.has(key)) return false;
+  return true;
+}
+
 /**
  * Pipeline-level DECISION pass (separate from detection): the per-module quality drops above are the
  * detectors; here we glue. A point sits in a BAD (garbage) span when the quality-drop density in its
  * ±BADSPAN_DENS-second neighbourhood is high (≥BADSPAN_FRAC of the window AND ≥BADSPAN_MIN flags) —
  * the eye reads such a stretch as one blob of noise. Every point inside a bad span (incl. ones no
  * module flagged) gets the `badspan` drop, merging spans ≤BADSPAN_GLUE seconds apart. Isolated flags
- * are left to their own module's drop. Operates over the timed points (null-time points are already
- * label-dropped). Tunable via g.BADSPAN_*.
+ * are left to their own module's drop. Operates over the MEASURED sequence only — points with no
+ * timestamp (already label-dropped) AND policy-only drops (oversample/noTime) are excluded from the
+ * density population entirely, not just the flag count: a `timed`-but-policy-dropped point used to
+ * still occupy a slot in the sliding window's denominator, so a high-native-sample-rate source (many
+ * oversample-thinned duplicates per real fix) diluted the density and could keep `badspan` from ever
+ * firing even when every survivor in the window was quality-flagged (see
+ * docs/gpmf-sensors.md's badspan dilution finding, 2026-07-05). Tunable via g.BADSPAN_*.
  * @param {object[]} points  the assembled track (mutated in place)
  * @param {Record<string, number>} g  resolved params
  */
@@ -91,7 +105,8 @@ export function glueBadSpans(points, g) {
   const GLUE = (g.BADSPAN_GLUE ?? 5) * 1000; // merge bad spans separated by ≤ this (ms)
 
   const timed = [];
-  for (let i = 0; i < points.length; i++) if (points[i].time != null) timed.push(i);
+  for (let i = 0; i < points.length; i++)
+    if (points[i].time != null && !isPolicyOnlyDropped(points[i])) timed.push(i);
   const m = timed.length;
   if (m === 0) return points;
   const time = timed.map((i) => points[i].time);

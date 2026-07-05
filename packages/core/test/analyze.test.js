@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { addDrop, analyze } from "../src/analyze.js";
+import { addDrop, analyze, glueBadSpans } from "../src/analyze.js";
 import { PARAMS } from "../src/profile.js";
 
 // ════════════════════════════════════════════════════════════════════════════════════════
@@ -30,6 +30,47 @@ test("addDrop: records reasons and maintains dropReason + dropCount", () => {
   addDrop(p, "outlier", { detour: 95 }); // same key updates context, not the count
   assert.deepEqual(p.dropReason, { outlier: { detour: 95 }, drift: true });
   assert.equal(p.dropCount, 2);
+});
+
+test("glueBadSpans: oversample-thinned raw duplicates don't dilute the density calc", () => {
+  // A high native-sample-rate source: 30 1 Hz survivors, a dense quality-dropped run at idx
+  // 10-19, each survivor gap filled with 9 policy-dropped (oversample) raw duplicates (10 Hz raw,
+  // matching a real Hero10 clip). Before the dilution fix, those duplicates still occupied slots
+  // in the density window's denominator alongside the sparse 1 Hz survivors, diluting the
+  // survivor-only density ~10x — enough to keep idx 8/9 (unflagged survivors just outside the
+  // dense run, whose ±5s window is genuinely ~40-45% flagged among survivors alone) under the 30%
+  // cutoff. The real-world case this regression-tests: docs/gpmf-sensors.md's badspan dilution
+  // finding (2026-07-05) — GX065132.MP4's despike-dense tail went from 0 badspan drops to 12.
+  const points = [];
+  for (let i = 0; i < 30; i++) {
+    const p = { time: i * 1000, idx: i };
+    if (i >= 10 && i <= 19) p.dropReason = { outlier: true }; // the dense flagged region
+    points.push(p);
+    for (let j = 1; j < 10; j++)
+      points.push({ time: i * 1000 + j * 100, dropReason: { oversample: true } });
+  }
+  points.sort((a, b) => a.time - b.time);
+  glueBadSpans(points, {});
+
+  const survivors = points.filter((p) => p.idx != null);
+  const badIdx = (i) => survivors.find((p) => p.idx === i).dropReason?.badspan != null;
+  assert.ok(
+    badIdx(8) && badIdx(9),
+    "idx 8/9 glue into the bad span despite the oversample dilution",
+  );
+  assert.ok(!badIdx(7), "idx 7 sits just outside the density window and correctly stays clear");
+
+  // policy-only-dropped points are excluded from the density population entirely — they never
+  // themselves pick up a redundant badspan tag on top of their existing oversample drop.
+  const oversampled = points.filter((p) => p.dropReason?.oversample);
+  assert.ok(oversampled.every((p) => !p.dropReason?.badspan));
+});
+
+test("glueBadSpans: a sparse (below-threshold) flag rate is left alone", () => {
+  const points = Array.from({ length: 20 }, (_, i) => ({ time: i * 1000 }));
+  points[5].dropReason = { outlier: true }; // one flagged point among 20 — well under 30%
+  glueBadSpans(points, {});
+  assert.ok(!points.some((p) => p.dropReason?.badspan));
 });
 
 test("analyze: empty input yields an empty array", () => {
