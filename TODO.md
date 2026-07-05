@@ -15,11 +15,16 @@ one place, not two).
   contract: [`docs/export-contract.md`](docs/export-contract.md). **`--organize DIR`**
   reorganizes the source videos to mirror the `.gpx` grouping/session naming
   (`src/organize.js`), moving each file's cache alongside and sweeping the `.gpx` in too
-  when `--out` wasn't explicit; always previews + confirms first.
+  when `--out` wasn't explicit; always previews + confirms first. **`--html`/`--png`**
+  (2026-07-05) render each group's merged track through core's own analyzed view
+  (clean track + drop markers), additive to the `.gpx` — an eval aid so a group can be
+  eyeballed without a separate `gpx-stabilizer --html` pass; required exporting
+  `analyzedSvg`/`savePng` from core's public API (`packages/core/src/index.js`).
 - **core `stabilize`** (`packages/core`) — noise/outlier removal, plus opt-in elevation
-  **smoothing** (`mods/smooth.js`) and uniform-grid **resampling** (`resample.js`).
-  Consumer-accepted by movie-layers `provider-gopro`. Status + evals in
-  [`SPEC.md`](SPEC.md) ("Track smoothing" / "Track resampling").
+  **smoothing** (`mods/smooth.js`), uniform-grid **resampling** (`resample.js`), and coarse
+  lift/descent/flat **segmentation** (`mods/segment.js`, an opt-in `finalize`-phase module,
+  2026-07-04). Consumer-accepted by movie-layers `provider-gopro`. Status + evals in
+  [`SPEC.md`](SPEC.md) ("Track smoothing" / "Track resampling" / "Segment / lift segmentation").
 
 ## Next (detail in SPEC)
 
@@ -28,10 +33,10 @@ one place, not two).
   — the placement rule".
 - **Core roadmap, remaining** — apply the **additive-power activity model**
   ([`SPEC.md`](SPEC.md)): powered-vehicle box merge **DONE** (`powered` in
-  `mods/activity.js`, 2026-07-01); still open — four power-classes as the stage-2
-  commit space; distance-domain resample variant; then **segment classification / lift
-  handling / activity segmentation** (the shared precondition the elevation work kept
-  hitting) and OSM validation.
+  `mods/activity.js`, 2026-07-01); coarse lift/descent/flat segmentation **DONE**
+  (`mods/segment.js`, see Shipped above); still open — its **turn-confirm** and
+  **catwalk-vs-carve** follow-ons, four power-classes as the stage-2 commit space,
+  distance-domain resample variant, and OSM validation.
 - **Per-activity smoothing defaults — BLOCKED, don't treat as ready-to-build.** Two
   gaps: (a) no data to *derive* it — the only local tracks are one batch of ski GoPro
   clips (`gpx_eval/hero5cache/`), so walking/cycling/driving/rail/flight values would be

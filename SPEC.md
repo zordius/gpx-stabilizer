@@ -674,14 +674,21 @@ run on a real multi-day ski corpus (2026-02-11 & -13, GX/Hero10 bodies; `gpx_eva
   blocks; naive per-point thresholding adds ~1-min slivers → wants hysteresis (sustained-sign
   entry/exit) + a minimum-episode + sliver-merge to recover the true ~3–5 min episodes.
 
-**Design direction (next):** a post-stabilize `lift`/`segment` module — primary axis = sign of a
-**detection-denoised** (windowed) `vspeed` with hysteresis; confirm lift via low `turn` + steady
-speed; emit a per-segment label (climb/descent first, then the four power-classes). It runs **before**
-per-activity output-smoothing and feeds it the labels (see the two-smoothings note above). Both are
-`finalize`-phase modules (sequential, see each other) — the `finalize` phase is now built
-(§ "Module model"), so the seam segmentation needs exists; cleaning is the remaining prerequisite. This is the
-core-side half of the stage-2 coarse split ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
-*Thresholds in the eval are first-look guesses, not tuned.*
+**Coarse split — IMPLEMENTED (2026-07-04).** [`packages/core/src/mods/segment.js`](packages/core/src/mods/segment.js),
+an opt-in `finalize`-phase module (like `kink`, not a built-in), labels each kept point
+`point.segment = { id, type }` (`lift`/`descent`/`flat`) from the sign of a **detection-denoised**
+(windowed) `vspeed` with hysteresis + a short-episode merge — the algorithm validated in
+`gpx_eval/seg_explore.mjs` against the real ski corpus (reproduces its episode structure exactly).
+Thresholds (`SEG_VON`/`SEG_WIN_S`/`SEG_MIN_S`) are first-look guesses, not tuned.
+
+**Still open (follow-ons):** confirm a lift via low `turn` + steady speed (disambiguates a cable-line
+climb from a hiking climb or slow milling); a catwalk-vs-carve sub-split within `descent` (high
+`carve` = actively working the terrain vs low `carve` = a straight glide); and committing each segment
+to the **four power-classes** (human / no-engine-gravity / powered-ground / airborne), not just
+lift/descent/flat. `segment` runs **before** any per-activity output-smoothing and feeds it the labels
+(see the two-smoothings note above) — though per-activity output-smoothing itself is a separate
+negative result (below). This is the core-side half of the stage-2 coarse split
+([`docs/core-ski-split.md`](docs/core-ski-split.md)).
 
 **Per-activity output-smoothing — explored, NOT built (negative result, 2026-07-04).** With the
 `segment` module in place, explored whether each segment type wants a different elevation-smoothing
