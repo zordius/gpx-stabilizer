@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { buildGroups, family, fileNumber } from "../src/group.js";
+import { buildGroups, family, fileNumber, gkeyOf, groupNames } from "../src/group.js";
 
 // minimal TrackPoint
 const pt = (lat, lon, time) => ({ lat, lon, time });
@@ -142,6 +142,26 @@ test("buildGroups (A): with no file-number, the time gap is the sole session clu
     },
   ]);
   assert.equal(groups[0].segments.length, 2); // near points cluster; the far one splits off
+});
+
+test("groupNames: matches buildGroups' naming (readable name, serial-clash suffix)", () => {
+  const entries = [
+    { family: "GX", date: "20260628", serial: "aaaa1111", session: "5131", points: [pt(1, 1, 10)] },
+    { family: "GX", date: "20260628", serial: "bbbb2222", session: "5131", points: [pt(2, 2, 20)] },
+    { family: "GOPR", date: "20260629", serial: null, session: "9001", points: [pt(3, 3, 30)] },
+  ];
+  const names = groupNames(entries);
+  assert.equal(names.get(gkeyOf(entries[0])), "20260628-GX-aaaa1111");
+  assert.equal(names.get(gkeyOf(entries[1])), "20260628-GX-bbbb2222");
+  assert.equal(names.get(gkeyOf(entries[2])), "20260629-GOPR"); // lone camera -> no suffix
+});
+
+test("groupNames: gkeyOf merges same serial+date regardless of family/session", () => {
+  const a = { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [] };
+  const b = { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [] };
+  assert.equal(gkeyOf(a), gkeyOf(b));
+  const names = groupNames([a, b]);
+  assert.equal(names.size, 1); // one gkey -> one name, shared by both sessions
 });
 
 test("buildGroups: drops (0,0) placeholder fixes; an all-placeholder session is skipped", () => {

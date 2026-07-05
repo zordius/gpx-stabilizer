@@ -20,6 +20,7 @@ No install needed:
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
+                                  [--organize DIR] [--yes]
 ```
 
 Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
@@ -31,6 +32,20 @@ split into one `<trkseg>` per recording session (keyed on the filename file-numb
 split for restarts/dropouts). A per-file extraction cache (keyed by size+mtime+rate) lets a killed
 run resume without re-extracting. `--rate HZ` downsamples from the native ~18 Hz; `--tz HOURS`
 overrides the longitude-guessed local date.
+
+### `--organize DIR` — reorganize the source videos to match the GPX
+
+After every `.gpx` above has been written, moves each source video into
+`<DIR>/<group>/<session>/` — the same `<date>-<family>` group naming as the `.gpx` file, further
+split into one folder per recording session (the filename file-number; `no-session/` when a file
+has none). Each file's extraction cache moves alongside (never deleted — it's free to keep and
+costly to lose); the group's `.gpx` moves in too, *unless* `--out` was explicitly given (then it
+stays where you put it). Never overwrites an existing destination file.
+
+Always previews the full plan first, then asks before touching anything — including whether
+found `.LRV`/`.THM` sidecar files (GoPro's per-chapter low-res preview / thumbnail) should be
+deleted (default) or moved alongside. `--yes` skips both prompts (sidecars default to deleted); a
+non-interactive stdin without `--yes` does nothing rather than hang waiting for input.
 
 ## Library — telemetry export
 

@@ -118,6 +118,7 @@ never load whole into RAM.
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
+                                  [--organize DIR] [--yes]
 ```
 
 Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
@@ -129,6 +130,11 @@ split into one `<trkseg>` per recording session (keyed on the filename file-numb
 split for restarts/dropouts). A per-file extraction cache (keyed by size+mtime+rate) lets a killed
 run resume without re-extracting. `--rate HZ` downsamples from the native ~18 Hz; `--tz HOURS`
 overrides the longitude-guessed local date.
+
+`--organize DIR` reorganizes the source videos to mirror the `.gpx` output, after every `.gpx` is
+written: `<DIR>/<group>/<session>/`, cache moved alongside, the group's `.gpx` swept in too unless
+`--out` was explicit. Always previews + asks first (including what to do with `.LRV`/`.THM`
+sidecars — default delete); `--yes` skips both prompts. Detail: [`packages/gopro/README.md`](packages/gopro/README.md).
 
 ## Library — telemetry export
 

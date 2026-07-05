@@ -10,9 +10,12 @@ one place, not two).
 
 - **`gpx-from-gopro` CLI** (`packages/gopro`) — recurses a directory for GoPro videos,
   writes one merged GPX 1.1 per **(camera, local date)**: serial (udta CAME) merge key,
-  GUMI per-`<trkseg>` session split, resumable per-file cache (`CACHE_V=3`, all GPMF
-  streams). Telemetry-export API + cache contract:
-  [`docs/export-contract.md`](docs/export-contract.md).
+  file-number session split (see "Open validation items" below — GUMI was replaced),
+  resumable per-file cache (`CACHE_V=3`, all GPMF streams). Telemetry-export API + cache
+  contract: [`docs/export-contract.md`](docs/export-contract.md). **`--organize DIR`**
+  reorganizes the source videos to mirror the `.gpx` grouping/session naming
+  (`src/organize.js`), moving each file's cache alongside and sweeping the `.gpx` in too
+  when `--out` wasn't explicit; always previews + confirms first.
 - **core `stabilize`** (`packages/core`) — noise/outlier removal, plus opt-in elevation
   **smoothing** (`mods/smooth.js`) and uniform-grid **resampling** (`resample.js`).
   Consumer-accepted by movie-layers `provider-gopro`. Status + evals in

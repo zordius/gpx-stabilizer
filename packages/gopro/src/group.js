@@ -48,6 +48,8 @@ export function fileNumber(file) {
  * @property {string | null} session   recording id = filename file-number (a recording's
  *   chapters share it; a new recording / crash restart gets a new one), or null
  * @property {import("gpx-stabilizer").TrackPoint[]} points
+ * @property {string} [file]    source video path — optional, unused by buildGroups() itself,
+ *   carried through for organize.js's planMove() (see ./organize.js)
  */
 
 /**
@@ -56,6 +58,45 @@ export function fileNumber(file) {
  * @property {import("gpx-stabilizer").TrackPoint[][]} segments  one per <trkseg>
  * @property {number | null} startMs  earliest real fix (epoch ms), for meta.time
  */
+
+/**
+ * Merge key = (camera, day): serial when known (two same-model bodies stay separate), else
+ * filename family. Exported so organize.js's planMove() can look a file's name up in the Map
+ * groupNames() returns, without recomputing the key by a possibly-drifted copy.
+ * @param {GroupEntry} e
+ * @returns {string}
+ */
+export function gkeyOf(e) {
+  return e.serial ? `${e.date}|s:${e.serial}` : `${e.date}|f:${e.family}`;
+}
+
+/**
+ * The output name for each file's merge group (camera+day) — `<date>-<family>`, disambiguated
+ * with a short serial suffix only when two cameras collide on the same family+date. This is
+ * exactly the naming buildGroups() gives its `.gpx` files; exported so organize.js's planMove()
+ * can name mp4 folders identically without re-deriving the same logic (and risking drift).
+ * @param {GroupEntry[]} entries
+ * @returns {Map<string, string>} gkey -> name
+ */
+export function groupNames(entries) {
+  const seen = new Map(); // gkey -> { date, family, serial }
+  for (const e of entries) {
+    const gkey = gkeyOf(e);
+    if (!seen.has(gkey))
+      seen.set(gkey, { date: e.date, family: e.family, serial: e.serial ?? null });
+  }
+  const clash = new Map(); // "date-family" -> distinct group count
+  for (const g of seen.values()) {
+    const base = `${g.date}-${g.family}`;
+    clash.set(base, (clash.get(base) ?? 0) + 1);
+  }
+  const names = new Map();
+  for (const [gkey, g] of seen) {
+    const base = `${g.date}-${g.family}`;
+    names.set(gkey, clash.get(base) > 1 && g.serial ? `${base}-${g.serial.slice(0, 8)}` : base);
+  }
+  return names;
+}
 
 /**
  * Group extracted files into output GPX tracks.
@@ -82,18 +123,12 @@ export function fileNumber(file) {
  * @returns {{ groups: GpxGroup[], skipped: string[] }}
  */
 export function buildGroups(entries) {
-  // gkey -> { date, family, serial, sessions: Map<fileNumber, points[]> }
+  const names = groupNames(entries);
+  // gkey -> sessions: Map<fileNumber, points[]>
   const groups = new Map();
   for (const e of entries) {
-    const gkey = e.serial ? `${e.date}|s:${e.serial}` : `${e.date}|f:${e.family}`;
-    if (!groups.has(gkey)) {
-      groups.set(gkey, {
-        date: e.date,
-        family: e.family,
-        serial: e.serial ?? null,
-        sessions: new Map(),
-      });
-    }
+    const gkey = gkeyOf(e);
+    if (!groups.has(gkey)) groups.set(gkey, { sessions: new Map() });
     const sessions = groups.get(gkey).sessions;
     // (B) bucket by file-number; files with none share one fallback bucket that (A) below splits.
     const skey = e.session ?? "__nofilenum__";
@@ -104,20 +139,10 @@ export function buildGroups(entries) {
     for (const p of e.points) bucket.push(p);
   }
 
-  // Name a group <date>-<family>; only when two cameras collide on the same
-  // family+date do we disambiguate with a short serial suffix, so the common
-  // single-camera case keeps the readable name.
-  const clash = new Map(); // "date-family" -> distinct group count
-  for (const g of groups.values()) {
-    const base = `${g.date}-${g.family}`;
-    clash.set(base, (clash.get(base) ?? 0) + 1);
-  }
-
   const out = [];
   const skipped = [];
-  for (const g of groups.values()) {
-    const base = `${g.date}-${g.family}`;
-    const name = clash.get(base) > 1 && g.serial ? `${base}-${g.serial.slice(0, 8)}` : base;
+  for (const [gkey, g] of groups) {
+    const name = names.get(gkey);
     const segments = [];
     for (const pts of g.sessions.values()) {
       const clean = pts.filter((p) => !PLACEHOLDER(p));

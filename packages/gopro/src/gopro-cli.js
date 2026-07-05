@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // gpx-from-gopro — extract GoPro GPS into merged GPX, one file per camera per local date.
 //   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
+//                                [--organize DIR] [--yes]
 //
 // - Recurses directories for video files (mp4/mov/m4v/360); skips .LRV/.THM and ._ AppleDouble.
 // - Groups by (camera, local date): camera = the body serial (udta CAME) when known, so two
@@ -18,10 +19,18 @@
 // - Tolerant: a file that fails to extract is logged and skipped, the run continues.
 // - Caches each file's extracted points (sidecar <file>.gpxcache.json by default, or --cache-dir),
 //   keyed by size+mtime+rate+version, so a killed run resumes without re-extracting done files.
-import { mkdirSync, readdirSync, statSync } from "node:fs";
+// - --organize DIR: AFTER every .gpx has been written, reorganizes the source videos into
+//   <DIR>/<group>/<session>/ (same group/session naming as the .gpx above), moving each file's
+//   cache record alongside and — when --out was NOT explicitly given — the group's .gpx into its
+//   folder too. Always previews the plan and asks before moving anything (--yes skips both
+//   prompts, defaulting .LRV/.THM sidecars to delete); a non-interactive stdin without --yes does
+//   nothing (never blocks waiting for input that will never come). See organize.js.
+import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { saveGpx } from "gpx-stabilizer";
 import { buildGroups, family, fileNumber } from "./group.js";
+import { cacheMovePlan, executeMove, findSidecars, planMove } from "./organize.js";
 import { readGoproSamples } from "./telemetry.js";
 
 const VIDEO_RE = /\.(mp4|mov|m4v|360)$/i;
@@ -30,7 +39,7 @@ const LOCAL_TZ = -new Date().getTimezoneOffset() / 60; // hours, may be fraction
 
 // ---- args ----
 const argv = process.argv.slice(2);
-const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir"]);
+const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize"]);
 const inputs = [];
 const opts = {};
 for (let i = 0; i < argv.length; i++) {
@@ -43,10 +52,12 @@ for (let i = 0; i < argv.length; i++) {
 }
 if (inputs.length === 0) {
   console.error(
-    "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]",
+    "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
+      " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes]",
   );
   process.exit(1);
 }
+const outExplicit = opts.out != null; // --organize only sweeps the .gpx along when this is false
 const outDir = opts.out ?? ".";
 const manualTZ = opts.tz != null ? Number(opts.tz) : null;
 if (manualTZ != null && Number.isNaN(manualTZ)) {
@@ -167,7 +178,7 @@ for (const file of videos) {
   }
   // Hand the grouping inputs to buildGroups: serial (CAME) splits cameras, the filename
   // file-number splits recording sessions into <trkseg>s (+ a time-gap split). See ./group.js.
-  entries.push({ family: fam, date, serial: meta.serial, session: fileNumber(file), points });
+  entries.push({ family: fam, date, serial: meta.serial, session: fileNumber(file), points, file });
   const tag = meta.serial ? `${date}-${fam}#${meta.serial.slice(0, 4)}` : `${date}-${fam}`;
   console.log(`  ${basename(file)}: ${points.length} pts -> ${tag}${fromCache ? " (cached)" : ""}`);
   ok++;
@@ -194,3 +205,74 @@ for (const g of groups) {
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
 for (const w of written) console.log(`  -> ${join(outDir, w)}`);
+
+// ---- --organize: only after every .gpx above is safely on disk ----
+async function promptLine(question) {
+  const rl = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return await rl.question(question);
+  } finally {
+    rl.close();
+  }
+}
+
+if (opts.organize) {
+  const includeGpx = !outExplicit; // --out was explicit -> leave the .gpx where the user put it
+  const plan = planMove(entries, { root: opts.organize, outDir, includeGpx });
+  if (plan.files.length === 0) {
+    console.log("\n--organize: nothing to move (no successfully-extracted videos).");
+  } else {
+    const byDestDir = new Map();
+    let sidecarTotal = 0;
+    let cacheTotal = 0;
+    for (const f of plan.files) {
+      if (!byDestDir.has(f.destDir)) byDestDir.set(f.destDir, []);
+      byDestDir.get(f.destDir).push(f);
+      sidecarTotal += findSidecars(f.file).length;
+      const cp = cacheMovePlan(f.file, f.destPath, cache);
+      if (cp && existsSync(cp.from)) cacheTotal++;
+    }
+
+    console.log(`\n--organize preview: ${plan.files.length} video(s) -> ${opts.organize}`);
+    for (const [destDir, list] of byDestDir) {
+      console.log(`  ${destDir}/`);
+      for (const f of list) console.log(`    ${basename(f.file)}`);
+    }
+    if (plan.gpx.length)
+      console.log(`  + ${plan.gpx.length} .gpx file(s) moving into their group folder`);
+    if (cacheTotal) console.log(`  + ${cacheTotal} cache file(s) moving alongside (never deleted)`);
+    if (sidecarTotal) console.log(`  + ${sidecarTotal} .LRV/.THM sidecar file(s) found`);
+
+    let sidecarAction = "delete";
+    let confirmed = true;
+    if (!opts.yes) {
+      if (!process.stdin.isTTY) {
+        console.log(
+          "--organize: stdin is not interactive — skipping without --yes (nothing moved).",
+        );
+        confirmed = false;
+      } else {
+        if (sidecarTotal > 0) {
+          const raw = await promptLine(
+            `  delete or move the ${sidecarTotal} sidecar file(s)? [delete/move] (default delete): `,
+          );
+          sidecarAction = raw.trim().toLowerCase().startsWith("m") ? "move" : "delete";
+        }
+        const raw = await promptLine(`\nProceed with moving ${plan.files.length} file(s)? [y/N] `);
+        confirmed = ["y", "yes"].includes(raw.trim().toLowerCase());
+      }
+    }
+
+    if (!confirmed) {
+      console.log("--organize: cancelled, nothing moved.");
+    } else {
+      const summary = executeMove(plan, { cache, sidecarAction });
+      console.log(
+        `\n--organize done. moved=${summary.moved} gpxMoved=${summary.gpxMoved} cacheMoved=${summary.cacheMoved} ` +
+          `sidecars(moved=${summary.sidecarsMoved},deleted=${summary.sidecarsDeleted}) ` +
+          `skippedCollisions=${summary.skippedCollisions} errors=${summary.errors.length}`,
+      );
+      for (const e of summary.errors) console.error(`  ERROR ${e.file}: ${e.error}`);
+    }
+  }
+}
