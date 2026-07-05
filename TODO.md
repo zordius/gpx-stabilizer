@@ -34,6 +34,14 @@ one place, not two).
   didn't render, no hover). Both fixed the same way: skip policy-only drops
   (`oversample`/`noTime`) instead of treating them as quality gaps. Detail + regression tests:
   [`SPEC.md`](SPEC.md) ("Policy vs quality drops").
+- **`drift` fixed for short clips (2026-07-05), same investigation** — its only compactness check
+  (`netd150`, ±150 s) clamps to the whole clip on anything not much longer than that, diluting a
+  real short stay with real motion elsewhere in a short recording (`GX065132.MP4`: undershot the
+  100 m cutoff by a hair, purely from the window swallowing a fast descent earlier in the clip).
+  Added a second, much shorter window (`netdShort`, ±15 s default) gated on speed already being
+  slow (so a fast, tight ski carve can't be misread as drift) and its own lower duration floor.
+  0 → 16 points glued into one 7.5 s segment on the real clip. Detail + regression tests:
+  [`SPEC.md`](SPEC.md) ("drift's window scale mismatch").
 
 ## Next (detail in SPEC)
 

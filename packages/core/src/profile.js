@@ -14,6 +14,9 @@ export const PARAMS = Object.freeze({
   CARVE_AMP: 0.25, // s-arc swing amplitude threshold (rad)
   NET_WIN: 60, //     net-speed / wander time window (+/- s)
   NETD_WIN: 150, //   net-displacement time window (+/- s)
+  NETD_WIN_SHORT: 15, // short net-displacement window (+/- s) — catches a compact stay/wobble
+  //                     that NETD_WIN's long window dilutes on a short recording (the long window
+  //                     clamps to the whole clip, mixing in real motion far outside the stay)
   S_SHORT: 2, //      s-delta short half-window (samples)
   S_LONG: 10, //      s-delta long half-window (samples)
 });
@@ -78,8 +81,8 @@ function sDelta(x, y, shortHw, longHw) {
  * bundle for compute modules and assembly.
  *
  * Descriptors: hs, vs (smoothed speed); straight, steady (local shape); maDist (jitter); netsp,
- * netd150, wander (time-windowed); carve (S-arc density); paused. `cu` is the cumulative-unit-vector
- * scan the windows block differences (exposed for modules).
+ * netd150, netdShort, wander (time-windowed); carve (S-arc density); paused. `cu` is the
+ * cumulative-unit-vector scan the windows block differences (exposed for modules).
  *
  * @param {ReturnType<import("./measure.js").measure>} m  point bundle (x, y, el, t, dt, planarStep)
  * @param {Partial<typeof PARAMS>} [opts]
@@ -90,11 +93,25 @@ export function profile(m, opts = {}) {
   const { hs, vs } = speeds(planarStep, dt, el, g); //           block 3
   const { straight, steady } = localShape(x, y, hs, g); //       block 4
   const { maDist, cu } = jitter(x, y, el, g); //                 block 5
-  const { netsp, netd150, wander, paused } = windows(x, y, t, cu, g); // block 6
+  const { netsp, netd150, netdShort, wander, paused } = windows(x, y, t, cu, g); // block 6
   // carve (S-arc density) is a SKI-specific signal — no core module consumes it. Gate it on g.CARVE
   // (off by default → zeros) so the general core skips the work; ski mode turns it on. Block 7.
   const carve = g.CARVE ? carveDensity(x, y, planarStep, g) : new Array(x.length).fill(0);
-  return { hs, vs, straight, steady, maDist, cu, netsp, netd150, wander, paused, carve, g };
+  return {
+    hs,
+    vs,
+    straight,
+    steady,
+    maDist,
+    cu,
+    netsp,
+    netd150,
+    netdShort,
+    wander,
+    paused,
+    carve,
+    g,
+  };
 }
 
 /** Block 3 — horizontal and vertical speed (m/s), each smoothed; ele is pre-smoothed for vs. */
@@ -169,13 +186,18 @@ export function jitter(x, y, el, g) {
 
 /**
  * Block 6 — time-windowed net speed (+/-NET_WIN), wander (circular variance of `cu` over the same
- * window), net displacement (+/-NETD_WIN), and the `paused` flag.
+ * window), net displacement at two scales (+/-NETD_WIN, +/-NETD_WIN_SHORT), and the `paused` flag.
+ * The short-window net displacement exists purely to catch a compact stay on a recording shorter
+ * than (or not much longer than) NETD_WIN, where the long window clamps to the whole clip and
+ * dilutes with real motion outside the stay — same underlying "did the receiver actually go
+ * anywhere" question as netd150, just at a scale a short clip's own length doesn't drown out.
  */
 export function windows(x, y, t, cu, g) {
   const n = x.length;
   const netsp = new Array(n).fill(0);
   const wander = new Array(n).fill(0);
   const netd150 = new Array(n).fill(9e9);
+  const netdShort = new Array(n).fill(9e9);
   for (let i = 0; i < n; i++) {
     const lo = searchLeft(t, t[i] - g.NET_WIN);
     const hi = Math.min(n - 1, searchLeft(t, t[i] + g.NET_WIN));
@@ -189,9 +211,12 @@ export function windows(x, y, t, cu, g) {
     const l2 = searchLeft(t, t[i] - g.NETD_WIN);
     const h2 = Math.min(n - 1, searchLeft(t, t[i] + g.NETD_WIN));
     netd150[i] = Math.hypot(x[h2] - x[l2], y[h2] - y[l2]);
+    const l3 = searchLeft(t, t[i] - g.NETD_WIN_SHORT);
+    const h3 = Math.min(n - 1, searchLeft(t, t[i] + g.NETD_WIN_SHORT));
+    netdShort[i] = Math.hypot(x[h3] - x[l3], y[h3] - y[l3]);
   }
   const paused = netsp.map((v) => v < g.NETSTAY);
-  return { netsp, netd150, wander, paused };
+  return { netsp, netd150, netdShort, wander, paused };
 }
 
 /** Block 7 — local S-arc density (carve): signed swing crossings per 100 m over +/-SW. */

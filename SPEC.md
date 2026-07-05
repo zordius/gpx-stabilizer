@@ -140,7 +140,7 @@ For each point, summarise its ±window neighbourhood. **Owns all tuning `PARAMS`
 | `hs`, `vs` | ±SW (smoothed) | horizontal / vertical speed |
 | `straight`, `steady` | ±SW | path straightness / speed steadiness |
 | `maDist` | ±SW | distance off the moving-average line (jitter) |
-| `netsp`, `netd150`, `wander` | ±NET_WIN / ±NETD_WIN | net speed, net displacement, direction variance |
+| `netsp`, `netd150`, `netdShort`, `wander` | ±NET_WIN / ±NETD_WIN / ±NETD_WIN_SHORT | net speed, net displacement (long + short window), direction variance |
 | `carve` | ±SW | S-arc swing density |
 | `paused` | derived | `netsp < NETSTAY` — the "not moving" state |
 
@@ -203,6 +203,32 @@ Both are regression-tested (`analyze.test.js`, `view.test.js`) and confirmed on 
 general lesson: **a policy drop is not a real gap — every point-stream consumer that reasons about
 "is this point missing/absent" needs to ask *why*, not just *whether*.** Grep `dropReason` (or
 `p.dropReason`) for a truthy-only check before adding a new one.
+
+**`drift`'s window scale mismatch on a short clip — found + fixed (2026-07-05), same investigation.**
+`drift`'s only compactness check, `netd150` (±NETD_WIN, 150 s), clamps to the whole clip on anything
+not much longer than that — so on a 33 s clip every point's "net displacement over ±150 s" is really
+"net displacement over the whole clip," diluted by real motion far outside any actual stay. On
+`GX065132.MP4`'s tail (the same erratic, "stopped but wandering" span the policy-drop bugs above were
+found on) this undershot the 100 m cutoff by a hair (102 m) purely from a fast descent 15+ seconds
+earlier in the same clip, so `drift` never fired despite `wander`/`vs` both already reading
+compellingly drift-like.
+
+- **Fix — a second, much shorter net-displacement window (`netdShort`, ±NETD_WIN_SHORT, 15 s
+  default)**, OR'd into the same `drift` check (same shape as `outlier`'s detour-OR-speed-spike):
+  same phenomenon, just not diluted by a short clip's own length. Confirmed on `GX065132.MP4`: 0 →
+  16 points glued into one 7.5 s drift segment.
+- **Caught before shipping: a short window can misread a genuinely fast, tight ski carve as
+  drift** — a few seconds of rhythmic S-turns can also show small net displacement without being
+  drift. The short-window branch is therefore gated on `hs` already being slow (< DRIFT_HS_SHORT,
+  2 m/s default) — a real carve's speed sits well above that, so it stays entirely on the original,
+  unmodified long window. Regression-tested (`drift.test.js`) with a fast/high-`hs` case that must
+  NOT be flagged.
+- **A run relying only on the short window also gets its own, much lower duration floor**
+  (`DRIFT_MIN_SHORT`, 2 s default) — the existing 30 s floor exists because the long window's
+  compactness alone is a weak tell over a couple of samples, but requiring 30 s here would defeat
+  the short window's purpose entirely (the real qualifying run above is only ~7.5 s). A run the long
+  window ALSO confirms keeps the original 30 s floor regardless of `hs` — being slow is not, by
+  itself, reason to relax it.
 
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 
