@@ -56,8 +56,12 @@ one place, not two).
   truly-stationary check (**PARTIAL** as of 2026-07-05, same sample, found the *opposite*
   problem: the catalog's original "IMU energy ≈ 0" test is wrong — a person doing real,
   non-translational things (bending, head turns) reads as MORE active than actual skiing;
-  the fix is testing horizontal/translational force specifically, which tolerates
-  rotation) — not full INS reconstruction. Catalog + per-signal status:
+  the fix is testing horizontal/translational force specifically — but a corpus-wide scan
+  (723 candidate clusters across all 124 cached clips, `gpx_eval/stationary_scan.mjs`)
+  found a second failure mode too: a head/helmet-mounted camera's neck-pivot lever arm
+  still injects real force into that same fix on a quick head turn (ground-truthed on a
+  chairlift), so "tolerates rotation" only holds for rotation about the sensor's own
+  centre) — not full INS reconstruction. Catalog + per-signal status:
   [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into the pipeline needs
   the proposed `finalize` phase (SPEC module-model section).
 

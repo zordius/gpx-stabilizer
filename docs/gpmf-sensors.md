@@ -132,7 +132,7 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 | 3 | **SCEN → obstruction (device-independent)** | obstruction detection — hdop fails on GX | SCEN | Hero10 | ★★★ | correlate vegetation/indoor prob with the hdop≥3 spatial clusters (GOPR's hdop knee is the ground truth) | UNVERIFIED |
 | 4 | **GRAV lean + ACCL centripetal → carve confirm** | ski `carve` signal | GRAV, ACCL | Hero10 | ★★ | lean angle (`GRAV` tilt) and lateral centripetal (`ACCL`) rise together through a carved arc — the lean *is* the resultant of gravity + centripetal (not gyro yaw) | UNVERIFIED |
 | 5 | **SCEN(indoor)+low-speed+FACE → rest/queue** | temporal activity segmentation (roadmap) | SCEN, FACE, GPS speed | Hero10 | ★★ | indoor/face episodes ↔ stationary runs (the base-area hdop clusters) | UNVERIFIED |
-| 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | **revised**: raw IMU motion energy ≈ 0 is the WRONG test (a person can stand still while doing real, non-translational things — bending, head turns — that raise it); test **translational/horizontal force** ≈ 0 instead, which tolerates rotation | **PARTIAL** (see below) |
+| 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | **revised**: raw IMU motion energy ≈ 0 is the WRONG test (a person can stand still while doing real, non-translational things — bending, head turns — that raise it); test **translational/horizontal force** ≈ 0 instead — tolerates rotation about the sensor's own centre, but NOT rotation about a remote pivot (a head/helmet mount's neck lever arm still injects real force) | **PARTIAL** (see below) |
 | 7 | **exposure (SHUT×ISO) → obstruction / indoor (PORTABLE)** | obstruction detection — the one proxy that works on *both* chips | SHUT, ISO (+`YAVG` on Hero10) | both² | ★★ | per-clip-relative `SHUT×ISO` (or `YAVG`) vs `SCEN` indoor/vegetation prob + GOPR hdop≥3 clusters (ground truth) + known indoor episodes³ | UNVERIFIED |
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
 | 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | **PARTIAL** (oracle v1 — see below) |
@@ -367,22 +367,59 @@ something" with "the position is moving," and fails whenever they diverge — wh
 adjusting a pack, or looking around all do.
 
 **The fix: test translational (horizontal) force specifically, not total IMU energy — it tolerates
-rotation.** This is the SAME horizontal-projected proxy #1 above already built (`ACCL` minus
-gravity, minus the along-gravity component, leaving the horizontal-plane force): rotating the camera
-to look down barely touches it (rotation about roughly the gravity axis doesn't inject much
-horizontal specific force), while an actual step or stumble would. Re-reading #1's own numbers
-through this lens: 8 of the 10 `despike`-flagged points had a horizontal-force ratio matching the
-"quiet"/baseline range (0.03–0.15) — consistent with a near-fixed position — while GYRO alone would
-have called this whole window "clearly moving." The 2 outlier points (ratio 0.40×/0.97×) stay
-ambiguous: still explainable as either a real small jolt (stepping, a binding snapping open) or a
-residual GPS glitch — this check narrows *what kind* of question is left open, not that one.
+*most* rotation, with one caveat below.** This is the SAME horizontal-projected proxy #1 above
+already built (`ACCL` minus gravity, minus the along-gravity component, leaving the horizontal-plane
+force): a rotation about the sensor's own location barely touches it, while an actual step or
+stumble would. Re-reading #1's own numbers through this lens: 8 of the 10 `despike`-flagged points
+had a horizontal-force ratio matching the "quiet"/baseline range (0.03–0.15) — consistent with a
+near-fixed position — while GYRO alone would have called this whole window "clearly moving." The 2
+outlier points (ratio 0.40×/0.97×) stay ambiguous: still explainable as either a real small jolt
+(stepping, a binding snapping open) or a residual GPS glitch — this check narrows *what kind* of
+question is left open, not that one.
 
-**Reading — PARTIAL.** The refined test (horizontal force, not raw energy) is directionally
-right and matches the one ground-truthed case available, but it's one clip, one manually-confirmed
-scenario, and the two outlier points are still unresolved either way. Open: validate on more
-obstructed/near-stationary footage; decide the actual pipeline action once confirmed (drop the span
-outright vs reposition it to a single representative fix — the catalog's original "collapse or
-reposition" framing is still the right target, this section only fixes the *detector*).
+**Caveat found via the corpus-wide scan below: a head-mounted camera's rotation axis is the NECK,
+not the sensor — so "tolerates rotation" over-promised.** `gpx_eval/stationary_scan.mjs` (see
+below) surfaced a second candidate, `GX035138.MP4` cts 644644–645144 (10:44.6–10:45.1 into the
+video), with an even bigger GYRO anomaly than the ski-removal case (mean 0.555 rad/s ≈ 32°/s vs
+~0.02 rad/s for both a confirmed-moving window and the whole clip). Ground truth (the person who
+shot it): sitting on a **chairlift**, looked right then quickly left — no other action. The
+horizontal-force proxy read this as elevated too (cts 645144: ratio 0.73, ~10× this clip's quiet
+median of 0.074 — cts 644644 was milder, ~2.3×), even though ground truth says there was **no**
+real translational event. Why: the GoPro sits **above the forehead**, a real lever arm from the
+neck's rotation axis — so a head turn sweeps the sensor through a small arc, and *that* arc
+produces genuine tangential/centripetal acceleration **at the sensor**, independent of whether the
+body/chairlift seat moved at all. "Tolerates rotation" only holds for rotation about the sensor's
+own centre; a remote pivot (the neck, for a head/helmet mount) breaks it. Mitigating factors (same
+source): head-turn events are comparatively rare in typical footage, and the spurious force scales
+with turn *speed* (a quick snap injects more than a slow look) — so this is a real but probably
+minor contaminant, not a fatal flaw; a future refinement could cross-check a horizontal-force blip
+against a simultaneous GYRO yaw-rate spike before trusting it.
+
+**The same scan also found the coarse and GRAV-projected proxies can disagree on which point in a
+pair is the "real" outlier** (`GX035138`'s two points swap rank depending on which proxy is used) —
+another reason a scan's cheap screening metric is for *finding candidates*, not for concluding
+anything by itself; always re-check with the GRAV/self-estimated-gravity proxy before reading a
+scan hit.
+
+**Scaling the check corpus-wide.** `gpx_eval/stationary_scan.mjs` walked all 124 cached clips on
+the trip (both cameras), clustering each clip's low-speed (`hs < 2` m/s) `despike`-flagged points
+and scoring each cluster's GYRO-low energy against that clip's own whole-clip baseline. Result:
+**723 candidate clusters**, and the top ones by GYRO-low ratio are overwhelmingly small-span
+(1–5 m), low-speed (`hs` mostly 0.1–0.6 m/s), with a horizontal-force ratio at-or-below each clip's
+own quiet baseline — the same "real IMU activity, no real horizontal force" signature as the
+ski-removal case, recurring broadly across the whole trip rather than being a one-off. This is
+corpus-wide corroborating evidence for the *pattern*, even without ground-truthing every hit.
+
+**Reading — PARTIAL.** The refined test (horizontal force, not raw energy) is directionally right
+and matches most of the evidence, including a corpus-wide scan, but two ground-truthed clips found
+two different failure modes of the detector itself (bending/gear-removal inflates raw GYRO energy
+harmlessly; a head-mounted camera's neck-pivot lever arm can inflate even the horizontal-force
+proxy), and the scan's cheap screening metric doesn't always agree with the more careful
+GRAV-projected one. Open: validate more of the 723 candidates; decide the actual pipeline action
+once confirmed (drop the span outright vs reposition it to a single representative fix — the
+catalog's original "collapse or reposition" framing is still the right target); consider a
+GYRO-yaw-rate cross-check to filter out head/helmet-mount lever-arm false positives before trusting
+a horizontal-force reading.
 
 ## 5. Strategy
 
