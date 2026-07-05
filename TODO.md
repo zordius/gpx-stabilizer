@@ -48,12 +48,18 @@ one place, not two).
   the right knob is **noise-driven, not activity-driven** ([`SPEC.md`](SPEC.md) "Adaptive
   window"). Revisit only after segmentation lands and multi-activity tracks exist.
 - **GPS/IMU module (deferred, GoPro-only)** — lead with the **witness** uses: #2 ACCL
-  teleport-kill (**CONFIRM**, both cameras) and #1 ACCL-centripetal carve-vs-spike
+  teleport-kill (**CONFIRM**, both cameras); #1 ACCL-centripetal carve-vs-spike
   (**PARTIAL** as of 2026-07-05 — geometry-only `despike`+`carve` can't split a flagged
-  point from a real carve, an independent IMU horizontal-force proxy can, reproduced on
-  both cameras; not yet ground-truth-checked) — not full INS reconstruction. Catalog +
-  per-signal status: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into
-  the pipeline needs the proposed `finalize` phase (SPEC module-model section).
+  point from a real carve, an independent IMU horizontal-force proxy can; but the one
+  ground-truthed sample turned out to be a stationary gear-removal + GPS-obstruction
+  moment, not a real carve — weaker evidence than first read); #6 ACCL/GYRO
+  truly-stationary check (**PARTIAL** as of 2026-07-05, same sample, found the *opposite*
+  problem: the catalog's original "IMU energy ≈ 0" test is wrong — a person doing real,
+  non-translational things (bending, head turns) reads as MORE active than actual skiing;
+  the fix is testing horizontal/translational force specifically, which tolerates
+  rotation) — not full INS reconstruction. Catalog + per-signal status:
+  [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into the pipeline needs
+  the proposed `finalize` phase (SPEC module-model section).
 
 ## Open validation items (unique to here — not tracked in SPEC)
 

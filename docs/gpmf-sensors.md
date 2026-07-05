@@ -132,7 +132,7 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 | 3 | **SCEN → obstruction (device-independent)** | obstruction detection — hdop fails on GX | SCEN | Hero10 | ★★★ | correlate vegetation/indoor prob with the hdop≥3 spatial clusters (GOPR's hdop knee is the ground truth) | UNVERIFIED |
 | 4 | **GRAV lean + ACCL centripetal → carve confirm** | ski `carve` signal | GRAV, ACCL | Hero10 | ★★ | lean angle (`GRAV` tilt) and lateral centripetal (`ACCL`) rise together through a carved arc — the lean *is* the resultant of gravity + centripetal (not gyro yaw) | UNVERIFIED |
 | 5 | **SCEN(indoor)+low-speed+FACE → rest/queue** | temporal activity segmentation (roadmap) | SCEN, FACE, GPS speed | Hero10 | ★★ | indoor/face episodes ↔ stationary runs (the base-area hdop clusters) | UNVERIFIED |
-| 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | IMU motion energy ≈ 0 ⇒ really stopped (vs GPS drift while moving) | UNVERIFIED |
+| 6 | **ACCL/GYRO → truly-stationary check** | stationary garbage zones (`hdop≥3 paused`) | ACCL, GYRO | both | ★★ | **revised**: raw IMU motion energy ≈ 0 is the WRONG test (a person can stand still while doing real, non-translational things — bending, head turns — that raise it); test **translational/horizontal force** ≈ 0 instead, which tolerates rotation | **PARTIAL** (see below) |
 | 7 | **exposure (SHUT×ISO) → obstruction / indoor (PORTABLE)** | obstruction detection — the one proxy that works on *both* chips | SHUT, ISO (+`YAVG` on Hero10) | both² | ★★ | per-clip-relative `SHUT×ISO` (or `YAVG`) vs `SCEN` indoor/vegetation prob + GOPR hdop≥3 clusters (ground truth) + known indoor episodes³ | UNVERIFIED |
 | 8 | WNDM/AALP → moving/stopped gate | last-resort motion gate when GPS garbage | WNDM, AALP | Hero10 | ☆ | weak — speed already from GPS/IMU; AGC confounds AALP | PARKED |
 | 9 | **ACCL (vertical) → assist elevation reconstruction** | track smoothing / gradient jitter ([`SPEC.md`](../SPEC.md) elevation-reconstruction contract) | ACCL (+`GRAV`/`CORI` for world-frame) | both⁴ | ★★ | complementary filter (low-pass GPS `ele` + high-pass IMU vertical) vs plain distance-domain smoothing on `GX065132.MP4` (the contract's eval clip) | **PARTIAL** (oracle v1 — see below) |
@@ -323,12 +323,66 @@ check. This is also still #1's **coarse/portable** half from the catalog row (a 
 horizontal-force magnitude), not the **carve-specific** full form (`v²/r` vs lean-angle geometry —
 that's #4's job).
 
-**Open — what would move this to CONFIRM:** (a) eyeball the flagged clusters via
-`gpx-from-gopro --html`/`--png` (e.g. render `GX065132`'s cts 24–27 s window) to see whether the
-suspect points geometrically look like a spike (a kink/step) vs a smooth continuation of the arc;
-(b) run the same probes over more clips (only these 2 are cached locally right now); (c) cross-check
-against #4 (`GRAV` lean + `ACCL` centripetal rising together through the arc), the sharper,
-angle-aware version of this same check.
+**Open — what would move this to CONFIRM:** ~~(a) eyeball the flagged clusters~~ — **done, and it
+downgrades confidence in this sample rather than confirming it (2026-07-05).** Rendered
+`GX065132`'s cts 15–33 s window at true scale (`gpx_eval/carve_view.mjs`) and looked at where the
+10 flagged points actually sit: this is **not a fast carving arc**. The clip's first ~14 s is a
+straight, accelerating descent (`carve=0`, `hs` 2.1→4.5 m/s); by cts 15 s `hs` has fallen to
+0.7–1.5 m/s and the path **self-intersects** repeatedly in an ~10×6 m patch — geometrically more
+consistent with someone maneuvering in place than carving. Ground-truth from the person who shot
+it: this is exactly right — it's a **half-sky-obstructed spot while taking skis off**, GPS bouncing
+around a near-fixed position. So `despike`/`carve`'s "high-carve window" here is largely an
+**obstruction-jitter artifact**, not a real arc — the sample doesn't cleanly test #1 after all; see
+#6 below, where this same footage turns out to validate a *different, related* check instead. (b)
+running more clips and (c) cross-checking #4 are both still open, and now matter more, since this
+sample's relevance to #1 specifically is weaker than first thought.
+
+### ACCL/GYRO truly-stationary check (#6) — PARTIAL, and the naive test is WRONG *(2026-07-05)*
+
+The `GX065132` cts 15–33 s window above turned out to be the natural test case for #6, not #1: GPS
+bounces around (obstruction) while the position is close to fixed — the target open problem
+(`hdop≥3 paused` garbage zones) is exactly "confirm via IMU that nothing really moved, then collapse
+or reposition the jittery fixes." Ground truth (from the person who shot it): the position genuinely
+didn't move — they were **taking their skis off**, head-mounted camera, while GPS jittered from the
+sky obstruction.
+
+**The catalog's original test ("IMU motion energy ≈ 0") is wrong for this case.** Comparing
+band-split energy (`gpx_eval/stationary_check.mjs`, reusing `vib_analyze.mjs`'s low/high-frequency
+split) across three references — this window, a confirmed-moving window in the same clip (cts
+0–10 s, straight descent at 2–4.5 m/s), and a genuinely-static reference clip (`GP175136`, Hero5,
+end-of-day no-fix tail):
+
+| | ACCL low (manoeuvre) | ACCL high (vibration) | GYRO low (manoeuvre) | GYRO high (vibration) |
+|---|---|---|---|---|
+| **suspect window** (position ~fixed) | **4.54** | 2.56 | **0.835** | 0.322 |
+| confirmed-moving (same clip) | 1.96 | 3.06 | 0.205 | 0.403 |
+| confirmed-static (`GP175136`) | 2.19 | 0.385 | 0.099 | 0.067 |
+
+The suspect window's GYRO-low is **4× the confirmed-moving window and 8× the confirmed-static
+clip** — raw IMU energy says this is the LEAST-still of the three, exactly backwards from the
+ground truth. Why: a head-mounted camera on someone bending down / turning their head to fumble
+with ski bindings generates real, substantial rotation and slow-band acceleration — **motion that
+is real but non-translational.** The naive "motion energy ≈ 0" test conflates "the body is doing
+something" with "the position is moving," and fails whenever they diverge — which taking gear off,
+adjusting a pack, or looking around all do.
+
+**The fix: test translational (horizontal) force specifically, not total IMU energy — it tolerates
+rotation.** This is the SAME horizontal-projected proxy #1 above already built (`ACCL` minus
+gravity, minus the along-gravity component, leaving the horizontal-plane force): rotating the camera
+to look down barely touches it (rotation about roughly the gravity axis doesn't inject much
+horizontal specific force), while an actual step or stumble would. Re-reading #1's own numbers
+through this lens: 8 of the 10 `despike`-flagged points had a horizontal-force ratio matching the
+"quiet"/baseline range (0.03–0.15) — consistent with a near-fixed position — while GYRO alone would
+have called this whole window "clearly moving." The 2 outlier points (ratio 0.40×/0.97×) stay
+ambiguous: still explainable as either a real small jolt (stepping, a binding snapping open) or a
+residual GPS glitch — this check narrows *what kind* of question is left open, not that one.
+
+**Reading — PARTIAL.** The refined test (horizontal force, not raw energy) is directionally
+right and matches the one ground-truthed case available, but it's one clip, one manually-confirmed
+scenario, and the two outlier points are still unresolved either way. Open: validate on more
+obstructed/near-stationary footage; decide the actual pipeline action once confirmed (drop the span
+outright vs reposition it to a single representative fix — the catalog's original "collapse or
+reposition" framing is still the right target, this section only fixes the *detector*).
 
 ## 5. Strategy
 
