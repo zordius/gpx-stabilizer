@@ -127,7 +127,7 @@ assumption. Expect this caveat to recur across the multi-sensor designs.
 
 | # | use | target open problem | streams | device | ★ | how to validate | status |
 |---|---|---|---|---|---|---|---|
-| 1 | **ACCL centripetal → carve vs spike** | `despike` / ski "real carve or noise?" | ACCL (+`GRAV`/orientation) | both | ★★★ | at a `despike`-flagged turn a real carve has sustained lateral **centripetal** accel (`v²/r`), a spike has none. Coarse/portable = `ACCL` magnitude above g; carve-specific = the horizontal-projected linear accel (down-axis from `GRAV`, or GYRO+ACCL AHRS on Hero5). **Not gyro yaw** — a carve needn't rotate the camera (angulation keeps it facing downhill) | UNVERIFIED |
+| 1 | **ACCL centripetal → carve vs spike** | `despike` / ski "real carve or noise?" | ACCL (+`GRAV`/orientation) | both | ★★★ | at a `despike`-flagged turn a real carve has sustained lateral **centripetal** accel (`v²/r`), a spike has none. Coarse/portable = `ACCL` magnitude above g; carve-specific = the horizontal-projected linear accel (down-axis from `GRAV`, or GYRO+ACCL AHRS on Hero5). **Not gyro yaw** — a carve needn't rotate the camera (angulation keeps it facing downhill) | **PARTIAL** (see below) |
 | 2 | **ACCL → kill teleport false-claims** | `stray` / `outlier` | ACCL (+GRAV+CORI) | both¹ | ★★★ | a GPS jump with ~zero body linear accel = confirmed garbage | **CONFIRM ✓**⁵ |
 | 3 | **SCEN → obstruction (device-independent)** | obstruction detection — hdop fails on GX | SCEN | Hero10 | ★★★ | correlate vegetation/indoor prob with the hdop≥3 spatial clusters (GOPR's hdop knee is the ground truth) | UNVERIFIED |
 | 4 | **GRAV lean + ACCL centripetal → carve confirm** | ski `carve` signal | GRAV, ACCL | Hero10 | ★★ | lean angle (`GRAV` tilt) and lateral centripetal (`ACCL`) rise together through a carved arc — the lean *is* the resultant of gravity + centripetal (not gyro yaw) | UNVERIFIED |
@@ -276,6 +276,59 @@ W: real terrain lost) vs **noise** = grade jitter (falls with W). On 4 clips:
   formula** floated for SPEC's per-activity smoothing. Portable-core options without IMU: an `hdop`
   proxy (device-dependent / unreliable — `hdop-notes.md`) or a fixed compromise; the GoPro path
   gets the noise estimate (and the fix) for free from IMU-fused `ele` (#9).
+
+### ACCL centripetal carve-vs-spike (#1) — PARTIAL: geometry alone can't split them, IMU does *(2026-07-05)*
+
+First real-footage look at #1, on the two clips this doc's provenance section already names:
+`GX065132.MP4` (Hero10, has `GRAV`+`CORI`) and `GP015136.MP4` (Hero5, no `GRAV`). Cache-only — read
+each `<file>.gpxcache.json` sidecar directly (`oracle_v1.mjs`'s access pattern), no re-extraction.
+Probes: `gpx_eval/carve_analyze.mjs` (step 1 below), `carve_witness.mjs` (coarse `|ACCL|-g` proxy),
+`carve_witness_grav.mjs` (GRAV-projected horizontal proxy, Hero10), `carve_witness_selfgrav.mjs`
+(self-estimated-gravity horizontal proxy via low-pass `ACCL`, reusing #9's exact gravity-estimation
+code, for Hero5).
+
+**Step 1 confirms the wall #1 exists to break.** Running `analyze()` in ski mode
+(`DESPIKE_PROFILE: "ski", CARVE: true`): `GX065132` → 10 `despike.flagged` points, **all 10** sit
+inside a high-carve window (carve ≥5); `GP015136` → 72 flagged, 71/72 high-carve. So carve density
+genuinely cannot tell "a real point on this arc" from "a GPS glitch riding inside this arc" — both
+occupy the identical window.
+
+**Step 2 — an independent IMU centripetal/horizontal-force proxy DOES split them, on both cameras,
+under two different proxy formulations.** GPS-side accel = the velocity-vector two-point difference
+over the analysis-grid survivors (the same formula #2's `accl_validate2.mjs` already validated);
+IMU-side = a windowed (±500 ms) peak of either (a) coarse `|ACCL|-g`, or (b) the
+horizontal-projected linear accel — `ACCL` minus the gravity vector, minus its component along ĝ —
+using `GRAV` directly on Hero10 or a self-estimated ĝ = low-pass(`ACCL`) on Hero5. Ratio = GPS-accel
+/ IMU-peak, same direction as #2's ratio (real motion ≈ low ratio, GPS-only garbage ≈ high ratio).
+
+- **`GX065132` (Hero10, GRAV-projected):** control (quiet, low-carve, n=31) median ratio 0.0995;
+  of the 10 flagged points, 8 sit inside the control range (0.03–0.15 — IMU corroborates, reads as
+  real carving), **2 (cts 25025, 25525 — half a second apart) stand out at 0.40× / 0.97×** (4–10×
+  the control median), under BOTH the coarse and the GRAV-projected proxy.
+- **`GP015136` (Hero5, self-estimated-gravity-projected):** control median ratio 0.217; the 72
+  flagged points as a whole are unremarkable (mean 0.29, median 0.173 — *below* control, i.e. most
+  corroborate), but ranked by ratio, the top surface **a time-clustered group — cts
+  702924/703425/703925/707262/707812 (within ~5 s), ratio 0.60–2.15×** — the SAME cluster the
+  coarse `|ACCL|-g` proxy on this clip also ranked highest (two independently-coded proxies agree on
+  the same suspects). A weaker secondary cluster (cts 9343–14804, ratio 0.49–1.38×) also recurs
+  across both proxies but is less separated from baseline.
+
+**Reading — PARTIAL, not CONFIRM.** The separation is real and reproduces across (a) two proxy
+formulations (coarse magnitude vs orientation-projected) and (b) two cameras/gravity-estimation
+methods (`GRAV`-direct vs self-estimated) — more than a coincidence of one formula. But it is not
+yet #2-grade evidence: #2's separation was 5–8 orders of magnitude (unambiguous); here the suspect
+points sit only ~4–10× baseline, on n=10 and n=72 flagged points from exactly 2 clips — a real
+signal, but the scale alone doesn't rule out "an unusually sharp real carve" without a ground-truth
+check. This is also still #1's **coarse/portable** half from the catalog row (a scalar
+horizontal-force magnitude), not the **carve-specific** full form (`v²/r` vs lean-angle geometry —
+that's #4's job).
+
+**Open — what would move this to CONFIRM:** (a) eyeball the flagged clusters via
+`gpx-from-gopro --html`/`--png` (e.g. render `GX065132`'s cts 24–27 s window) to see whether the
+suspect points geometrically look like a spike (a kink/step) vs a smooth continuation of the arc;
+(b) run the same probes over more clips (only these 2 are cached locally right now); (c) cross-check
+against #4 (`GRAV` lean + `ACCL` centripetal rising together through the arc), the sharper,
+angle-aware version of this same check.
 
 ## 5. Strategy
 

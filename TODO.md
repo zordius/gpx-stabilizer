@@ -38,20 +38,22 @@ one place, not two).
   **catwalk-vs-carve** follow-ons, four power-classes as the stage-2 commit space,
   distance-domain resample variant, and OSM validation.
 - **Per-activity smoothing defaults — BLOCKED, don't treat as ready-to-build.** Two
-  gaps: (a) no data to *derive* it — the only local tracks are one batch of ski GoPro
-  clips (`gpx_eval/hero5cache/`), so walking/cycling/driving/rail/flight values would be
-  pure estimates, and `smooth_eval.mjs` measures grade *jitter* (self-consistency), not
-  error-vs-truth; (b) it needs **segment segmentation** first — a mixed-activity track
-  can't decide *which* per-activity params to apply without committed per-segment
-  labels. Also note `smooth` is deliberately **sport-agnostic** today
+  gaps: (a) no data to *derive* it — the only local tracks are one 3-day ski GoPro trip's
+  clips, so walking/cycling/driving/rail/flight values would be pure estimates, and
+  `smooth_eval.mjs` measures grade *jitter* (self-consistency), not error-vs-truth; (b) it
+  needs **segment segmentation** first — a mixed-activity track can't decide *which*
+  per-activity params to apply without committed per-segment labels. Also note `smooth`
+  is deliberately **sport-agnostic** today
   ([`packages/core/src/mods/smooth.js`](packages/core/src/mods/smooth.js)), and SPEC says
   the right knob is **noise-driven, not activity-driven** ([`SPEC.md`](SPEC.md) "Adaptive
   window"). Revisit only after segmentation lands and multi-activity tracks exist.
 - **GPS/IMU module (deferred, GoPro-only)** — lead with the **witness** uses: #2 ACCL
-  teleport-kill (validated, both cameras) and #1 ACCL-centripetal carve-vs-spike — not
-  full INS reconstruction. Catalog + per-signal status:
-  [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into the pipeline
-  needs the proposed `finalize` phase (SPEC module-model section).
+  teleport-kill (**CONFIRM**, both cameras) and #1 ACCL-centripetal carve-vs-spike
+  (**PARTIAL** as of 2026-07-05 — geometry-only `despike`+`carve` can't split a flagged
+  point from a real carve, an independent IMU horizontal-force proxy can, reproduced on
+  both cameras; not yet ground-truth-checked) — not full INS reconstruction. Catalog +
+  per-signal status: [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into
+  the pipeline needs the proposed `finalize` phase (SPEC module-model section).
 
 ## Open validation items (unique to here — not tracked in SPEC)
 
