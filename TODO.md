@@ -25,12 +25,15 @@ one place, not two).
   lift/descent/flat **segmentation** (`mods/segment.js`, an opt-in `finalize`-phase module,
   2026-07-04). Consumer-accepted by movie-layers `provider-gopro`. Status + evals in
   [`SPEC.md`](SPEC.md) ("Track smoothing" / "Track resampling" / "Segment / lift segmentation").
-- **`badspan` density-dilution bug fixed (2026-07-05)** — on a high-native-sample-rate source
-  (e.g. Hero10's raw ~10 Hz GPS5), the density calc's denominator used to include the raw
-  `oversample`-thinned duplicates alongside the sparse survivor sequence, diluting the flag
-  density ~10× and keeping `badspan` from ever firing even when every survivor in a window was
-  quality-flagged. Confirmed on real footage (`GX065132.MP4`): 0 → 12 points glued. Detail +
-  regression test: [`SPEC.md`](SPEC.md) ("badspan density-dilution bug").
+- **Two policy-vs-quality-drop bugs fixed (2026-07-05)** — on a high-native-sample-rate source
+  (e.g. Hero10's raw ~10 Hz GPS5, `oversample`-thinned to ~2 Hz survivors), a policy-dropped point
+  sits between nearly every survivor. Two consumers wrongly treated it as a real gap:
+  `glueBadSpans`'s density calc diluted its flag density ~10× (0 → 12 `badspan`-glued points on
+  `GX065132.MP4` after the fix), and `view.js`'s clean-line break shattered the line into
+  one-point, invisible runs (the bug that surfaced this — the interactive viewer's clean line
+  didn't render, no hover). Both fixed the same way: skip policy-only drops
+  (`oversample`/`noTime`) instead of treating them as quality gaps. Detail + regression tests:
+  [`SPEC.md`](SPEC.md) ("Policy vs quality drops").
 
 ## Next (detail in SPEC)
 

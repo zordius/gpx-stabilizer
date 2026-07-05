@@ -179,7 +179,30 @@ built-ins, in order:
 
 **`despike` is detection-only (option C, 2026-06-29).** It emits a `flagged` SIGNAL, never a `dropReason`. On its own despike is a weak/noisy proxy for `drift` (EDA: Jaccard 0.12 vs drift, same signal correlations, ~98 % of its old sole-drops were isolated curve false-positives), so an **isolated** flag must not drop a point. Instead the flag feeds the `badspan` density: a **dense** region of flags still glues into a dropped bad span (despike's real value — catching blobs of garbage `drift` misses), while a lone flag only contributes density and survives. Net on the 42-workout corpus: dropping 12.0 % → 10.6 % (5,039 isolated false-positives kept), `badspan` reach unchanged.
 
-**`badspan` density-dilution bug — FIXED (2026-07-05).** The density calc's denominator was every `time != null` point, which on a high-native-sample-rate source (e.g. a Hero10's raw ~10 Hz GPS5, `oversample`-thinned to ~2 Hz survivors) includes the policy-dropped raw duplicates alongside the sparse survivor sequence — diluting a window's flag density ~10× and keeping `badspan` from ever firing even when every survivor in the window was quality-flagged. Confirmed on real footage (`GX065132.MP4`'s despike-dense tail, [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) "#6"): 0 → 12 points glued after the fix. Fix: exclude policy-only-dropped points (`oversample`/`noTime`) from the density population entirely, not just from the flag count — `analyze.js`'s `isPolicyOnlyDropped`. Regression-tested in `analyze.test.js`.
+**Policy vs quality drops — a distinction two bugs missed the same way (found + fixed 2026-07-05).**
+`oversample`/`noTime` are *policy* drops (deliberate thinning/structure, not a quality problem);
+every other reason is a *quality* drop (a real gap — see `POLICY_DROPS` / `isQualityDropped` in
+`analyze.js`). Two consumers of the point stream treated ANY `dropReason` as equivalent, silently
+letting policy drops leak in as if they were real gaps — same root cause, two different symptoms,
+both found on the same real clip (`GX065132.MP4`, a Hero10 source: raw ~10 Hz GPS5,
+`oversample`-thinned to ~2 Hz survivors, so a policy-dropped point sits between nearly every
+survivor):
+
+- **`glueBadSpans`'s density denominator** counted every `time != null` point, including the
+  policy-dropped raw duplicates — diluting a window's flag density ~10× and keeping `badspan` from
+  firing even when every survivor in the window was quality-flagged. 0 → 12 points glued after the
+  fix (`isPolicyOnlyDropped`, excludes them from the density population entirely, not just the flag
+  count). See [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md) "#6" for the investigation that found it.
+- **`view.js`'s clean-line break (`splitAtDrops`)** cut the line at *any* `dropReason`, so a
+  policy-dropped point between two survivors shattered the clean line into one-point runs — each a
+  lone, invisible `M` with no connecting segment (the interactive viewer's clean line silently
+  failed to render, no hover, no visible line — the bug that prompted this investigation). Fixed by
+  skipping policy-only drops instead of breaking the run on them.
+
+Both are regression-tested (`analyze.test.js`, `view.test.js`) and confirmed on `GX065132.MP4`. The
+general lesson: **a policy drop is not a real gap — every point-stream consumer that reasons about
+"is this point missing/absent" needs to ask *why*, not just *whether*.** Grep `dropReason` (or
+`p.dropReason`) for a truthy-only check before adding a new one.
 
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 

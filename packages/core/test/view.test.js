@@ -53,6 +53,26 @@ test("toHtml: produces an HTML document with the gps layer (markers by default)"
   assert.match(html, /<path [^>]*d="M/); // no line width -> the track renders as markers
 });
 
+test("analyzedLayers: a policy drop (oversample) doesn't break the clean line", () => {
+  // A high native-sample-rate source (e.g. a Hero10's raw ~10 Hz GPS5): oversample thins it to the
+  // 0.5 s gate, so a policy-dropped point sits between nearly every survivor. Those must NOT break
+  // the clean line into one-point runs (each a lone, invisible `M` — the real-world bug this
+  // regression-tests: docs/gpmf-sensors.md's badspan dilution finding's view.js counterpart,
+  // 2026-07-05) — the line should stay ONE continuous run.
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx / 10; // ~5 m/s eastward at 10 Hz
+  const track = Array.from({ length: 50 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 100, // 10 Hz — every point but every 5th is oversample-thinned
+  }));
+  const layers = analyzedLayers(track);
+  const clean = layers.find((l) => l.label === "clean");
+  assert.equal(clean.lines.length, 1, "oversample thinning stays one continuous run, not many");
+  assert.ok(clean.lines[0].length >= 10); // holds every surviving (non-oversample-dropped) point
+});
+
 test("analyzedLayers: clean track line + per-reason drop layers, unified red circles", () => {
   const mx = Math.cos((36 * Math.PI) / 180) * 111320;
   const step = 5 / mx; // ~5 m/s eastward

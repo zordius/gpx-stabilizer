@@ -3,7 +3,7 @@
 // plots the raw points in one layer; `analyzedLayers` runs the pipeline and splits the result into
 // a clean track plus per-reason drop markers.
 
-import { analyze } from "./analyze.js";
+import { analyze, isQualityDropped } from "./analyze.js";
 import { toSvg, writeHtml } from "./html.js";
 import { project } from "./measure.js";
 
@@ -127,20 +127,27 @@ export function analyzedLayers(points, opts = {}) {
     opacity: 0.6,
     points: out.filter((p) => p.hdop != null && p.hdop >= lo && p.hdop < hi).map(flipY),
   });
-  // default `斷開`: cut the clean line at every dropped point — accumulate kept points into a run,
-  // and close the run whenever a drop interrupts it, so no line is drawn across a removed point.
+  // default `斷開`: cut the clean line at every QUALITY-dropped point — accumulate kept points
+  // into a run, and close the run whenever a real gap interrupts it, so no line is drawn across a
+  // removed point. A POLICY-only drop (oversample/noTime) is not a real gap — it's a thinned-out
+  // duplicate of essentially the same trajectory — so it's skipped rather than breaking the run;
+  // without this, a source with a high native sample rate (e.g. a Hero10's raw ~10 Hz GPS5) has an
+  // oversample-dropped point between nearly every survivor, shattering the clean line into
+  // one-point runs (each drawn as a lone `M`, invisible — see docs/gpmf-sensors.md's badspan
+  // dilution finding for the same-shaped bug in analyze.js's glueBadSpans, 2026-07-05).
   // opts.breakLine(out) can override with richer cut rules (time/distance gaps); it receives the
   // full ordered point list (drops included) and returns the runs of points to draw.
   const splitAtDrops = (pts) => {
     const runs = [];
     let cur = [];
     for (const p of pts) {
-      if (p.dropReason) {
+      if (!p.dropReason) {
+        cur.push(p);
+      } else if (isQualityDropped(p)) {
         if (cur.length) runs.push(cur);
         cur = [];
-      } else {
-        cur.push(p);
       }
+      // else: policy-only drop — skip the point, but don't break the run
     }
     if (cur.length) runs.push(cur);
     return runs;

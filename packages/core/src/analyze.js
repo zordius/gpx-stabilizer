@@ -63,11 +63,13 @@ export function analyze(points, opts = {}) {
 }
 
 /** Drop reasons that are deliberate policy/structure, NOT quality problems — excluded from the
- * bad-span density (e.g. oversample is downsampling; it would mark dense-but-good regions as bad). */
+ * bad-span density (e.g. oversample is downsampling; it would mark dense-but-good regions as bad),
+ * and from view.js's line-break decision (a policy drop is not a real gap in the track). */
 const POLICY_DROPS = new Set(["oversample", "noTime", "badspan"]);
 
-/** True if the point carries a QUALITY drop (any reason that signals a bad measurement). */
-function isQualityDropped(p) {
+/** True if the point carries a QUALITY drop (any reason that signals a bad measurement).
+ * Exported for view.js — a policy-only drop (oversample/noTime) should not break the clean line. */
+export function isQualityDropped(p) {
   if (!p.dropReason) return false;
   for (const key in p.dropReason) if (!POLICY_DROPS.has(key)) return true;
   return false;
