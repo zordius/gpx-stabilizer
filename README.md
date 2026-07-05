@@ -118,7 +118,7 @@ never load whole into RAM.
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-                                  [--organize DIR] [--yes]
+                                  [--organize DIR] [--yes] [--html] [--png [--width N] [--height N]]
 ```
 
 Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
@@ -134,7 +134,11 @@ overrides the longitude-guessed local date.
 `--organize DIR` reorganizes the source videos to mirror the `.gpx` output, after every `.gpx` is
 written: `<DIR>/<group>/<session>/`, cache moved alongside, the group's `.gpx` swept in too unless
 `--out` was explicit. Always previews + asks first (including what to do with `.LRV`/`.THM`
-sidecars — default delete); `--yes` skips both prompts. Detail: [`packages/gopro/README.md`](packages/gopro/README.md).
+sidecars — default delete); `--yes` skips both prompts.
+
+`--html` / `--png` render each group's merged track through the analyzed view (clean track + drop
+markers), additive to the `.gpx` — an eval aid, no separate `gpx-stabilizer --html`/`--png` pass
+needed. Detail: [`packages/gopro/README.md`](packages/gopro/README.md).
 
 ## Library — telemetry export
 

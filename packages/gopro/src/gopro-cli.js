@@ -1,7 +1,13 @@
 #!/usr/bin/env node
 // gpx-from-gopro — extract GoPro GPS into merged GPX, one file per camera per local date.
 //   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-//                                [--organize DIR] [--yes]
+//                                [--organize DIR] [--yes] [--html] [--png [--width N] [--height N]]
+//
+// - --html / --png: alongside the merged .gpx (never instead of it), also render each group's merged
+//   track through the SAME analyzed view core's own CLI uses (clean track + drop markers) — an eval
+//   aid for eyeballing a group before/after a pipeline change, no separate `gpx-stabilizer` step
+//   needed. --html writes one <out>/gopro-view.html (one panel per group); --png writes one
+//   <out>/<group>.png per group (needs @resvg/resvg-js — see core's png.js).
 //
 // - Recurses directories for video files (mp4/mov/m4v/360); skips .LRV/.THM and ._ AppleDouble.
 // - Groups by (camera, local date): camera = the body serial (udta CAME) when known, so two
@@ -25,10 +31,10 @@
 //   folder too. Always previews the plan and asks before moving anything (--yes skips both
 //   prompts, defaulting .LRV/.THM sidecars to delete); a non-interactive stdin without --yes does
 //   nothing (never blocks waiting for input that will never come). See organize.js.
-import { existsSync, mkdirSync, readdirSync, statSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { saveGpx } from "gpx-stabilizer";
+import { analyzedSvg, saveGpx, savePng, toHtmlAnalyzedFiles } from "gpx-stabilizer";
 import { buildGroups, family, fileNumber } from "./group.js";
 import { cacheMovePlan, executeMove, findSidecars, planMove } from "./organize.js";
 import { readGoproSamples } from "./telemetry.js";
@@ -39,7 +45,7 @@ const LOCAL_TZ = -new Date().getTimezoneOffset() / 60; // hours, may be fraction
 
 // ---- args ----
 const argv = process.argv.slice(2);
-const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize"]);
+const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize", "width", "height"]);
 const inputs = [];
 const opts = {};
 for (let i = 0; i < argv.length; i++) {
@@ -53,7 +59,8 @@ for (let i = 0; i < argv.length; i++) {
 if (inputs.length === 0) {
   console.error(
     "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
-      " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes]",
+      " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes]" +
+      " [--html] [--png [--width N] [--height N]]",
   );
   process.exit(1);
 }
@@ -205,6 +212,28 @@ for (const g of groups) {
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
 for (const w of written) console.log(`  -> ${join(outDir, w)}`);
+
+// ---- --html / --png: eval visualization of each group's merged track, additive to the .gpx above ----
+// (analyzedLayers/analyzedSvg run core's noise-removal pipeline over the flattened group, same
+// "core" defaults gpx-stabilizer's own CLI uses with no --mode — so drop reasons / hdop overlays
+// are visible without a separate `gpx-stabilizer --html` pass on the merged .gpx.)
+if (opts.html || opts.png) {
+  const tracks = groups.map((g) => ({ name: g.name, points: g.segments.flat() }));
+  if (opts.html) {
+    const htmlPath = join(outDir, "gopro-view.html");
+    writeFileSync(htmlPath, toHtmlAnalyzedFiles(tracks));
+    console.log(`html -> ${htmlPath}`);
+  }
+  if (opts.png) {
+    const width = Number(opts.width ?? 1280);
+    const height = Number(opts.height ?? 720);
+    for (const t of tracks) {
+      const pngPath = join(outDir, `${t.name}.png`);
+      await savePng(analyzedSvg(t.points, { width, height }), pngPath);
+      console.log(`png -> ${pngPath}`);
+    }
+  }
+}
 
 // ---- --organize: only after every .gpx above is safely on disk ----
 async function promptLine(question) {

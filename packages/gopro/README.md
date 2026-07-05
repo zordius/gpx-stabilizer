@@ -20,7 +20,7 @@ No install needed:
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-                                  [--organize DIR] [--yes]
+                                  [--organize DIR] [--yes] [--html] [--png [--width N] [--height N]]
 ```
 
 Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
@@ -46,6 +46,16 @@ Always previews the full plan first, then asks before touching anything — incl
 found `.LRV`/`.THM` sidecar files (GoPro's per-chapter low-res preview / thumbnail) should be
 deleted (default) or moved alongside. `--yes` skips both prompts (sidecars default to deleted); a
 non-interactive stdin without `--yes` does nothing rather than hang waiting for input.
+
+### `--html` / `--png` — eval view of each merged group
+
+Additive to the `.gpx` output (never instead of it): renders each group's merged track through
+the same **analyzed** view `gpx-stabilizer`'s own CLI uses (clean track + drop markers, hdop
+overlays), so a group can be eyeballed right after extraction with no separate
+`gpx-stabilizer --html`/`--png` pass on the merged `.gpx`. `--html` writes one
+`<out>/gopro-view.html` (one scrolling panel per group); `--png` writes one
+`<out>/<group>.png` per group (`--width`/`--height`, default 1280×720; needs
+`@resvg/resvg-js` — see [`gpx-stabilizer`](../core)'s `png.js`).
 
 ## Library — telemetry export
 
