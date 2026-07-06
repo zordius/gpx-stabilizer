@@ -63,6 +63,7 @@ test("windows: net speed/displacement, wander, and paused", () => {
   assert.ok(Math.abs(w.netsp[60] - 1) < 0.05, `netsp=${w.netsp[60]}`); // 1 m/s
   assert.ok(Math.abs(w.netd150[60] - 120) < 1, `netd150=${w.netd150[60]}`); // full-track disp
   assert.ok(w.wander[60] < 0.05, "straight -> low wander");
+  assert.ok(w.straightLong[60] > 0.95, `straightLong=${w.straightLong[60]}`); // straight -> efficient
   assert.ok(w.straightShort[60] > 0.95, `straightShort=${w.straightShort[60]}`); // straight -> efficient
   assert.equal(w.paused[60], false);
   const still = new Array(n).fill(0);
@@ -87,6 +88,7 @@ test("windows: net speed/displacement, wander, and paused", () => {
     PARAMS,
   );
   assert.ok(zw.wander[60] > 0.5);
+  assert.ok(zw.straightLong[60] < 0.1, `straightLong=${zw.straightLong[60]}`); // messy in-place jitter -> inefficient
   assert.ok(zw.straightShort[60] < 0.1, `straightShort=${zw.straightShort[60]}`); // messy in-place jitter -> inefficient
 });
 

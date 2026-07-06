@@ -140,7 +140,7 @@ For each point, summarise its ±window neighbourhood. **Owns all tuning `PARAMS`
 | `hs`, `vs` | ±SW (smoothed) | horizontal / vertical speed |
 | `straight`, `steady` | ±SW | path straightness / speed steadiness |
 | `maDist` | ±SW | distance off the moving-average line (jitter) |
-| `netsp`, `netd150`, `netdShort`, `straightShort`, `wander` | ±NET_WIN / ±NETD_WIN / ±NETD_WIN_SHORT | net speed, net displacement (long + short window), net displacement / path length (short window), direction variance |
+| `netsp`, `netd150`, `netdShort`, `straightLong`, `straightShort`, `wander` | ±NET_WIN / ±NETD_WIN / ±NETD_WIN_SHORT | net speed, net displacement (long + short window), net displacement / path length (long + short window), direction variance |
 | `carve` | ±SW | S-arc swing density |
 | `paused` | derived | `netsp < NETSTAY` — the "not moving" state |
 
@@ -250,6 +250,35 @@ despite `wander`/`vs` both already reading compellingly drift-like.
   compactness alone is a weak tell over a couple of samples, but requiring 30 s here would defeat
   the short window's purpose entirely. A run the long window ALSO confirms keeps the original 30 s
   floor unchanged.
+
+**The long window had the identical blind spot — found and converged onto the same fix
+(2026-07-06).** A real, ground-truthed switchback (walked exactly once, confirmed by the user's own
+memory of the route; its point-to-point path was checked directly and has zero self-intersections —
+`gpx_eval/tangle_verify.mjs`) still tripped the long window's ORIGINAL plain `netd150 < 100` check,
+for exactly the same reason `hs`/`netdShort` was wrong at the short scale: a single clean fold nets
+little displacement over ±150 s the same way genuine wandering-in-place does — `netd150` alone can't
+tell "folded once, cleanly" from "never really went anywhere."
+
+- **Fix — `straightLong`: the same net-displacement/path-length ratio as `straightShort`, computed
+  over ±NETD_WIN (150 s) instead of ±NETD_WIN_SHORT.** Added to the SAME `windows()` block, reusing
+  `netd150`'s own window bounds and the path-length prefix sum already built for `straightShort` — no
+  new O(n) work. `isDriftLong` now checks `straightLong < DRIFT_STRAIGHT_LONG` (default 0.2, same
+  value as the short window) in place of `netd150 < 100`; `netd150` itself is unchanged (still
+  exposed on points, still `straightLong`'s numerator).
+- **Can't just drop the long window and use only `straightShort` — checked, not assumed.** The two
+  windows aren't redundant even sharing one discriminant: `gpx_eval/onewindow_check.mjs` found the
+  long window catching 1,864 real points on one corpus file, of which 78 % (1,453) `straightShort`
+  never dipped below 0.2 for at all — a person can be genuinely stuck in one small area for minutes
+  while any given 15 s slice of that time looks like plausible local movement; only the wider window
+  reveals they never actually left. Symmetric to why the short window exists at all (a real short
+  stay gets diluted away by real motion in the long window) — each scale catches a real pattern the
+  other structurally cannot see.
+- **Same trade-off shape as the short window, not a tuning coincidence:** restricted to points where
+  `flat(k)` holds, the switchback's own reachable `straightLong` floor (0.207) sits right at the
+  0.2 line — one confirmed real case on each side of the exact same cutoff, at both window scales,
+  from two unrelated investigations. Reinforces that 0.2 is a deliberate, documented choice (drop a
+  weaker-evidence catch, keep a confirmed false positive out), not a number discovered by hunting for
+  a gap in the data — there isn't one, at either scale.
 
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 

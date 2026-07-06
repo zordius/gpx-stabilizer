@@ -81,8 +81,9 @@ function sDelta(x, y, shortHw, longHw) {
  * bundle for compute modules and assembly.
  *
  * Descriptors: hs, vs (smoothed speed); straight, steady (local shape); maDist (jitter); netsp,
- * netd150, netdShort, straightShort, wander (time-windowed); carve (S-arc density); paused. `cu`
- * is the cumulative-unit-vector scan the windows block differences (exposed for modules).
+ * netd150, netdShort, straightLong, straightShort, wander (time-windowed); carve (S-arc density);
+ * paused. `cu` is the cumulative-unit-vector scan the windows block differences (exposed for
+ * modules).
  *
  * @param {ReturnType<import("./measure.js").measure>} m  point bundle (x, y, el, t, dt, planarStep)
  * @param {Partial<typeof PARAMS>} [opts]
@@ -93,7 +94,7 @@ export function profile(m, opts = {}) {
   const { hs, vs } = speeds(planarStep, dt, el, g); //           block 3
   const { straight, steady } = localShape(x, y, hs, g); //       block 4
   const { maDist, cu } = jitter(x, y, el, g); //                 block 5
-  const { netsp, netd150, netdShort, straightShort, wander, paused } = windows(
+  const { netsp, netd150, netdShort, straightLong, straightShort, wander, paused } = windows(
     x,
     y,
     t,
@@ -114,6 +115,7 @@ export function profile(m, opts = {}) {
     netsp,
     netd150,
     netdShort,
+    straightLong,
     straightShort,
     wander,
     paused,
@@ -194,29 +196,44 @@ export function jitter(x, y, el, g) {
 
 /**
  * Block 6 — time-windowed net speed (+/-NET_WIN), wander (circular variance of `cu` over the same
- * window), net displacement at two scales (+/-NETD_WIN, +/-NETD_WIN_SHORT), `straightShort` (net
- * displacement / path length over the SAME short window), and the `paused` flag.
+ * window), net displacement at two scales (+/-NETD_WIN, +/-NETD_WIN_SHORT), `straightLong`/
+ * `straightShort` (net displacement / path length over each of those same two windows), and the
+ * `paused` flag.
  *
- * The short-window net displacement exists purely to catch a compact stay on a recording shorter
- * than (or not much longer than) NETD_WIN, where the long window clamps to the whole clip and
- * dilutes with real motion outside the stay — same underlying "did the receiver actually go
- * anywhere" question as netd150, just at a scale a short clip's own length doesn't drown out.
+ * `netd150`/`netdShort` answer "how far did it net travel" at two time scales — the short one
+ * exists purely to catch a compact stay on a recording shorter than (or not much longer than)
+ * NETD_WIN, where the long window clamps to the whole clip and dilutes with real motion outside the
+ * stay.
  *
- * `straightShort` answers a DIFFERENT question at that same short scale: not "how far did it net
- * travel" but "how much of the path it actually walked converted into net travel" — net
- * displacement / path length over +/-NETD_WIN_SHORT, in [0, 1]. A real (even slow, even
- * decelerating-to-a-pause) walk keeps a meaningful fraction of its short-window path length as net
- * progress; GPS noise wobbling in place inflates path length (scribbling back and forth) far more
- * than it inflates net displacement, driving this toward 0. This is what actually distinguishes a
- * "genuinely messy" line from a merely slow-but-directed one — `wander` (heading circular
- * variance) can't, because it weighs every step equally regardless of how much EXTRA distance a
- * detour/spike/wound loop cost relative to the progress it bought (found chasing a real false
- * positive: a person walking away from a chairlift, decelerating smoothly to a near-stop then
- * resuming, tripped the old hs+netdShort short-window gate for its entire ~47 s span even though it
- * was real, if slow, directed motion — `gpx_eval/straightshort_scan.mjs` against both that case and
- * the original true-positive drift sample (GX065132) found a clean gap in the data with NO
- * segment's minimum landing between 0.13 and 0.24, i.e. this is a naturally bimodal signal, not a
- * hand-tuned cutoff).
+ * `straightLong`/`straightShort` answer a DIFFERENT question at those same two scales: not "how far
+ * did it net travel" but "how much of the path it actually walked converted into net travel" — net
+ * displacement / path length, in [0, 1]. A real (even slow, even decelerating-to-a-pause, even
+ * looping back on itself once) walk keeps a meaningful fraction of its path length as net progress;
+ * GPS noise wobbling in place inflates path length (scribbling back and forth) far more than it
+ * inflates net displacement, driving this toward 0. This is what actually distinguishes a
+ * "genuinely messy" line from a merely slow-but-directed (or single-fold) one — `wander` (heading
+ * circular variance) can't, because it weighs every step equally regardless of how much EXTRA
+ * distance a detour/spike/wound loop cost relative to the progress it bought.
+ *
+ * Found chasing two real false positives at each scale: at the short scale, a person walking away
+ * from a chairlift, decelerating smoothly to a near-stop then resuming, tripped the old
+ * hs+netdShort short-window gate for its entire ~47 s span even though it was real, if slow,
+ * directed motion. At the long scale, a person's one clean, non-self-intersecting U-turn (a real
+ * switchback, ground-truthed as walked exactly once) tripped the OLD plain `netd150 < 100`
+ * long-window check, because a single fold nets little displacement over +/-150 s same as genuine
+ * wandering-in-place does — `netd150` alone can't tell "folded once, cleanly" from "never really
+ * went anywhere," the same blind spot `straightShort` was built to close at the short scale.
+ *
+ * Neither window is redundant with the other even though both now use the SAME discriminant
+ * (path-efficiency ratio): a short real stay gets diluted away by surrounding motion in the long
+ * window (needs the short window), while a long, low-grade wander can look locally fine in any
+ * given 15 s slice yet never leave the area over minutes (needs the long window) —
+ * `gpx_eval/onewindow_check.mjs` found the long window catching 1,864 real points on one corpus
+ * file, 78 % of which the short window's own `straightShort` never dips below 0.2 for at all.
+ * Not a hand-tuned cutoff either way: `gpx_eval/straightshort_scan2.mjs`/`straightlong_scan.mjs`
+ * found both real false positives sit close enough to their respective true positives' own
+ * thresholds (0.289 vs. 0.298 short-scale; 0.207 long-scale) that 0.2 is a deliberate, documented
+ * trade-off, not a discovered natural gap.
  */
 export function windows(x, y, t, cu, planarStep, g) {
   const n = x.length;
@@ -224,6 +241,7 @@ export function windows(x, y, t, cu, planarStep, g) {
   const wander = new Array(n).fill(0);
   const netd150 = new Array(n).fill(9e9);
   const netdShort = new Array(n).fill(9e9);
+  const straightLong = new Array(n).fill(1);
   const straightShort = new Array(n).fill(1);
   const cpath = new Array(n).fill(0);
   for (let i = 1; i < n; i++) cpath[i] = cpath[i - 1] + planarStep[i - 1];
@@ -240,14 +258,14 @@ export function windows(x, y, t, cu, planarStep, g) {
     const l2 = searchLeft(t, t[i] - g.NETD_WIN);
     const h2 = Math.min(n - 1, searchLeft(t, t[i] + g.NETD_WIN));
     netd150[i] = Math.hypot(x[h2] - x[l2], y[h2] - y[l2]);
+    straightLong[i] = netd150[i] / Math.max(cpath[h2] - cpath[l2], 1e-9);
     const l3 = searchLeft(t, t[i] - g.NETD_WIN_SHORT);
     const h3 = Math.min(n - 1, searchLeft(t, t[i] + g.NETD_WIN_SHORT));
     netdShort[i] = Math.hypot(x[h3] - x[l3], y[h3] - y[l3]);
-    const pathLen = cpath[h3] - cpath[l3];
-    straightShort[i] = netdShort[i] / Math.max(pathLen, 1e-9);
+    straightShort[i] = netdShort[i] / Math.max(cpath[h3] - cpath[l3], 1e-9);
   }
   const paused = netsp.map((v) => v < g.NETSTAY);
-  return { netsp, netd150, netdShort, straightShort, wander, paused };
+  return { netsp, netd150, netdShort, straightLong, straightShort, wander, paused };
 }
 
 /** Block 7 — local S-arc density (carve): signed swing crossings per 100 m over +/-SW. */

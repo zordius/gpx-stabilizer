@@ -47,7 +47,18 @@ one place, not two).
   long stays in the same corpus, but **no longer catches the original `GX065132.MP4` sample**
   (already marked weaker/PARTIAL evidence elsewhere) — its own reachable `straightShort` floor
   turned out to overlap the false positive's, a real ambiguity at this timescale, not a tuning
-  miss. Detail + regression tests: [`SPEC.md`](SPEC.md) ("drift's window scale mismatch").
+  miss.
+- **The long window had the identical blind spot (2026-07-06, same-day follow-up)** — a real,
+  ground-truthed switchback (walked exactly once; checked directly, zero self-intersections) still
+  tripped the long window's original plain `netd150 < 100` check, for the same reason: a single
+  clean fold nets little displacement over ±150 s the same way genuine wandering-in-place does.
+  Converged the long window onto the same fix — `straightLong` (the same net-displacement/path-length
+  ratio, just over ±150 s instead of ±15 s), reusing the path-length prefix sum already built for
+  `straightShort` (no new O(n) work). Checked, not assumed, whether the short window alone could
+  cover both scales: it can't — one corpus file had the long window catching 1,864 real points, 78 %
+  of which the short window's own `straightShort` never dipped below 0.2 for at all (a person can be
+  stuck in one small area for minutes while any given 15 s slice looks like real local movement).
+  Detail + regression tests: [`SPEC.md`](SPEC.md) ("drift's window scale mismatch").
 
 ## Next (detail in SPEC)
 
