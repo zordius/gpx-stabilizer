@@ -102,6 +102,23 @@ one place, not two).
   [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into the pipeline needs
   the proposed `finalize` phase (SPEC module-model section).
 
+## Known limitation (not addressed — deliberately skipped, 2026-07-06)
+
+- **A `drift` run isn't always ONE spatially-compact stay.** Checked a real case
+  (`20260211-GOPR-c8713177.gpx`, 03:47:29–03:50:30, 147 points): its "slow" sub-portion spans
+  61.86 x 30.24 m (max 49.49 m from centroid) — not remotely 1×1 m — and splits into at least two
+  spatially distinct clusters (~18 m radius, and a separate one 49 m away) bridged by the
+  `DRIFT_GAP` (60 s) merge, not one clean stay. Root cause: `straightLong`/`netd150` are WINDOWED
+  signals (±150 s) — a point can individually qualify as drift because its window is dominated by a
+  *nearby-in-time* stay, even while that point itself is mid a real, clean approach/departure
+  walk (confirmed: the fast-deceleration head of this same run, hs 0.95→2.25, sits 20–76 m from the
+  stay's own centroid and is NOT part of the run's 29 self-intersections at all — see
+  `gpx_eval/seg3_spatial_check.mjs`). No dedicated spatial-clustering "stay" check exists today;
+  `drift` conflates "GPS unreliable" with "this is a stay" via the windowed path-efficiency proxy.
+  A real fix would re-cluster a candidate run by actual spatial spread (radius from centroid / max
+  pairwise distance) rather than trusting the temporal window's reach — deliberately NOT
+  implemented; recorded here so a future pass doesn't have to re-derive it.
+
 ## Open validation items (unique to here — not tracked in SPEC)
 
 - **GUMI session split — RESOLVED (2026-07-03): the GUMI assumption was FALSE, split
