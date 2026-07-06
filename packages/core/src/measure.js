@@ -64,7 +64,7 @@ function interpEle(raw) {
  * @param {number[]} valid  indices of the trusted/timed points
  */
 export function measure(points, valid) {
-  const { xAll, yAll, x, y, el, t } = project(points, valid); // block 1
+  const { xAll, yAll, x, y, el, t, lat0, lon0 } = project(points, valid); // block 1
   const { dt, planarStep } = deltas(x, y, t); //                block 2
   const { velocity, acceleration } = kinematics(x, y, dt); //   block 3 — PLANAR (x/y only)
   const vz = verticalRate(el, dt); //                           block 3b — the separate vertical axis
@@ -78,6 +78,8 @@ export function measure(points, valid) {
     y,
     el,
     t,
+    lat0, // projection centre — lets a consumer invert x/y back to lat/lon (e.g. the HTML viewer's
+    lon0, // click-to-show-coordinates feature)
     dt: padLast(dt),
     planarStep: padLast(planarStep),
     velocity: padOrder(velocity),
@@ -137,7 +139,7 @@ export function project(points, valid) {
   const y = valid.map((i) => yAll[i]);
   const el = interpEle(valid.map((i) => points[i].ele));
   const t = valid.map((i) => points[i].time / 1000);
-  return { xAll, yAll, x, y, el, t };
+  return { xAll, yAll, x, y, el, t, lat0, lon0 };
 }
 
 /** Block 2 — per-step planar distance and time delta (dt floored at 1 s against duplicate stamps). */

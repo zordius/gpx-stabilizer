@@ -10,16 +10,21 @@ import { project } from "./measure.js";
 /**
  * Enrich each point with SVG `x`/`y` (local meters, north up) while keeping its original fields.
  * Reuses measure.js's projection over all points (none excluded), then flips y so north points up
- * in SVG coordinates. Returns new point objects; inputs are not mutated.
+ * in SVG coordinates. Returns new point objects; inputs are not mutated. The returned array also
+ * carries `.origin` (`{ lat0, lon0 }`, the projection centre) — an extra property, not an element —
+ * so a caller can pass it on to `toSvg` (embedded as `data-lat0`/`data-lon0` for the viewer's
+ * click-to-show-coordinates feature) without changing the array's shape for existing consumers.
  * @param {Array<{ lat: number, lon: number }>} points
  * @returns {Array<object>} the same points, each with `x`/`y` added
  */
 export function withXY(points) {
-  const { xAll, yAll } = project(
+  const { xAll, yAll, lat0, lon0 } = project(
     points,
     points.map((_, i) => i),
   );
-  return points.map((p, i) => ({ ...p, x: xAll[i], y: -yAll[i] })); // SVG y-down → north up
+  const out = points.map((p, i) => ({ ...p, x: xAll[i], y: -yAll[i] })); // SVG y-down → north up
+  out.origin = { lat0, lon0 };
+  return out;
 }
 
 /**
@@ -44,7 +49,9 @@ export function toLayers(points, opts = {}) {
   const layer = { label: opts.label ?? "gps", color: opts.color ?? "#06c", lines };
   for (const key of ["width", "pointColor", "size", "opacity"])
     if (opts[key] != null) layer[key] = opts[key];
-  return [layer];
+  const result = [layer];
+  result.origin = xy.origin; // see withXY's doc — carried through for toHtml/toHtmlFiles
+  return result;
 }
 
 /**
@@ -78,7 +85,8 @@ export function segmentLabels(lines, opts = {}) {
 /** Convenience: render points straight to one HTML document (a single panel, a single layer). */
 export function toHtml(points, opts = {}) {
   const title = opts.title ?? "GPX Stabilizer Viewer";
-  return writeHtml([{ layers: toLayers(points, opts) }], { title });
+  const layers = toLayers(points, opts);
+  return writeHtml([{ layers, opts: { origin: layers.origin } }], { title });
 }
 
 /** analyze stores raw (south-down) y; flip it for north-up SVG, keeping every field. */
@@ -209,6 +217,7 @@ export function analyzedLayers(points, opts = {}) {
   ];
   // opts.labels → a black head/tail label per clean segment, on top (opts.labelSize sets font size)
   if (opts.labels) layers.push(segmentLabels(cleanLayer.lines, { fontSize: opts.labelSize }));
+  layers.origin = out.origin; // see withXY's doc — carried through for toHtmlAnalyzedFiles/analyzedSvg
   return layers;
 }
 
@@ -257,7 +266,10 @@ function summarize(files) {
  * @param {{ title?: string, heading?: string, label?: string, color?: string, width?: number, pointColor?: string, size?: number, opacity?: number }} [opts]
  */
 export function toHtmlFiles(files, opts = {}) {
-  const panels = files.map((f) => ({ title: f.name, layers: toLayers(f.points, opts) }));
+  const panels = files.map((f) => {
+    const layers = toLayers(f.points, opts);
+    return { title: f.name, layers, opts: { origin: layers.origin } };
+  });
   return writeHtml(panels, {
     title: opts.title ?? "GPX Stabilizer",
     heading: opts.heading ?? "GPX Stabilizer",
@@ -272,7 +284,10 @@ export function toHtmlFiles(files, opts = {}) {
  * @param {Parameters<typeof analyze>[1] & { title?: string, heading?: string }} [opts]
  */
 export function toHtmlAnalyzedFiles(files, opts = {}) {
-  const panels = files.map((f) => ({ title: f.name, layers: analyzedLayers(f.points, opts) }));
+  const panels = files.map((f) => {
+    const layers = analyzedLayers(f.points, opts);
+    return { title: f.name, layers, opts: { origin: layers.origin } };
+  });
   return writeHtml(panels, {
     title: opts.title ?? "GPX Stabilizer",
     heading: opts.heading ?? "GPX Stabilizer — analyzed",
@@ -288,9 +303,11 @@ export function toHtmlAnalyzedFiles(files, opts = {}) {
  * @param {Parameters<typeof analyze>[1] & { width?: number, height?: number }} [opts]
  */
 export function analyzedSvg(points, opts = {}) {
-  return toSvg(analyzedLayers(points, opts), {
+  const layers = analyzedLayers(points, opts);
+  return toSvg(layers, {
     standalone: true,
     width: opts.width ?? 1280,
     height: opts.height ?? 720,
+    origin: layers.origin,
   });
 }

@@ -79,7 +79,7 @@ function countPoints(layer) {
  * `width`/`height` and an internal `<style>` so markers/lines keep a constant stroke under the fit.
  *
  * @param {Layer[]} layers  points carry `x`, `y` (and `text` for labels)
- * @param {{ padding?: number, background?: string, standalone?: boolean, width?: number, height?: number }} [opts]
+ * @param {{ padding?: number, background?: string, standalone?: boolean, width?: number, height?: number, origin?: { lat0: number, lon0: number } }} [opts]
  * @returns {string}
  */
 export function toSvg(layers = [], opts = {}) {
@@ -138,7 +138,13 @@ export function toSvg(layers = [], opts = {}) {
     : ` style="--ar:${ar}"`;
   // font-family/weight set once on the root <svg> so every <text> (labels) inherits one style —
   // sans-serif to match the HTML legend, thinnest weight (degrades to nearest available).
-  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" font-family="sans-serif" font-weight="100"${sizeAttr}>`;
+  // `opts.origin` (the projection centre, `{ lat0, lon0 }`) rides as data attributes so the viewer's
+  // click-to-show-coordinates script can invert a clicked x/y back to lat/lon — harmless (ignored)
+  // in standalone/PNG mode, where nothing reads them.
+  const originAttr = opts.origin
+    ? ` data-lat0="${opts.origin.lat0}" data-lon0="${opts.origin.lon0}"`
+    : "";
+  const head = `<svg xmlns="${SVG_NS}" viewBox="${vbX} ${vbY} ${vbW} ${vbH}" preserveAspectRatio="xMidYMid meet" font-family="sans-serif" font-weight="100"${sizeAttr}${originAttr}>`;
 
   const out = [head];
   // standalone has no host CSS, so carry the non-scaling-stroke rule inline (constant marker/line px)
@@ -371,14 +377,39 @@ ${body}
 //  - not the # anchor          -> click its title (sets # and scrolls it into view)
 //  - the # anchor, out of view  -> scrollIntoView (# unchanged, so a title click wouldn't move it)
 //  - the # anchor, in viewport  -> zoom to the clicked point at 1 m = 5 px, then DRAG to pan
+//  - already zoomed, plain click (no drag) -> show the clicked point's lat/lon bottom-left
 // Zoom out with a RIGHT-CLICK or the bottom-right "zoom out" button. One panel zoomed; legend/header ignored.
 let zoomed = null;
 let drag = null;
+let lastDragMoved = false; // did the most recent pointerdown->up actually pan (vs. a plain click)?
+// Both controls are grid-area:1/1 siblings of the zoomed panel's own header/svg (moved into that
+// section on zoom-in, below) and use sticky positioning, not fixed — so they stay pinned to their
+// corner ONLY while that panel is on screen, and scroll away with it once the page scrolls past.
 const btn = document.createElement("button");
 btn.textContent = "zoom out";
 btn.style.cssText =
-  "position:fixed;right:12px;bottom:12px;z-index:9;display:none;padding:6px 12px;cursor:pointer;font:14px sans-serif";
-document.body.appendChild(btn);
+  "grid-area:1/1;align-self:end;justify-self:end;position:sticky;bottom:12px;right:12px;z-index:9;display:none;padding:6px 12px;cursor:pointer;font:14px sans-serif";
+const coordBox = document.createElement("div");
+// Deliberately clickable/selectable (not pointer-events:none): a click here must do nothing (it
+// isn't inside a panel's svg, so the pan/zoom logic below already ignores it) rather than fall
+// through to the panel underneath, and the text must be selectable so the coordinates can be copied.
+coordBox.style.cssText =
+  "grid-area:1/1;align-self:end;justify-self:start;position:sticky;bottom:12px;left:12px;z-index:9;display:none;padding:6px 10px;font:14px sans-serif;background:#fffc;border:1px solid #000;cursor:default;user-select:text";
+// invert a clicked SVG-space point back to lat/lon via the panel's own projection centre
+// (data-lat0/data-lon0, embedded by html.js's toSvg) — same formula as measure.js's project(),
+// run backwards: x = (lon-lon0)*mx, svgY = -(lat-lat0)*DEG_LAT_M.
+const DEG_LAT_M = 110540, DEG_LON_M = 111320;
+const showCoords = (svg, clientX, clientY) => {
+  const lat0 = Number(svg.dataset.lat0);
+  const lon0 = Number(svg.dataset.lon0);
+  if (!Number.isFinite(lat0) || !Number.isFinite(lon0)) return; // no origin embedded -> nothing to show
+  const u = new DOMPoint(clientX, clientY).matrixTransform(svg.getScreenCTM().inverse());
+  const mx = Math.cos((lat0 * Math.PI) / 180) * DEG_LON_M;
+  const lat = lat0 - u.y / DEG_LAT_M;
+  const lon = lon0 + u.x / mx;
+  coordBox.textContent = lat.toFixed(6) + ", " + lon.toFixed(6);
+  coordBox.style.display = "block";
+};
 const restore = () => {
   if (zoomed) {
     zoomed.setAttribute("viewBox", zoomed.dataset.orig);
@@ -386,15 +417,22 @@ const restore = () => {
   }
   zoomed = null;
   btn.style.display = "none";
+  coordBox.style.display = "none";
 };
 document.body.addEventListener("pointerdown", (e) => {
   if (!zoomed || e.target.closest("section > svg") !== zoomed) return; // drag only the zoomed panel
-  drag = { x: e.clientX, y: e.clientY, vb: zoomed.getAttribute("viewBox").split(" ").map(Number) };
+  drag = {
+    x: e.clientX,
+    y: e.clientY,
+    moved: false,
+    vb: zoomed.getAttribute("viewBox").split(" ").map(Number),
+  };
   zoomed.style.cursor = "grabbing";
   zoomed.setPointerCapture?.(e.pointerId);
 });
 document.body.addEventListener("pointermove", (e) => {
   if (!drag) return;
+  if (Math.abs(e.clientX - drag.x) > 3 || Math.abs(e.clientY - drag.y) > 3) drag.moved = true;
   const r = zoomed.getBoundingClientRect();
   const [vx, vy, vw, vh] = drag.vb;
   // preserveAspectRatio="meet" scales the viewBox UNIFORMLY (the smaller-axis fit), so one screen px
@@ -407,6 +445,7 @@ document.body.addEventListener("pointermove", (e) => {
 });
 document.body.addEventListener("pointerup", () => {
   if (drag) {
+    lastDragMoved = drag.moved;
     drag = null;
     if (zoomed) zoomed.style.cursor = "grab";
   }
@@ -427,7 +466,11 @@ document.body.addEventListener("contextmenu", (e) => {
 document.body.addEventListener("click", (e) => {
   if (e.target === btn) return restore();
   const svg = e.target.closest("section > svg");
-  if (!svg || svg === zoomed) return; // already zoomed -> drag pans, click does nothing
+  if (svg && svg === zoomed) {
+    if (!lastDragMoved) showCoords(svg, e.clientX, e.clientY); // plain click (no pan) -> show lat/lon
+    return;
+  }
+  if (!svg) return;
   if (zoomed) restore(); // clicking another panel un-zooms the previous one
   const section = svg.closest("section");
   const a = section && section.querySelector("h2 a");
@@ -445,6 +488,8 @@ document.body.addEventListener("click", (e) => {
   svg.setAttribute("viewBox", (u.x - w / 2) + " " + (u.y - h / 2) + " " + w + " " + h);
   svg.style.cursor = "grab";
   zoomed = svg;
+  section.appendChild(btn); // move into THIS panel's grid so sticky is scoped to it, not the viewport
+  section.appendChild(coordBox);
   btn.style.display = "block";
 });
 </script>

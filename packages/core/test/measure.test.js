@@ -13,7 +13,7 @@ test("project: valid-only centre, projects all points, east=+x north=+y", () => 
     { lat: 36.001, lon: 138.001, ele: 110, time: 1000 },
     { lat: 80, lon: 200, ele: 0, time: null }, // excluded — must not move the centre
   ];
-  const { xAll, x, y, el, t } = project(points, [0, 1]);
+  const { xAll, x, y, el, t, lat0, lon0 } = project(points, [0, 1]);
   assert.equal(xAll.length, 3); //                every point projected
   assert.equal(x.length, 2); //                   sub-sequence is valid-only
   assert.ok(x[1] > x[0], "more east -> larger x");
@@ -21,6 +21,10 @@ test("project: valid-only centre, projects all points, east=+x north=+y", () => 
   assert.ok(Math.abs(x[0]) < 100, "centre ignores the excluded point");
   assert.deepEqual(t, [0, 1]); //                 ms -> s
   assert.deepEqual(el, [100, 110]); //            elevation carried through
+  // lat0/lon0 (the projection centre) let a consumer invert x/y back to lat/lon (the HTML viewer's
+  // click-to-show-coordinates feature) — mean of the valid points only, ignoring the excluded one
+  assert.ok(Math.abs(lat0 - 36.0005) < 1e-9);
+  assert.ok(Math.abs(lon0 - 138.0005) < 1e-9);
 });
 
 test("deltas: planar step distance and dt floored at 1 second", () => {
@@ -73,6 +77,7 @@ test("measure: projects all points and takes adjacent deltas over the valid sub-
   const m = measure(points, [...points.keys()]);
   assert.equal(m.xAll.length, 121); // every point projected
   assert.equal(m.n, 121);
+  assert.equal(m.lat0, 36); // projection centre passed through from project()
   // per-step arrays are padded to per-point length n (the last point reuses the previous step)
   assert.equal(m.planarStep.length, 121);
   assert.equal(m.dt.length, 121);

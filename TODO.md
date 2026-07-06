@@ -25,6 +25,9 @@ one place, not two).
   lift/descent/flat **segmentation** (`mods/segment.js`, an opt-in `finalize`-phase module,
   2026-07-04). Consumer-accepted by movie-layers `provider-gopro`. Status + evals in
   [`SPEC.md`](SPEC.md) ("Track smoothing" / "Track resampling" / "Segment / lift segmentation").
+- **HTML viewer: click-to-show-coordinates (2026-07-06)** — zoomed into a panel, a plain click
+  shows the clicked point's lat/lon bottom-left. Detail: [`SPEC.md`](SPEC.md) ("Viewer
+  (`view.js` + `html.js`)").
 - **Two policy-vs-quality-drop bugs fixed (2026-07-05)** — on a high-native-sample-rate source
   (e.g. Hero10's raw ~10 Hz GPS5, `oversample`-thinned to ~2 Hz survivors), a policy-dropped point
   sits between nearly every survivor. Two consumers wrongly treated it as a real gap:

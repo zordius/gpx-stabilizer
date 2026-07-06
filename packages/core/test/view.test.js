@@ -17,6 +17,13 @@ test("withXY: adds x/y to each point and keeps the original fields", () => {
   assert.notEqual(out[0], pts[0]); // not mutated
 });
 
+test("withXY: .origin carries the projection centre (mean lat/lon), not an array element", () => {
+  const out = withXY(pts);
+  assert.equal(out.length, 3); // origin doesn't show up when iterating/indexing
+  assert.ok(Math.abs(out.origin.lat0 - (0 + 1 + 0.5) / 3) < 1e-9);
+  assert.ok(Math.abs(out.origin.lon0 - (0 + 1 + 2) / 3) < 1e-9);
+});
+
 test("toLayers: one track becomes a single line segment holding every point", () => {
   const layers = toLayers(pts);
   assert.equal(layers.length, 1);
@@ -24,6 +31,7 @@ test("toLayers: one track becomes a single line segment holding every point", ()
   assert.equal(layers[0].lines.length, 1); // one segment...
   assert.equal(layers[0].lines[0].length, 3); // ...holding every point
   assert.equal(typeof layers[0].lines[0][0].x, "number"); // points carry x/y
+  assert.ok(layers.origin); // carried through from withXY for toHtml/toHtmlFiles
 });
 
 test("toLayers: several tracks become separate segments sharing ONE projection centre", () => {
@@ -51,6 +59,17 @@ test("toHtml: produces an HTML document with the gps layer (markers by default)"
   assert.match(html, /^<!doctype html>/);
   assert.match(html, /<g id="layer-gps"/);
   assert.match(html, /<path [^>]*d="M/); // no line width -> the track renders as markers
+  assert.match(html, /data-lat0="[\d.]+" data-lon0="[\d.]+"/); // click-to-show-coordinates origin
+});
+
+test("analyzedLayers: .origin carries the projection centre through from analyze()", () => {
+  const track = [
+    { lat: 36, lon: 138, ele: 1000, time: 0 },
+    { lat: 36.001, lon: 138.001, ele: 1000, time: 1000 },
+  ];
+  const layers = analyzedLayers(track);
+  assert.ok(layers.origin);
+  assert.ok(Math.abs(layers.origin.lat0 - 36.0005) < 1e-6);
 });
 
 test("analyzedLayers: a policy drop (oversample) doesn't break the clean line", () => {

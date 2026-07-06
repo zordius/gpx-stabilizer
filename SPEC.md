@@ -415,6 +415,15 @@ airborne group's lower `hspeed` when adding them. Note "離地" is **not directl
   variable; CSS sizes it to the largest box that fits the real viewport (`vw`/`vh`), so the
   zoom-to-fit is computed in CSS, not baked in. Marker/line pixel size stays constant under zoom via
   `non-scaling-stroke`.
+- **Click-to-show-coordinates (2026-07-06).** Zoomed into a panel, a plain click (not a drag-pan)
+  shows the clicked point's lat/lon bottom-left. Built from a real need this session: pinpointing
+  which real-world spot a drop cluster corresponds to previously meant reverse-engineering pixel
+  position → SVG viewBox math by hand (error-prone — got the wrong segment more than once). Each
+  panel's `<svg>` carries `data-lat0`/`data-lon0` (the projection centre — `measure.js`'s `project()`
+  already computed it, now threaded through `withXY`/`toLayers`/`analyzedLayers`/`analyze()` as an
+  extra `.origin` property on the returned array, not a new element, so no existing consumer's
+  shape changes) — enough for the inline script to invert a clicked SVG x/y straight back to lat/lon
+  (the same formula as `project()`, run backwards), no per-point data needed.
 
 ---
 

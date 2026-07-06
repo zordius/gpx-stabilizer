@@ -27,6 +27,15 @@ test("svg exposes the bbox aspect ratio as a --ar CSS variable (CSS sizes the el
   assert.match(svg, /style="--ar:2"/);
 });
 
+test("opts.origin embeds data-lat0/data-lon0 on the root svg; omitted when not given", () => {
+  const svg = toSvg([{ label: "t", lines: [pts([0, 0], [1, 1])] }], {
+    origin: { lat0: 36.79, lon0: 138.78 },
+  });
+  assert.match(svg, /<svg [^>]*data-lat0="36\.79"[^>]*data-lon0="138\.78"/);
+  const noOrigin = toSvg([{ label: "t", lines: [pts([0, 0], [1, 1])] }]);
+  assert.doesNotMatch(noOrigin, /data-lat0/);
+});
+
 test("each layer becomes a labelled <g> with an id", () => {
   const svg = toSvg([
     { label: "track", lines: [pts([0, 0], [1, 1])] },
@@ -205,6 +214,27 @@ test("writeHtml honours per-panel toSvg opts", () => {
     },
   ]);
   assert.match(html, /<rect x="0" y="0" width="1" height="1" fill="#abc"\/>/);
+});
+
+test("writeHtml: each panel's own opts.origin lands on its own svg (multi-file, distinct centres)", () => {
+  const html = writeHtml([
+    {
+      layers: [{ label: "t", lines: [pts([0, 0], [1, 1])] }],
+      opts: { origin: { lat0: 1, lon0: 2 } },
+    },
+    {
+      layers: [{ label: "t", lines: [pts([0, 0], [1, 1])] }],
+      opts: { origin: { lat0: 3, lon0: 4 } },
+    },
+  ]);
+  assert.match(html, /data-lat0="1" data-lon0="2"/);
+  assert.match(html, /data-lat0="3" data-lon0="4"/);
+});
+
+test("writeHtml embeds the click-to-show-coordinates script (lat0/lon0 inversion)", () => {
+  const html = writeHtml([]);
+  assert.match(html, /showCoords/);
+  assert.match(html, /dataset\.lat0/);
 });
 
 test("writeHtml sets and escapes the document title", () => {

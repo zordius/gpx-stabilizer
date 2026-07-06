@@ -59,6 +59,10 @@ export function analyze(points, opts = {}) {
   // points (every dropReason/signal) AND each other's mutations — the home for reconciliation,
   // reconstruction, and segmentation. No built-ins use it, so this is a no-op for base stabilize.
   for (const mod of all) if (mod.finalize) mod.finalize(result, ctx);
+  // extra property (not an element) — the projection centre, so view.js can pass it on to the HTML
+  // viewer's click-to-show-coordinates feature without changing this array's shape for consumers
+  // that just iterate/index it.
+  result.origin = { lat0: ctx.lat0, lon0: ctx.lon0 };
   return result;
 }
 
