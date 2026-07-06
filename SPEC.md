@@ -140,7 +140,7 @@ For each point, summarise its ±window neighbourhood. **Owns all tuning `PARAMS`
 | `hs`, `vs` | ±SW (smoothed) | horizontal / vertical speed |
 | `straight`, `steady` | ±SW | path straightness / speed steadiness |
 | `maDist` | ±SW | distance off the moving-average line (jitter) |
-| `netsp`, `netd150`, `netdShort`, `wander` | ±NET_WIN / ±NETD_WIN / ±NETD_WIN_SHORT | net speed, net displacement (long + short window), direction variance |
+| `netsp`, `netd150`, `netdShort`, `straightShort`, `wander` | ±NET_WIN / ±NETD_WIN / ±NETD_WIN_SHORT | net speed, net displacement (long + short window), net displacement / path length (short window), direction variance |
 | `carve` | ±SW | S-arc swing density |
 | `paused` | derived | `netsp < NETSTAY` — the "not moving" state |
 
@@ -204,31 +204,52 @@ general lesson: **a policy drop is not a real gap — every point-stream consume
 "is this point missing/absent" needs to ask *why*, not just *whether*.** Grep `dropReason` (or
 `p.dropReason`) for a truthy-only check before adding a new one.
 
-**`drift`'s window scale mismatch on a short clip — found + fixed (2026-07-05), same investigation.**
-`drift`'s only compactness check, `netd150` (±NETD_WIN, 150 s), clamps to the whole clip on anything
-not much longer than that — so on a 33 s clip every point's "net displacement over ±150 s" is really
-"net displacement over the whole clip," diluted by real motion far outside any actual stay. On
-`GX065132.MP4`'s tail (the same erratic, "stopped but wandering" span the policy-drop bugs above were
-found on) this undershot the 100 m cutoff by a hair (102 m) purely from a fast descent 15+ seconds
-earlier in the same clip, so `drift` never fired despite `wander`/`vs` both already reading
-compellingly drift-like.
+**`drift`'s window scale mismatch on a short clip — found, fixed, then corrected again
+(2026-07-05/06), same investigation.** `drift`'s only compactness check, `netd150` (±NETD_WIN,
+150 s), clamps to the whole clip on anything not much longer than that — so on a 33 s clip every
+point's "net displacement over ±150 s" is really "net displacement over the whole clip," diluted by
+real motion far outside any actual stay. On `GX065132.MP4`'s tail (the same erratic, "stopped but
+wandering" span the policy-drop bugs above were found on) this undershot the 100 m cutoff by a hair
+(102 m) purely from a fast descent 15+ seconds earlier in the same clip, so `drift` never fired
+despite `wander`/`vs` both already reading compellingly drift-like.
 
-- **Fix — a second, much shorter net-displacement window (`netdShort`, ±NETD_WIN_SHORT, 15 s
-  default)**, OR'd into the same `drift` check (same shape as `outlier`'s detour-OR-speed-spike):
-  same phenomenon, just not diluted by a short clip's own length. Confirmed on `GX065132.MP4`: 0 →
-  16 points glued into one 7.5 s drift segment.
-- **Caught before shipping: a short window can misread a genuinely fast, tight ski carve as
-  drift** — a few seconds of rhythmic S-turns can also show small net displacement without being
-  drift. The short-window branch is therefore gated on `hs` already being slow (< DRIFT_HS_SHORT,
-  2 m/s default) — a real carve's speed sits well above that, so it stays entirely on the original,
-  unmodified long window. Regression-tested (`drift.test.js`) with a fast/high-`hs` case that must
-  NOT be flagged.
-- **A run relying only on the short window also gets its own, much lower duration floor**
+- **First attempt (shipped, then reverted) — a second, much shorter net-displacement window
+  (`netdShort`, ±NETD_WIN_SHORT, 15 s), gated on `hs` already being slow (< 2 m/s).** Confirmed on
+  `GX065132.MP4`: 0 → 16 points glued into one 7.5 s drift segment. **Real-corpus use (2026-07-06)
+  found this floods false positives**: on a real ski-day recording, a person walking away from a
+  chairlift — decelerating smoothly to a near-stop, then resuming — tripped the gate for its entire
+  ~47 s span, because at a 30 s window scale neither part of the gate is actually restrictive (human
+  walking pace is under 2 m/s; 100 m of net displacement is not "compact" over just 30 s). Scanned
+  the whole file: 481 → 3,970 drift-dropped points (8×), spanning ~25 segments across the entire
+  recording, not an isolated case.
+- **Root cause: `hs`/`netdShort` never measured "messiness."** `wander` (heading circular variance)
+  weighs every step equally regardless of how much *extra* distance a detour/spike/loop cost
+  relative to the progress it bought, so it can't tell a real (if slow) walk from GPS noise
+  scribbling in place — both can show "low speed, high heading variance, small net displacement" at
+  this window scale.
+- **Fix — `straightShort`: net displacement / path length over the SAME ±NETD_WIN_SHORT window**
+  (added to `profile.js`'s `windows()` block, reusing the same window bounds `netdShort` already
+  computes). GPS noise while stationary inflates path length far more than net displacement (ratio
+  → 0); a real walk — even slow, even pausing — keeps a meaningful fraction of its path length as
+  net progress (ratio stays well above 0). Replaces the `hs`/`netdShort` gate entirely — no separate
+  speed gate needed, since a real fast carve's `straightShort` never approaches the cutoff either
+  (empirically >0.8 throughout, `gpx_eval/straightshort_scan.mjs`).
+- **Threshold trade-off, resolved by explicit choice, not tuning:** `isDriftShort` also still
+  requires the pre-existing `flat(k)` gate (`wander > 0.5 && |vs| < 0.2`) — and restricted to points
+  where THAT holds too, the original `GX065132.MP4` sample's reachable `straightShort` floor (0.298)
+  turned out to sit right on top of the reported false positive's own floor (0.289): no single
+  threshold separates these two specific real, ground-truthed cases. Chose `DRIFT_STRAIGHT_SHORT =
+  0.2` — this **no longer catches the `GX065132.MP4` sample** (already marked PARTIAL/weaker
+  evidence in `docs/gpmf-sensors.md` #1/#6) in exchange for cleanly excluding the false positive AND
+  correctly keeping the clearly-genuine long stays in the same corpus scan (8 segments with
+  `straightShort` down to 0.004–0.13, vs. the excluded real walks at 0.24+) — a real, irreducible
+  ambiguity at this timescale between "paused briefly while walking" and "GPS drifted while
+  stationary," not a tuning miss (echoes the earlier-flagged "低速時所有訊號可能被同時污染" concern).
+- **A run relying only on the short window still gets its own, much lower duration floor**
   (`DRIFT_MIN_SHORT`, 2 s default) — the existing 30 s floor exists because the long window's
   compactness alone is a weak tell over a couple of samples, but requiring 30 s here would defeat
-  the short window's purpose entirely (the real qualifying run above is only ~7.5 s). A run the long
-  window ALSO confirms keeps the original 30 s floor regardless of `hs` — being slow is not, by
-  itself, reason to relax it.
+  the short window's purpose entirely. A run the long window ALSO confirms keeps the original 30 s
+  floor unchanged.
 
 ### Module model — multi-sensor & reconstruction extension *(proposed, 2026-06-28)*
 

@@ -81,8 +81,8 @@ function sDelta(x, y, shortHw, longHw) {
  * bundle for compute modules and assembly.
  *
  * Descriptors: hs, vs (smoothed speed); straight, steady (local shape); maDist (jitter); netsp,
- * netd150, netdShort, wander (time-windowed); carve (S-arc density); paused. `cu` is the
- * cumulative-unit-vector scan the windows block differences (exposed for modules).
+ * netd150, netdShort, straightShort, wander (time-windowed); carve (S-arc density); paused. `cu`
+ * is the cumulative-unit-vector scan the windows block differences (exposed for modules).
  *
  * @param {ReturnType<import("./measure.js").measure>} m  point bundle (x, y, el, t, dt, planarStep)
  * @param {Partial<typeof PARAMS>} [opts]
@@ -93,7 +93,14 @@ export function profile(m, opts = {}) {
   const { hs, vs } = speeds(planarStep, dt, el, g); //           block 3
   const { straight, steady } = localShape(x, y, hs, g); //       block 4
   const { maDist, cu } = jitter(x, y, el, g); //                 block 5
-  const { netsp, netd150, netdShort, wander, paused } = windows(x, y, t, cu, g); // block 6
+  const { netsp, netd150, netdShort, straightShort, wander, paused } = windows(
+    x,
+    y,
+    t,
+    cu,
+    planarStep,
+    g,
+  ); // block 6
   // carve (S-arc density) is a SKI-specific signal — no core module consumes it. Gate it on g.CARVE
   // (off by default → zeros) so the general core skips the work; ski mode turns it on. Block 7.
   const carve = g.CARVE ? carveDensity(x, y, planarStep, g) : new Array(x.length).fill(0);
@@ -107,6 +114,7 @@ export function profile(m, opts = {}) {
     netsp,
     netd150,
     netdShort,
+    straightShort,
     wander,
     paused,
     carve,
@@ -186,18 +194,39 @@ export function jitter(x, y, el, g) {
 
 /**
  * Block 6 — time-windowed net speed (+/-NET_WIN), wander (circular variance of `cu` over the same
- * window), net displacement at two scales (+/-NETD_WIN, +/-NETD_WIN_SHORT), and the `paused` flag.
+ * window), net displacement at two scales (+/-NETD_WIN, +/-NETD_WIN_SHORT), `straightShort` (net
+ * displacement / path length over the SAME short window), and the `paused` flag.
+ *
  * The short-window net displacement exists purely to catch a compact stay on a recording shorter
  * than (or not much longer than) NETD_WIN, where the long window clamps to the whole clip and
  * dilutes with real motion outside the stay — same underlying "did the receiver actually go
  * anywhere" question as netd150, just at a scale a short clip's own length doesn't drown out.
+ *
+ * `straightShort` answers a DIFFERENT question at that same short scale: not "how far did it net
+ * travel" but "how much of the path it actually walked converted into net travel" — net
+ * displacement / path length over +/-NETD_WIN_SHORT, in [0, 1]. A real (even slow, even
+ * decelerating-to-a-pause) walk keeps a meaningful fraction of its short-window path length as net
+ * progress; GPS noise wobbling in place inflates path length (scribbling back and forth) far more
+ * than it inflates net displacement, driving this toward 0. This is what actually distinguishes a
+ * "genuinely messy" line from a merely slow-but-directed one — `wander` (heading circular
+ * variance) can't, because it weighs every step equally regardless of how much EXTRA distance a
+ * detour/spike/wound loop cost relative to the progress it bought (found chasing a real false
+ * positive: a person walking away from a chairlift, decelerating smoothly to a near-stop then
+ * resuming, tripped the old hs+netdShort short-window gate for its entire ~47 s span even though it
+ * was real, if slow, directed motion — `gpx_eval/straightshort_scan.mjs` against both that case and
+ * the original true-positive drift sample (GX065132) found a clean gap in the data with NO
+ * segment's minimum landing between 0.13 and 0.24, i.e. this is a naturally bimodal signal, not a
+ * hand-tuned cutoff).
  */
-export function windows(x, y, t, cu, g) {
+export function windows(x, y, t, cu, planarStep, g) {
   const n = x.length;
   const netsp = new Array(n).fill(0);
   const wander = new Array(n).fill(0);
   const netd150 = new Array(n).fill(9e9);
   const netdShort = new Array(n).fill(9e9);
+  const straightShort = new Array(n).fill(1);
+  const cpath = new Array(n).fill(0);
+  for (let i = 1; i < n; i++) cpath[i] = cpath[i - 1] + planarStep[i - 1];
   for (let i = 0; i < n; i++) {
     const lo = searchLeft(t, t[i] - g.NET_WIN);
     const hi = Math.min(n - 1, searchLeft(t, t[i] + g.NET_WIN));
@@ -214,9 +243,11 @@ export function windows(x, y, t, cu, g) {
     const l3 = searchLeft(t, t[i] - g.NETD_WIN_SHORT);
     const h3 = Math.min(n - 1, searchLeft(t, t[i] + g.NETD_WIN_SHORT));
     netdShort[i] = Math.hypot(x[h3] - x[l3], y[h3] - y[l3]);
+    const pathLen = cpath[h3] - cpath[l3];
+    straightShort[i] = netdShort[i] / Math.max(pathLen, 1e-9);
   }
   const paused = netsp.map((v) => v < g.NETSTAY);
-  return { netsp, netd150, netdShort, wander, paused };
+  return { netsp, netd150, netdShort, straightShort, wander, paused };
 }
 
 /** Block 7 — local S-arc density (carve): signed swing crossings per 100 m over +/-SW. */

@@ -10,42 +10,50 @@
 //
 // Net displacement is checked at TWO window scales, either passing (same OR-across-shapes pattern
 // as outlier's detour/speed-spike): `netd150` (+/-NETD_WIN, 150 s by default) for a real long stay,
-// and `netdShort` (+/-NETD_WIN_SHORT, 15 s) for a compact stay/wobble on a recording not much longer
-// than NETD_WIN — the long window then clamps to the whole clip and dilutes with real motion
-// elsewhere in it, so a genuine short stay can undershoot the long-window check by only a little
-// (found on `GX065132.MP4`: netd150 = 102 m against a 100 m cutoff, entirely because the clip is
-// only 33 s and the +/-150 s window swallows the fast descent earlier in the same clip).
+// and a short-window "messiness" check (`straightShort`, +/-NETD_WIN_SHORT, 15 s) for a compact
+// stay/wobble on a recording not much longer than NETD_WIN — the long window then clamps to the
+// whole clip and dilutes with real motion elsewhere in it, so a genuine short stay can undershoot
+// the long-window check by only a little (found on `GX065132.MP4`: netd150 = 102 m against a 100 m
+// cutoff, entirely because the clip is only 33 s and the +/-150 s window swallows the fast descent
+// earlier in the same clip).
 //
-// The short-window branch is gated on `hs` already being slow (< DRIFT_HS_SHORT, 2 m/s default):
-// a short window has no long-window's margin — a few seconds of a tight, genuinely fast carve
-// (rhythmic S-turns) can ALSO show small net displacement without being drift, so without a speed
-// gate this would misclassify real skiing. Requiring hs to already be near-stationary keeps the
-// short-window check scoped to exactly the case it was built for (GX065132's hs 0.6-1.4 m/s tail)
-// and leaves any actually-moving-fast track entirely on the original, already-proven long window.
+// The short-window branch checks `straightShort` (net displacement / path length over the SAME
+// +/-NETD_WIN_SHORT window, see profile.js) rather than a speed gate + absolute distance cutoff: an
+// earlier version gated on `hs < 2 m/s` and reused the long window's `netd150` cutoff (100 m), but a
+// real person walking away from a chairlift — decelerating smoothly to a near-stop, then resuming —
+// tripped that gate for its ENTIRE ~47 s span (hs stays under 2 m/s throughout a slow walk; 100 m of
+// net displacement is not a meaningful "compact" bound at a 30 s window scale, since even brisk
+// walking covers well under that). `straightShort` answers the right question instead — not "how
+// far/how fast" but "how much of the path actually converted into net progress" — because GPS noise
+// wobbling in place inflates path length far more than it inflates net displacement, while a real
+// walk (even slow, even pausing) keeps a meaningful fraction of its path length as net progress.
+// Validated against both the real false positive above and the original true-positive sample
+// (`gpx_eval/straightshort_scan.mjs`): straightShort has a clean gap in the data with no segment's
+// minimum landing between 0.13 and 0.24 — genuinely bimodal, not a hand-tuned cutoff — and a real
+// fast carve never approaches either side (stays >0.8), so no separate speed gate is needed.
 //
-// A run qualifying ONLY through the short-window/already-slow path (netd150 never confirms it —
-// the long window's own compactness never holds for any point in the run) gets its OWN, much lower
-// duration floor (DRIFT_MIN_SHORT): the 30 s floor below exists because the long window's
-// compactness check alone isn't a strong enough tell over a couple of samples, but a run that's
-// already slow throughout AND never qualifies the safer long-window way doesn't need nearly as
-// much time to be a believable stay/wobble — and requiring 30 s here would defeat the short
-// window's whole purpose (GX065132's actual qualifying run is ~2 s: a `vs` glitch a few samples
-// later, unrelated to this fix, cuts it short). A run where netd150 ALSO holds keeps the original
-// 30 s floor unchanged, regardless of hs — hs alone isn't reason enough to relax it.
+// A run qualifying ONLY through the short-window path (netd150 never confirms it — the long
+// window's own compactness never holds for any point in the run) gets its OWN, much lower duration
+// floor (DRIFT_MIN_SHORT): the 30 s floor below exists because the long window's compactness check
+// alone isn't a strong enough tell over a couple of samples, but a run the short window alone
+// confirms doesn't need nearly as much time to be a believable stay/wobble — and requiring 30 s
+// here would defeat the short window's whole purpose (GX065132's actual qualifying run is ~2 s: a
+// `vs` glitch a few samples later, unrelated to this fix, cuts it short). A run where netd150 ALSO
+// holds keeps the original 30 s floor unchanged.
 
 export const compute = (ctx) => {
-  const { n, t, x, y, wander, vs, hs, netd150, netdShort, g } = ctx;
-  const wHi = g.DRIFT_WANDER ?? 0.5; //   random heading (circular variance)
-  const vLo = g.DRIFT_VS ?? 0.2; //       flat altitude (m/s) — the clean tell, drift can't fake it
-  const dLo = g.DRIFT_NETD ?? 100; //     net displacement over +/-150 s (m): small = went nowhere
-  const hsLo = g.DRIFT_HS_SHORT ?? 2; //  m/s — short-window check only applies when already this slow
-  const gap = g.DRIFT_GAP ?? 60; //       merge rest-like points within this many seconds
-  const minDur = g.DRIFT_MIN ?? 30; //    low floor — compactness does the work, not duration
+  const { n, t, x, y, wander, vs, netd150, straightShort, g } = ctx;
+  const wHi = g.DRIFT_WANDER ?? 0.5; //          random heading (circular variance)
+  const vLo = g.DRIFT_VS ?? 0.2; //              flat altitude (m/s) — the clean tell, drift can't fake it
+  const dLo = g.DRIFT_NETD ?? 100; //            net displacement over +/-150 s (m): small = went nowhere
+  const straightLo = g.DRIFT_STRAIGHT_SHORT ?? 0.2; // net displacement / path length over +/-15 s
+  const gap = g.DRIFT_GAP ?? 60; //              merge rest-like points within this many seconds
+  const minDur = g.DRIFT_MIN ?? 30; //           low floor — compactness does the work, not duration
   const minDurShort = g.DRIFT_MIN_SHORT ?? 2; // s — floor for a run only the short window confirms
 
   const flat = (k) => wander[k] > wHi && Math.abs(vs[k]) < vLo; // shared by both window checks
   const isDriftLong = (k) => flat(k) && netd150[k] < dLo;
-  const isDriftShort = (k) => flat(k) && hs[k] < hsLo && netdShort[k] < dLo;
+  const isDriftShort = (k) => flat(k) && straightShort[k] < straightLo;
   const isDrift = (k) => isDriftLong(k) || isDriftShort(k);
   const drift = new Array(n).fill(null);
   const drop = new Array(n).fill(null);

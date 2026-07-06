@@ -59,18 +59,35 @@ test("windows: net speed/displacement, wander, and paused", () => {
   const ys = new Array(n).fill(0);
   const el = new Array(n).fill(0);
   const t = ramp(n);
-  const w = windows(xs, ys, t, jitter(xs, ys, el, PARAMS).cu, PARAMS);
+  const w = windows(xs, ys, t, jitter(xs, ys, el, PARAMS).cu, deltas(xs, ys, t).planarStep, PARAMS);
   assert.ok(Math.abs(w.netsp[60] - 1) < 0.05, `netsp=${w.netsp[60]}`); // 1 m/s
   assert.ok(Math.abs(w.netd150[60] - 120) < 1, `netd150=${w.netd150[60]}`); // full-track disp
   assert.ok(w.wander[60] < 0.05, "straight -> low wander");
+  assert.ok(w.straightShort[60] > 0.95, `straightShort=${w.straightShort[60]}`); // straight -> efficient
   assert.equal(w.paused[60], false);
   const still = new Array(n).fill(0);
   assert.equal(
-    windows(still, still, t, jitter(still, still, el, PARAMS).cu, PARAMS).paused[60],
+    windows(
+      still,
+      still,
+      t,
+      jitter(still, still, el, PARAMS).cu,
+      deltas(still, still, t).planarStep,
+      PARAMS,
+    ).paused[60],
     true,
   );
   const zz = ramp(n, (i) => i % 2); // jitter in place -> high wander
-  assert.ok(windows(zz, ys, t, jitter(zz, ys, el, PARAMS).cu, PARAMS).wander[60] > 0.5);
+  const zw = windows(
+    zz,
+    ys,
+    t,
+    jitter(zz, ys, el, PARAMS).cu,
+    deltas(zz, ys, t).planarStep,
+    PARAMS,
+  );
+  assert.ok(zw.wander[60] > 0.5);
+  assert.ok(zw.straightShort[60] < 0.1, `straightShort=${zw.straightShort[60]}`); // messy in-place jitter -> inefficient
 });
 
 test("carveDensity: zero for a straight line, positive for an S-curve", () => {

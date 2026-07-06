@@ -289,6 +289,7 @@ function assemble(points, bags, valid, sig, modData) {
       netsp: sig.netsp[k],
       netd150: sig.netd150[k],
       netdShort: sig.netdShort[k],
+      straightShort: sig.straightShort[k],
       wander: sig.wander[k],
       maDist: sig.maDist[k],
       carve: sig.carve[k],
