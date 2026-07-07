@@ -153,6 +153,32 @@ test("analyze: opts.disable skips a built-in (oversample off keeps the dense inp
   assert.equal(analyze(pts, { disable: ["oversample"] }).filter((p) => !p.dropReason).length, 21);
 });
 
+test("analyze: opts.mode='ski' expands to the preset — segment (not a core builtin) runs and labels a sustained climb", () => {
+  const climb = track({ n: 90, dlon: STEP5 / 5, dele: 0.5 }); // ~1 m/s east, 0.5 m/s climb, 90 s
+  const core = analyze(climb);
+  assert.ok(core.every((p) => p.segment === undefined)); // segment isn't a core builtin
+  const ski = analyze(climb, { mode: "ski" });
+  assert.ok(ski.slice(20, 70).every((p) => p.segment?.type === "lift")); // safely past the edge windows
+});
+
+test("analyze: opts.mode='ski' preset params are defaults — an explicit opt still overrides them", () => {
+  const step = 5 / (Math.cos((36 * Math.PI) / 180) * 111320);
+  const wavy = Array.from({ length: 80 }, (_, i) => ({
+    lat: 36 + 0.0005 * Math.sin(i / 3),
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const skiCarve = analyze(wavy, { mode: "ski" });
+  const overridden = analyze(wavy, { mode: "ski", CARVE: false });
+  assert.ok(skiCarve.some((p) => p.carve > 0)); // ski's own preset turns CARVE on
+  assert.ok(overridden.every((p) => p.carve === 0)); // explicit opt wins over the preset
+});
+
+test("analyze: an unknown opts.mode throws a clear error", () => {
+  assert.throws(() => analyze(track({ n: 5 }), { mode: "nope" }), /unknown mode "nope"/);
+});
+
 test("analyze: a dropped point does not shift the projection centre", () => {
   const pts = track({ n: 121, dlon: STEP5 });
   pts.splice(61, 0, { lat: 80, lon: 200, ele: 0, time: 60300 }); // wild, < 0.5 s after a kept point

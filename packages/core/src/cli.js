@@ -10,7 +10,6 @@ import { readFileSync, writeFileSync } from "node:fs";
 import { basename } from "node:path";
 import { readGpx } from "./gpx.js";
 import { MODES } from "./modes.js";
-import { loadModule } from "./mods/index.js";
 import { savePng } from "./png.js";
 import { stabilizeGpx } from "./stabilize.js";
 import { analyzedSvg, toHtmlAnalyzedFiles } from "./view.js";
@@ -40,19 +39,19 @@ const dir = opt("out", ".");
 const base = (f) => basename(f).replace(/\.gpx$/i, "");
 
 // --mode bundles a preset (params + extra modules); --config JSON overrides the preset's params,
-// then --disable merges onto the disable list. One resolved `cfg` feeds every analyze() path.
+// then --disable merges onto the disable list. `cfg.mode` feeds every analyze()/stabilize() path
+// directly — they expand it via `resolveMode` (./modes.js) themselves, so this is just validated
+// here for a clean CLI error (an unresolvable mode would otherwise only surface deep inside
+// stabilizeGpx/toHtmlAnalyzedFiles).
 const mode = opt("mode", "core");
-const preset = MODES[mode];
-if (!preset) {
+if (!MODES[mode]) {
   console.error(`unknown --mode "${mode}" (use: ${Object.keys(MODES).join(", ")})`);
   process.exit(1);
 }
 const cfgPath = opt("config", null);
-const cfg = { ...preset.params, ...(cfgPath ? JSON.parse(readFileSync(cfgPath, "utf8")) : {}) };
+const cfg = { mode, ...(cfgPath ? JSON.parse(readFileSync(cfgPath, "utf8")) : {}) };
 const dis = opt("disable", null);
 if (dis) cfg.disable = [...(cfg.disable ?? []), ...dis.split(",")];
-const presetMods = await Promise.all(preset.enable.map(loadModule));
-if (presetMods.length) cfg.modules = [...(cfg.modules ?? []), ...presetMods];
 // --html's "stabilized" layer (the REAL stabilize() export — reflects liftSnap/smooth/gradeBound
 // repositioning, unlike `clean`'s own untouched analysis-time positions) is ON by default;
 // --no-stabilized opts back out. See analyzedLayers' doc for why the two layers can diverge.

@@ -22,18 +22,20 @@
 // Built-in modules (./mods) always run; caller modules are appended via `opts.modules`.
 
 import { measure } from "./measure.js";
+import { resolveMode } from "./modes.js";
 import { builtins } from "./mods/index.js";
 import { profile } from "./profile.js";
 
 /**
  * @param {import("./measure.js").TrackPoint[]} points  one track's points, in time order
- * @param {{ modules?: import("./mods/index.js").Module[], disable?: string[] } & Record<string, number>} [opts]
- *   `modules` to append, `disable` to skip built-ins by name (e.g. ["oversample"]), plus any
- *   measurement param overrides (see PARAMS in ./measure.js). The whole object is plain JSON.
+ * @param {{ mode?: string, modules?: import("./mods/index.js").Module[], disable?: string[] } & Record<string, number>} [opts]
+ *   `mode` (e.g. "ski") expands to a preset's params + modules via `resolveMode` (./modes.js) before
+ *   anything else runs. `modules` to append, `disable` to skip built-ins by name (e.g.
+ *   ["oversample"]), plus any measurement param overrides (see PARAMS in ./measure.js).
  * @returns {Array<object>} every original point, enriched (kept) or position-only (dropped)
  */
 export function analyze(points, opts = {}) {
-  const { modules = [], disable = [], ...paramOpts } = opts;
+  const { modules = [], disable = [], ...paramOpts } = resolveMode(opts);
   if (points.length === 0) return [];
 
   const all = [...builtins.filter((m) => !disable.includes(m.name)), ...modules];

@@ -82,6 +82,45 @@ test("stabilize: opts.tangleSnap swaps lat/lon ahead of liftSnap when point.tang
   assert.equal(neither[0].lat, 36); // both flags off -> stays raw
 });
 
+// A gentle, long-wavelength lateral wobble (one sine cycle spans the whole run, ~1m amplitude) —
+// large enough for liftSnap's best-fit line to visibly flatten, gentle enough to stay well within
+// liftConfirm's straightness/turn-rate gates (unlike a per-step alternating jitter, which reads as a
+// reversal/lone-hairpin to despike and gets points dropped before liftSnap ever sees them).
+function wobblyClimb() {
+  return Array.from({ length: 90 }, (_, i) => ({
+    lat: 36 + 0.00001 * Math.sin(i / 6),
+    lon: 138 + i * (3 / MX), // ~3 m/s east
+    ele: 1000 + i * 0.5, // ~0.5 m/s climb — a sustained lift-like ride
+    time: i * 1000,
+  }));
+}
+
+test("stabilize: opts.mode='ski' auto-wires liftConfirm+liftSnap — a real lift run gets snapped without manually loading modules", () => {
+  const pts = wobblyClimb();
+  const out = stabilize(pts, { mode: "ski" });
+  assert.equal(out.length, pts.length); // nothing dropped
+  // interior points (well past liftSnap's own 20 m boundary fade) get pulled onto the fitted line —
+  // the raw wobble should collapse, not survive into the export
+  const range = (arr) => Math.max(...arr) - Math.min(...arr);
+  const rawRange = range(pts.slice(15, 75).map((p) => p.lat));
+  const outRange = range(out.slice(15, 75).map((p) => p.lat));
+  assert.ok(outRange < rawRange * 0.5, "liftSnap flattened the lateral wobble");
+});
+
+test("stabilize: opts.mode='ski' preset flags are defaults — an explicit opt still overrides them", () => {
+  const pts = wobblyClimb();
+  const out = stabilize(pts, { mode: "ski", liftSnap: false });
+  assert.equal(out.length, pts.length);
+  const rawInterior = pts.slice(15, 75).map((p) => p.lat);
+  const outInterior = out.slice(15, 75).map((p) => p.lat);
+  assert.deepEqual(outInterior, rawInterior); // export flag explicitly off -> raw lat passes through
+});
+
+test("stabilize: an unknown opts.mode throws a clear error", () => {
+  const pts = [{ lat: 36, lon: 138, ele: 1000, time: 0 }];
+  assert.throws(() => stabilize(pts, { mode: "nope" }), /unknown mode "nope"/);
+});
+
 test("stabilizeTrack: stabilizes each segment and preserves meta", () => {
   const track = {
     segments: [

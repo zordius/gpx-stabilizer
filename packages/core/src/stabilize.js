@@ -6,6 +6,7 @@
 
 import { analyze } from "./analyze.js";
 import { readGpx, saveGpx } from "./gpx.js";
+import { resolveMode } from "./modes.js";
 import * as gradeBoundMod from "./mods/gradeBound.js";
 import { validateModule } from "./mods/index.js";
 import * as smoothMod from "./mods/smooth.js";
@@ -49,12 +50,18 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  * reinflated) and, when present, overrides `lat`/`lon` ahead of `liftSnap` — it already reads
  * `liftSnap`'s own position as its input where available, so its output is the more-refined answer.
  * Does not touch `ele`.
+ *
+ * **`opts.mode`** (e.g. `"ski"`) expands to a preset's params + modules via `resolveMode`
+ * (./modes.js) BEFORE any of the above is read — so `MODES.ski`'s own `liftSnap`/`tangleSnap`/
+ * `gradeBound: true` and its `enable` modules are already in effect by the time this function's own
+ * destructuring runs. An explicit field on `opts` still wins over the preset (same precedence the
+ * CLI's `--mode` + `--config` already had).
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { mode?: string, smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { smooth, gradeBound, liftSnap, tangleSnap, ...rest } = opts;
+  const { smooth, gradeBound, liftSnap, tangleSnap, ...rest } = resolveMode(opts);
   const modules = [...(rest.modules ?? [])];
   if (smooth) modules.push(smoothModule);
   if (gradeBound) modules.push(gradeBoundModule);
