@@ -30,7 +30,7 @@ const files = argv.filter((a) => !a.startsWith("--") && /\.gpx$/i.test(a));
 
 if (!files.length) {
   console.error(
-    "usage: gpx-stabilizer FILE.gpx [...] [--html [FILE]] [--png [--width N] [--height N]]" +
+    "usage: gpx-stabilizer FILE.gpx [...] [--html [FILE]] [--no-stabilized] [--png [--width N] [--height N]]" +
       " [--out DIR] [--mode core|ski] [--config FILE.json] [--disable name,...]",
   );
   process.exit(1);
@@ -53,6 +53,10 @@ const dis = opt("disable", null);
 if (dis) cfg.disable = [...(cfg.disable ?? []), ...dis.split(",")];
 const presetMods = await Promise.all(preset.enable.map(loadModule));
 if (presetMods.length) cfg.modules = [...(cfg.modules ?? []), ...presetMods];
+// --html's "stabilized" layer (the REAL stabilize() export — reflects liftSnap/smooth/gradeBound
+// repositioning, unlike `clean`'s own untouched analysis-time positions) is ON by default;
+// --no-stabilized opts back out. See analyzedLayers' doc for why the two layers can diverge.
+if (has("no-stabilized")) cfg.stabilized = false;
 
 if (has("html")) {
   // one HTML document with a scrolling panel per file

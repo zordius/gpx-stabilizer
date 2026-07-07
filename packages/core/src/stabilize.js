@@ -30,12 +30,31 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  * `{ GRADE_AMAX: 2 }`). They are independent compute signals, so they don't chain in-pipeline; if both
  * are set the export prefers `gradeBound` (terrain-preserving) — true despike-then-smooth awaits the
  * proposed `finalize` phase.
+ *
+ * A third, three-axis rewrite: **`opts.liftSnap`** — a plain boolean (the module it reads,
+ * `mods/liftSnap.js`, is parameter-free; the caller tunes its upstream module, `liftConfirm`, via the
+ * normal `g.LIFT_*` params, unrelated to this export switch). Reads `point.liftSnap` (`{ lat, lon,
+ * ele? }`, only present on points inside a run `liftConfirm` actually confirmed as a real lift —
+ * see that module's doc) and, when present, overrides `lat`/`lon` unconditionally and `ele` ahead of
+ * `gradeBound`/`smooth` (liftSnap only ever sets `ele` for the handful of points it reinterprets as a
+ * pause; everywhere else it's absent, so the existing `gradeBound`/`smooth`/raw chain is untouched).
+ * Unlike `smooth`/`gradeBound`, this does NOT auto-load its module — `liftConfirm`/`liftSnap` are
+ * loaded via `opts.modules` (ski mode bundles both, see `modes.js`), so the export switch and the
+ * module that feeds it stay decoupled; passing `liftSnap: true` without loading the modules is a
+ * harmless no-op (no `point.liftSnap` ever appears, so every `??` falls through to the raw value).
+ *
+ * A fourth, general-purpose (not ski-gated) rewrite: **`opts.tangleSnap`** — same plain-boolean,
+ * decoupled-loading convention as `liftSnap` (module: `mods/tangleSnap.js`). Reads `point.tangleSnap`
+ * (`{ lat, lon }`, only present on points inside a very-low-speed run that module thinned and
+ * reinflated) and, when present, overrides `lat`/`lon` ahead of `liftSnap` — it already reads
+ * `liftSnap`'s own position as its input where available, so its output is the more-refined answer.
+ * Does not touch `ele`.
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number> }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { smooth, gradeBound, ...rest } = opts;
+  const { smooth, gradeBound, liftSnap, tangleSnap, ...rest } = opts;
   const modules = [...(rest.modules ?? [])];
   if (smooth) modules.push(smoothModule);
   if (gradeBound) modules.push(gradeBoundModule);
@@ -51,10 +70,14 @@ export function stabilize(points, opts = {}) {
   return analyze(points, analyzeOpts)
     .filter((p) => !p.dropReason)
     .map((p) => ({
-      lat: p.lat,
-      lon: p.lon,
-      // gradeBound (despike) wins over smooth when both set (terrain-preserving); else whichever; else raw
-      ele: (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ?? p.ele,
+      lat: (tangleSnap ? p.tangleSnap?.lat : null) ?? (liftSnap ? p.liftSnap?.lat : null) ?? p.lat,
+      lon: (tangleSnap ? p.tangleSnap?.lon : null) ?? (liftSnap ? p.liftSnap?.lon : null) ?? p.lon,
+      // liftSnap (a confirmed-lift pause reposition) wins when present, then gradeBound (despike)
+      // over smooth when both set (terrain-preserving), else whichever, else raw
+      ele:
+        (liftSnap ? p.liftSnap?.ele : null) ??
+        (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ??
+        p.ele,
       time: p.time,
     }));
 }

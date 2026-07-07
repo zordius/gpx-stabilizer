@@ -11,6 +11,25 @@ test("modes: core is the empty default; ski enables despike-ski profile + carve 
   assert.ok(MODES.ski.enable.includes("kink"));
 });
 
+test("modes: ski also enables segment + liftConfirm + liftSnap, and turns on the liftSnap export", () => {
+  assert.equal(MODES.ski.params.liftSnap, true);
+  // segment must load before liftConfirm/liftSnap — they read point.segment/point.liftConfirm
+  const enable = MODES.ski.enable;
+  assert.ok(enable.indexOf("segment") < enable.indexOf("liftConfirm"));
+  assert.ok(enable.indexOf("liftConfirm") < enable.indexOf("liftSnap"));
+});
+
+test("modes: ski also enables tangleSnap, loaded after liftSnap, and turns on its export", () => {
+  assert.equal(MODES.ski.params.tangleSnap, true);
+  const enable = MODES.ski.enable;
+  assert.ok(enable.includes("tangleSnap"));
+  assert.ok(enable.indexOf("liftSnap") < enable.indexOf("tangleSnap"));
+});
+
+test("modes: ski turns on gradeBound (elevation despike) by default", () => {
+  assert.equal(MODES.ski.params.gradeBound, true);
+});
+
 test("profile: carve is gated on g.CARVE (off → zeros, on → computed)", () => {
   const step = 5 / (Math.cos((36 * Math.PI) / 180) * 111320); // ~5 m/s east
   const track = Array.from({ length: 80 }, (_, i) => ({

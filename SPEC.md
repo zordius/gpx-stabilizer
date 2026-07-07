@@ -827,6 +827,60 @@ lift/descent/flat. `segment` runs **before** any per-activity output-smoothing a
 negative result (below). This is the core-side half of the stage-2 coarse split
 ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
 
+**Prior art for the follow-ons above — the old Python prototype's lift logic (reviewed 2026-07-07).**
+A pre-rewrite script (`gpx_stabilize.py`, a monolith kept outside this repo — see "Reference" at the
+bottom of this doc; not diffed line-for-line against the `old_ski_v1` branch, so treat as the same
+lineage, not a confirmed-identical copy) already worked out a considerably richer lift model than
+today's coarse `vspeed`-sign split. Its header docstring claims an EM loop (points ↔ lift-line/station,
+mutually refined) but a later comment says that was **removed** in favor of the rule cascade below —
+the docstring is stale, the rules are what actually runs. None of this is ported; it's recorded here as
+a worked reference for the "still open" items above, not a spec for what core will do.
+
+- **Base classification** — a climbing segment (`vspeed` sign, same coarse signal `segment.js` already
+  uses) is `lift` only if ALSO **straight** (net displacement / path length > 0.5, the same shape as
+  this repo's `straightLong`/`straightShort`) AND **not too fast** (`hspeed` median < 13 m/s,
+  `HS_LIFT`); climbing-but-ambiguous falls to `ascent`, never `ski`.
+- **Minimum duration** — an isolated `lift` run under 60 s (`LIFT_MINDUR`) downgrades to `ascent`. A
+  companion "or too little elevation gain" comment references a `LIFT_MINGAIN` param that is **not
+  actually defined or checked anywhere in the file** — a stale comment, not a real second gate; only
+  duration is enforced.
+- **Fake-lift-by-turning** — RDP-simplify (ε=40 m) the segment's own points, count simplified turns
+  sharper than 45°. **A real cable line can't wiggle**: ≥2 such turns *and* moderate-plus speed
+  (>5 m/s) reclassifies the whole run as `drive` (a switchbacking road); the same wiggle at slow speed
+  is read as a lift's own angle-station turns, not a road, and stays `lift`. This is the concrete
+  mechanism this repo's own "turn-confirm" follow-on is gesturing at, just inverted (there: use low
+  turn to *confirm* lift; here: use *high, sharp* turn combined with speed to *reject* it) — both
+  reduce to the same underlying claim, "a rope doesn't turn sharply."
+- **Fake-lift-by-speed** — climb median speed over 7 m/s (`FAKE_V_SHORT`) alone reclassifies to
+  `drive` — a cable physically can't move a rider that fast.
+- **GPS-drift override** — even a `lift`/`ski`/`lowski` run gets reclassified to `noise` if it shows
+  high heading-wander (>0.85, 3-D circular variance) AND confined displacement (<50 m) AND low speed
+  (<2.5 m/s) — the same "wandering while essentially stationary" shape as this repo's `drift`, just
+  computed as one whole-run 3-D wander score rather than a windowed per-point signal.
+- **Drive-sandwich** — a `lift`/`ski`/`lowski` run wedged between two long, strong `drive` runs (no
+  `rest` between) with no intervening rest gets absorbed into `drive` too, up to a length cap that
+  scales with how long the two `drive` runs either side were.
+- **Geometric reconstruction (not just classification)** — every confirmed `lift` run gets PCA-fit to
+  its own straight line (elevation untouched) and every point orthogonally projected onto it. Then,
+  using the physical premise **"a lift never travels backward, only pauses"**: walk the along-line
+  projection and require it non-decreasing; a point that would go backward is not deleted but moved
+  onto the current "high-water" anchor point (x, y, *and* elevation) — i.e. reinterpreted as a pause
+  at the lift's real position, not GPS noise to discard. Nothing in this repo's `mods/` reconstructs a
+  point's position today — every current module only drops or labels.
+- **Cluster-level validity signal** — after spatially clustering all surviving output runs, a non-main
+  cluster is dropped wholesale if it contains **no** `lift` run at all, or if it contains one but that
+  cluster's longest `lift` run is longer than every other cluster's (read as "probably a drive
+  elsewhere," since a genuine resort visit's lift rides are bounded, not the single longest lift in the
+  whole multi-day dataset) and it isn't the chronologically last cluster. Presence/length of `lift`
+  runs is the cluster-keep signal — no OSM needed for this decision (OSM cross-checks — `--liftaudit` —
+  are debug/validation only, gated behind an off-by-default flag).
+
+Only piece (1) above (coarse straight+moderate-speed climb) has a JS equivalent today
+(`mods/segment.js`'s sign-only split, which doesn't even check straightness or speed yet). Everything
+else — the min-duration gate, both fake-lift rejections, the drift override applied to `lift`
+specifically, drive-sandwich, the PCA-snap-and-monotonic-pause reconstruction, and the cluster-keep
+signal — has no ported equivalent in `packages/core` yet.
+
 **Per-activity output-smoothing — explored, NOT built (negative result, 2026-07-04).** With the
 `segment` module in place, explored whether each segment type wants a different elevation-smoothing
 window (`gpx_eval/segsmooth_eval.mjs`, across Hero10-GX + Hero5-GOPR + a FitoTrack phone track of the

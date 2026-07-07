@@ -5,7 +5,8 @@
 
 import { analyze, isQualityDropped } from "./analyze.js";
 import { toSvg, writeHtml } from "./html.js";
-import { project } from "./measure.js";
+import { project, projectTo } from "./measure.js";
+import { stabilize } from "./stabilize.js";
 
 /**
  * Enrich each point with SVG `x`/`y` (local meters, north up) while keeping its original fields.
@@ -108,8 +109,21 @@ const flipY = (p) => ({ ...p, y: -p.y });
  * The clean track is split into separate polylines by `opts.breakLine(out) → runs`; the default
  * cuts it at every dropped point (a drop = a break, no line across the gap). This is the seam the
  * fuller `斷開` function (time/distance-gap cuts) plugs into.
+ *
+ * **`stabilized` line — ON BY DEFAULT** (`opts.stabilized: false` to turn it off): the actual
+ * `stabilize(points, opts)` export (same `opts`, so `smooth`/`gradeBound`/`liftSnap` all apply
+ * exactly as they would to the real shipped output) — NOT the same thing as `clean` above. `clean`
+ * is `analyze()`'s own kept points at their analysis-time position; a survivor-repositioning module
+ * (`liftSnap`) never touches that position, only the separate `point.liftSnap` signal
+ * `stabilize()`'s export step reads. So for a ski-mode track with confirmed lift runs, `clean` and
+ * `stabilized` diverge exactly where liftSnap moved something — seeing that divergence is the whole
+ * point of this layer, so it defaults on rather than needing to be remembered. Projected
+ * onto the SAME origin as everything else (`projectTo`, not a second `analyze()`/`project()` call,
+ * which would each pick their own centre and silently shift one layer relative to the other). Broken
+ * into runs at a `opts.stabilizedMaxGap`-second time gap (default 10, matching `resample.js`'s own
+ * default) rather than one straight line across a dropped stretch.
  * @param {import("./measure.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { breakLine?: (out: object[]) => object[][] }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { breakLine?: (out: object[]) => object[][], stabilized?: boolean, stabilizedMaxGap?: number }} [opts]
  */
 export function analyzedLayers(points, opts = {}) {
   const out = analyze(points, opts);
@@ -215,6 +229,31 @@ export function analyzedLayers(points, opts = {}) {
     { label: "raw", color: "#888", width: 1, opacity: 0.7, lines: [out.map(flipY)] },
     cleanLayer,
   ];
+  // the real stabilize() export, on top of clean, so a liftSnap-repositioned (or smooth/gradeBound-
+  // rewritten) run visibly diverges from its own analysis-time position — ON by default, opt out
+  // via opts.stabilized: false. stabilize()'s output carries no dropReason (already filtered away),
+  // so — same `斷開` concern as the clean line's own splitAtDrops — break at a time gap
+  // (opts.stabilizedMaxGap, default 10 s, matching resample.js's own maxGap default) rather than
+  // drawing one straight line across a dropped stretch.
+  if (opts.stabilized !== false) {
+    const { lat0, lon0 } = out.origin;
+    const shipped = stabilize(points, opts).map((p) => {
+      const { x, y } = projectTo(p.lat, p.lon, lat0, lon0);
+      return flipY({ ...p, x, y });
+    });
+    const maxGapMs = (opts.stabilizedMaxGap ?? 10) * 1000;
+    const runs = [];
+    let cur = [];
+    for (const p of shipped) {
+      if (cur.length && p.time - cur[cur.length - 1].time > maxGapMs) {
+        runs.push(cur);
+        cur = [];
+      }
+      cur.push(p);
+    }
+    if (cur.length) runs.push(cur);
+    layers.push({ label: "stabilized", color: "#f0a", width: 1.5, lines: runs });
+  }
   // opts.labels → a black head/tail label per clean segment, on top (opts.labelSize sets font size)
   if (opts.labels) layers.push(segmentLabels(cleanLayer.lines, { fontSize: opts.labelSize }));
   layers.origin = out.origin; // see withXY's doc — carried through for toHtmlAnalyzedFiles/analyzedSvg

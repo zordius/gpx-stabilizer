@@ -130,6 +130,42 @@ export function speedOf(ctx, p) {
 }
 
 /**
+ * Inverse of `project()`'s formula: local metres (north-up-flipped or not — caller's choice, this
+ * just runs the same linear map backwards) → lat/lon, given the SAME projection centre `project()`
+ * used. The HTML viewer's click-to-show-coordinates script already does this inversion client-side
+ * (`html.js`'s inline JS, run backwards against `data-lat0`/`data-lon0`); this is the same formula as
+ * a reusable Node-side function, for a module (e.g. `liftSnap`) that needs to convert a reconstructed
+ * position back into `{ lat, lon }` before it can be shipped in a GPX point.
+ * @param {number} x
+ * @param {number} y
+ * @param {number} lat0
+ * @param {number} lon0
+ * @returns {{ lat: number, lon: number }}
+ */
+export function unproject(x, y, lat0, lon0) {
+  const mx = Math.cos((lat0 * Math.PI) / 180) * DEG_LON_M;
+  return { lat: lat0 + y / DEG_LAT_M, lon: lon0 + x / mx };
+}
+
+/**
+ * `unproject`'s inverse — `project()`'s forward formula, but against a caller-supplied centre
+ * instead of computing one from a point array. For a second point set (e.g. `stabilize()`'s
+ * output, which carries no `x`/`y`) that must share ONE projection with an already-projected set
+ * (e.g. `analyze()`'s own output) so both plot aligned on the same canvas — reusing `project()`
+ * itself would give each set its OWN centre (the mean of THAT array only) and silently shift one
+ * relative to the other.
+ * @param {number} lat
+ * @param {number} lon
+ * @param {number} lat0
+ * @param {number} lon0
+ * @returns {{ x: number, y: number }}
+ */
+export function projectTo(lat, lon, lat0, lon0) {
+  const mx = Math.cos((lat0 * Math.PI) / 180) * DEG_LON_M;
+  return { x: (lon - lon0) * mx, y: (lat - lat0) * DEG_LAT_M };
+}
+
+/**
  * Block 1 — project to local meters. The centre (lat0/lon0) is the mean of the `valid` points (falls
  * back to all points if none are valid), but every point is projected so excluded points still have
  * a position. Returns `xAll/yAll` for all points and `x/y/el/t` for the valid sub-sequence.

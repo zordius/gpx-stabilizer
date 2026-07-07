@@ -1,6 +1,14 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { deltas, kinematics, measure, project, speedOf, verticalRate } from "../src/measure.js";
+import {
+  deltas,
+  kinematics,
+  measure,
+  project,
+  speedOf,
+  unproject,
+  verticalRate,
+} from "../src/measure.js";
 
 // ════════════════════════════════════════════════════════════════════════════════════════
 // Point-level blocks — projection + adjacent deltas, the parameter-free core. Tested directly
@@ -25,6 +33,24 @@ test("project: valid-only centre, projects all points, east=+x north=+y", () => 
   // click-to-show-coordinates feature) — mean of the valid points only, ignoring the excluded one
   assert.ok(Math.abs(lat0 - 36.0005) < 1e-9);
   assert.ok(Math.abs(lon0 - 138.0005) < 1e-9);
+});
+
+test("unproject: inverts project() exactly, round-tripping every point back to its own lat/lon", () => {
+  const points = [
+    { lat: 36, lon: 138, ele: 100, time: 0 },
+    { lat: 36.001, lon: 138.002, ele: 110, time: 1000 },
+    { lat: 35.998, lon: 137.999, ele: 90, time: 2000 },
+  ];
+  const { xAll, yAll, lat0, lon0 } = project(points, [0, 1, 2]);
+  for (let i = 0; i < points.length; i++) {
+    const { lat, lon } = unproject(xAll[i], yAll[i], lat0, lon0);
+    assert.ok(Math.abs(lat - points[i].lat) < 1e-9, `lat round-trip @${i}`);
+    assert.ok(Math.abs(lon - points[i].lon) < 1e-9, `lon round-trip @${i}`);
+  }
+});
+
+test("unproject: x=0,y=0 is exactly the projection centre", () => {
+  assert.deepEqual(unproject(0, 0, 36, 138), { lat: 36, lon: 138 });
 });
 
 test("deltas: planar step distance and dt floored at 1 second", () => {

@@ -72,6 +72,47 @@ test("analyzedLayers: .origin carries the projection centre through from analyze
   assert.ok(Math.abs(layers.origin.lat0 - 36.0005) < 1e-6);
 });
 
+test("analyzedLayers: stabilized layer is ON by default; opts.stabilized: false turns it off", () => {
+  const track = [
+    { lat: 36, lon: 138, ele: 1000, time: 0 },
+    { lat: 36.001, lon: 138.001, ele: 1000, time: 1000 },
+  ];
+  assert.ok(analyzedLayers(track).find((l) => l.label === "stabilized"));
+  assert.equal(
+    analyzedLayers(track, { stabilized: false }).find((l) => l.label === "stabilized"),
+    undefined,
+  );
+});
+
+test("analyzedLayers: opts.stabilized diverges from clean exactly where a repositioning module fires", () => {
+  // a stand-in finalize module (not real liftSnap.js — that has its own dedicated tests) that
+  // shifts one point's position, so we can see `clean` (analyze()'s own kept-point position,
+  // untouched by any repositioning module) and `stabilized` (the real stabilize() export, which
+  // reads liftSnap-shaped signals) genuinely disagree — the whole point of this layer.
+  const fakeReposition = {
+    name: "fakeReposition",
+    finalize: (out) => {
+      out[1].liftSnap = { lat: out[1].lat + 0.01, lon: out[1].lon };
+    },
+  };
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx;
+  const track = Array.from({ length: 5 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const layers = analyzedLayers(track, { modules: [fakeReposition], liftSnap: true });
+  const clean = layers.find((l) => l.label === "clean");
+  const stabilized = layers.find((l) => l.label === "stabilized");
+  assert.ok(stabilized);
+  // both layers cover the shifted point, but at different y (north/south) since lat moved
+  assert.notEqual(clean.lines[0][1].y, stabilized.lines[0][1].y);
+  // every OTHER point is untouched -> same position in both layers
+  assert.equal(clean.lines[0][0].y, stabilized.lines[0][0].y);
+});
+
 test("analyzedLayers: a policy drop (oversample) doesn't break the clean line", () => {
   // A high native-sample-rate source (e.g. a Hero10's raw ~10 Hz GPS5): oversample thins it to the
   // 0.5 s gate, so a policy-dropped point sits between nearly every survivor. Those must NOT break
@@ -102,7 +143,9 @@ test("analyzedLayers: clean track line + per-reason drop layers, unified red cir
     time: i * 1000,
   }));
   track[15] = { ...track[15], lat: track[15].lat + 60 / 110540 }; // a ~60 m sideways spike
-  const layers = analyzedLayers(track);
+  // stabilized (on by default) is a separate concern with its own tests — turn it off here so this
+  // test stays focused on the original drop-layer/clean-line set.
+  const layers = analyzedLayers(track, { stabilized: false });
   const clean = layers.find((l) => l.label === "clean");
   assert.equal(layers[layers.length - 1].label, "clean"); // clean renders LAST = on top
   assert.ok(clean.width > 0);
