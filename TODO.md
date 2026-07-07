@@ -8,6 +8,15 @@ one place, not two).
 
 ## Shipped
 
+- **`gpsQuality` module — device-specific GPS-chip quality gate (2026-07-07)** — `measure.js` now
+  carries the device's raw `<hdop>`/`<fix>` per point; a new opt-in module drops a point when
+  `fix != "3d"` or `hdop >= 10`. Validated on a 3-day GX(Hero10)+Android ground-truth corpus:
+  catches 82.3% of points `drift`/`outlier`/`stray`/`badspan` miss entirely, at a 7.9%
+  false-positive cost. **Not a builtin** — the threshold is chip-specific (a same-trip Hero5's
+  baseline hdop runs ~3× lower), so `packages/gopro`'s `readGoproTelemetry` opts it in only when
+  `meta.model === "HERO10"`. Also **revises** `docs/hdop-notes.md`'s earlier "adds little over
+  geometry" read for GX-class chips — see that doc's §9. Detail: [`SPEC.md`](SPEC.md) ("GPS-chip
+  quality gate").
 - **`gpx-from-gopro` CLI** (`packages/gopro`) — recurses a directory for GoPro videos,
   writes one merged GPX 1.1 per **(camera, local date)**: serial (udta CAME) merge key,
   file-number session split (see "Open validation items" below — GUMI was replaced),

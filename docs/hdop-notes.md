@@ -90,7 +90,7 @@ Sweeping the threshold and watching track coverage fall (low coverage = concentr
 | device | hdop as an obstruction signal? | how to use it |
 |---|---|---|
 | **GOPR (good chip)** | ✓ reliable — bimodal, clean knee | absolute **≥3**, or a per-track **p97** that auto-adapts (see §6) = obstruction places; handle spatially (drop/flag the zone) |
-| **GX (poor chip)** | ✗ unreliable — continuous noise ramp, no knee, day-variable | no fixed cut works, **and a relative percentile fails too** (no knee — §6); rely on the **geometric pipeline** rather than hdop |
+| **GX (poor chip)** | ✗ unreliable *for spatial obstruction-mapping* — continuous noise ramp, no knee, day-variable; ✓ **revised 2026-07-07 for straight point-quality gating** — see §9 | no fixed cut isolates a spatially-concentrated obstruction band, **and a relative percentile fails too** (no knee — §6); but §9 found a cross-device-validated absolute cut (`hdop≥10`) still usable as a *point-level* quality gate, just not as an *obstruction-place* detector |
 
 The one-line takeaway: **a good GPS chip's hdop has a clean baseline/obstruction split
 so a threshold means something; a poor chip's hdop is a continuous noise ramp where no
@@ -143,6 +143,13 @@ for good-chip devices (GOPR ≥3 = place-based obstruction) and must be per-devi
 per-track. For GX-class devices it adds little over geometry. The geometric modules
 (`drift`, `outlier`, `stray`, `despike`) already cover the garbage either way.
 
+**Revised for GX, 2026-07-07 — see §9.** The "adds little over geometry" line above was an
+*inference* from the no-knee shape (§4), never checked against an independent ground truth
+for GX itself (this section's own cross-checks, §7, ran on GOPR). A later 3-day
+GX+Android corpus with a genuinely independent second device found the opposite: `fix`/`hdop`
+catches the majority of points the geometric modules miss entirely. §9 has the numbers and
+reconciles the two.
+
 ## 8. Open
 
 - **GPS9 (Hero11+) hdop scale unverified** (no hardware) — `export-contract.md`.
@@ -150,3 +157,72 @@ per-track. For GX-class devices it adds little over geometry. The geometric modu
   ~6,400 such points exist and only ~5% are dropped today (`view.js`'s `hdop≥3 paused`
   overlay visualises them). Whether to add a hdop-aware drop for these is open — but per
   §5 it would have to be device-aware.
+
+## 9. Revision — cross-device ground truth changes the GX conclusion (2026-07-07)
+
+§4/§5/§7 above concluded hdop "adds little over geometry" for GX-class chips. That was an
+**inference from the distribution's shape** (no knee → no clean obstruction-place cut), not
+a direct measurement against an independent position reference — §7's own hdop-vs-drops
+cross-check ran on GOPR, never on GX. A later corpus closes that gap and revises the
+GX-specific part of the conclusion (the GOPR conclusion in §5/§6 is untouched).
+
+### New data
+
+Three days (2026-02-11/12/13) of a **different** trip: GX (Hero10) + a phone
+(Android/FitoTrack) recording the **same person, simultaneously** — a genuine independent
+position reference, not a proxy. Scripts: `gpx_eval/gx_specific_signal_mining.mjs`,
+`gpx_eval/hero5_hdop_check.mjs`, `gpx_eval/lift_straightness_check.mjs` (all ephemeral, not
+checked in). Credibility between the two devices was decided per contiguous disagreement
+run (not per point, to avoid noise-driven flip-flop), using each side's own quality-drop
+flags and a sampling-rate-normalized local-smoothness residual as the tie-break.
+
+### The shape finding replicates — "no knee" is confirmed again
+
+Sweeping the hdop cutoff on this new corpus reproduces §4's exact shape: recall decays
+*gradually* with no step, e.g. (bad-point recall / good-point false-positive rate)
+1→100%/100%, 3→97.5%/46.5%, 5→84.8%/18.5%, 8→57.4%/10.0%. No knee — §4 was right about the
+shape on this corpus too.
+
+### But "no knee" does not mean "no usable threshold" once there's ground truth
+
+Restricted to the points the existing geometric pipeline (`drift`/`outlier`/`stray`/
+`badspan`/`activity`) **already misses entirely** (823 cross-device-confirmed-wrong points,
+kept as "clean" today), a fixed gate — drop when `fix != "3d"` **or** `hdop >= 10` — catches:
+
+| hdop cutoff | catches of the 823 already-missed points | newly drops of already-fine kept points |
+|---|---|---|
+| 8 | 83.0% (683) | 10.98% (290/2642) |
+| 10 | 82.3% (677) | 7.91% (209/2642) |
+| 12 | 82.3% (677) | 5.75% (152/2642) |
+
+And the caught points are genuinely bad, not boundary noise — median cross-device position
+error of the caught set is 159 m (mean 733 m, p90 2288 m) vs 4.9 m (mean 18.3 m) for the
+points the gate leaves alone. So a continuous, knee-less ramp can still support a real,
+validated point-level quality gate — §4's shape observation was correct, but §5/§7's
+"therefore it adds little" inference from that shape does not hold once checked against an
+independent reference. The two sections were answering different questions: §4 asks "can
+hdop find spatially-concentrated obstruction *places*" (no, confirmed again above); §9 asks
+"does hdop/fix predict this *point's* position error" (yes, strongly, once you have
+something to check it against).
+
+### Still device-specific — confirmed in the OTHER direction this time
+
+§2's "GX is ~1.7× worse than GOPR at the median" already flagged hdop as device-variable.
+Re-checked directly on this new corpus's own GOPR (Hero5) file: kept-point median hdop is
+**1.77–1.78** (Hero10's kept-point median on the corresponding trip: **5.31–5.78**) — a
+~3× gap, consistent with §2's finding but from an independent trip. A `hdop>=10` cutoff
+tuned on Hero10 would almost never fire on a Hero5 file (its p90 is only ~2.2), so it is
+**not portable across chip generations** — confirming §5's "must be per-device" rule, just
+for a *different* reason than §4's "no knee" (here the issue is the whole scale sitting an
+order of magnitude apart, not the distribution's shape).
+
+### Shipped
+
+`packages/core/src/mods/gpsQuality.js` — `fix != "3d" || hdop >= GPSQ_HDOP_MAX` (default 10),
+self-gates to a no-op when a source has neither field (e.g. this Android/FitoTrack GPX, which
+carries no `<hdop>`/`<fix>` tags at all). **Not a core builtin** (same reasoning as `kink.js`'s
+existing precedent) — the threshold is chip-specific per the finding above, so it stays an
+explicit `opts.modules` opt-in. `packages/gopro/src/telemetry.js` opts in automatically only
+when `meta.model === "HERO10"`; every other model (including Hero5/GOPR) is unaffected. See
+[`SPEC.md`](../SPEC.md) ("GPS-chip quality gate") and [`TODO.md`](../TODO.md) for the shipped
+entry.

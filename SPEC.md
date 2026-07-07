@@ -204,6 +204,33 @@ general lesson: **a policy drop is not a real gap — every point-stream consume
 "is this point missing/absent" needs to ask *why*, not just *whether*.** Grep `dropReason` (or
 `p.dropReason`) for a truthy-only check before adding a new one.
 
+**GPS-chip quality gate (`gpsQuality`) — device-specific, opt-in (2026-07-07).** `measure.js` now
+carries the device's own raw `<hdop>`/`<fix>` per point (mirroring the existing `<speed>`
+passthrough), and a new compute module, `mods/gpsQuality.js`, drops a point when `fix != "3d"` or
+`hdop >= GPSQ_HDOP_MAX` (default 10) — a signal none of `drift`/`outlier`/`stray`/`badspan` reads
+at all. Validated against a 3-day GX(Hero10)+Android ground-truth corpus: the gate independently
+catches 82.3% of points those modules miss entirely (823 cross-device-confirmed-wrong points), at a
+7.9% false-positive cost on points otherwise judged fine — and the caught points are genuinely bad
+(median cross-device position error 159 m), not boundary noise.
+
+**Not a core builtin** (same reasoning as `kink.js`'s existing precedent, see `mods/index.js`): the
+default threshold is calibrated to one GPS chip generation. A same-trip Hero5 recording's baseline
+hdop runs ~3× lower than Hero10's (kept-point median 1.8 vs 5.3-5.8), so a fixed cutoff tuned for
+one chip would misfire or sit permanently inert on another — this stays an explicit
+`opts.modules: [await loadModule("gpsQuality")]` opt-in, never a device-agnostic default. `core`'s
+public `index.js` now exports `loadModule` so a consuming package can opt in without reaching into
+`core`'s internals. `packages/gopro/src/telemetry.js`'s `readGoproTelemetry` opts in automatically
+only when `meta.model === "HERO10"` (the only layer that knows the camera model) — every other
+model, and any non-GoPro source with no `hdop`/`fix` at all, is unaffected (the module self-gates to
+a no-op when both fields are `null`).
+
+This also **revises** the device-dependence finding in [`docs/hdop-notes.md`](docs/hdop-notes.md):
+its §4/§5 concluded GX-class hdop "adds little over geometry" from the distribution's shape alone
+(no knee — no absolute or percentile cut isolates a spatially-concentrated obstruction *place*);
+that inference was never checked against an independent position reference for GX itself. §9
+(added 2026-07-07) found the opposite once one existed: a knee-less, continuous ramp can still back
+a real, ground-truth-validated *point-level* quality gate — just not an obstruction-*place* map.
+
 **`drift`'s window scale mismatch on a short clip — found, fixed, then corrected again
 (2026-07-05/06), same investigation.** `drift`'s only compactness check, `netd150` (±NETD_WIN,
 150 s), clamps to the whole clip on anything not much longer than that — so on a 33 s clip every
@@ -850,8 +877,10 @@ assemble.)
   "garbage-zone" subset the pipeline currently keeps). Still open: shade the clean line by a signal
   (e.g. `hs`), and surface `activity.modes`. **What hdop means and whether it's usable is
   device-dependent** — see [`docs/hdop-notes.md`](docs/hdop-notes.md) (good chips give a clean
-  baseline/obstruction split; poor chips give an unusable noise ramp), which gates any future move to
-  wire hdop into the pipeline.
+  baseline/obstruction split as an *obstruction-place* signal; poor chips give an unusable noise
+  ramp for that use). **Wired into the pipeline for Hero10 on 2026-07-07** (`mods/gpsQuality.js`,
+  see "GPS-chip quality gate" above) as a *point-level* quality gate, a different use than the
+  obstruction-place mapping `hdop-notes.md` was written against — see its §9 for the reconciliation.
 - **Drop → keep / reposition, and where framing rides (direction)** — the drop modules only emit a
   **drop signal**; the eventual reconstruction tier (see roadmap: *track smoothing*) is a later stage
   that decides, per dropped point/run, **discard vs reposition** (move it back onto a plausible line)
