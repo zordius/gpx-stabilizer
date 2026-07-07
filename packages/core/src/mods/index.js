@@ -62,7 +62,11 @@ export function validateModule(name, def) {
  * (its sharp-turn flags are either spikes despike already drops, or real corners we keep). The file
  * `./kink.js` stays; opt back in for the future ski work via `opts.modules: [await loadModule("kink")]`.
  * It originally sat after `drift` / before `despike`, but compute-module ORDER IS COSMETIC (each runs
- * on the same ctx independently; assemble/glue come after), so re-add it anywhere among the computes. */
+ * on the same ctx independently; assemble/glue come after), so re-add it anywhere among the computes.
+ * `gpsQuality` is ALSO intentionally not here, for a different reason: it gates on the raw GPS chip's
+ * own `hdop`/`fix`, and its default threshold is calibrated to one specific chip generation (see the
+ * module's own doc) — a caller that knows which device/model produced the track opts in via
+ * `opts.modules: [await loadModule("gpsQuality")]` (e.g. packages/gopro, gated on `meta.model`). */
 export const builtins = [
   validateModule("dequantizeTime", dequantizeTime),
   validateModule("noTime", noTime),

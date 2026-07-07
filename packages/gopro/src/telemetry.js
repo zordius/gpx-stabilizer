@@ -4,7 +4,7 @@
 // docs/export-contract.md.
 
 import { statSync } from "node:fs";
-import { resample, stabilize } from "gpx-stabilizer";
+import { loadModule, resample, stabilize } from "gpx-stabilizer";
 import tzlookup from "tz-lookup";
 import { extractGoproAll, probeGoproMeta } from "./gopro.js";
 import { CACHE_V, readCache, resolveCachePath, writeCache } from "./gopro-cache.js";
@@ -217,7 +217,9 @@ export async function readGoproSamples(path, opts = {}) {
  *   regularises the cleaned points onto a uniform time grid (see {@link resample}) — it
  *   **implies** `stabilize` (resampling raw, uncleaned points is meaningless), and
  *   `RESAMPLE_HZ: "fps"` (or `resample: "fps"`) uses the video frame rate (`meta.fps`) so
- *   there is one point per frame; `cache` controls the on-disk extraction record.
+ *   there is one point per frame; `cache` controls the on-disk extraction record. When cleaning
+ *   runs on a HERO10 file, core's `gpsQuality` module is applied automatically (gated on
+ *   `meta.model` — see the module's doc for why it's model-specific, not a general default).
  * @returns {Promise<TelemetryResult>}
  */
 export async function readGoproTelemetry(path, opts = {}) {
@@ -246,9 +248,18 @@ export async function readGoproTelemetry(path, opts = {}) {
   if (opts.resample && opts.stabilize === false) {
     throw new Error("readGoproTelemetry: `resample` requires cleaning — drop `stabilize: false`");
   }
+  // Hero10's GPS chip needs its own quality gate (core's `gpsQuality` module — see its doc): its
+  // hdop baseline runs 5-10x higher than a Hero5's on the same trip, so the threshold is calibrated
+  // to that one chip generation and must not silently apply to every model. `gpsQuality` is opt-in
+  // (not a core builtin) specifically so this decision lives here, where `meta.model` is known.
+  const gxModules = meta.model === "HERO10" ? [await loadModule("gpsQuality")] : [];
+  const stabilizeOpts = opts.stabilize && opts.stabilize !== true ? opts.stabilize : {};
   const cleaned =
     opts.stabilize || opts.resample
-      ? stabilize(raw, opts.stabilize && opts.stabilize !== true ? opts.stabilize : {})
+      ? stabilize(raw, {
+          ...stabilizeOpts,
+          modules: [...(stabilizeOpts.modules ?? []), ...gxModules],
+        })
       : raw;
 
   let points = cleaned;

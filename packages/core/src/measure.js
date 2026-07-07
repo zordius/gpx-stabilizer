@@ -55,8 +55,10 @@ function interpEle(raw) {
  *
  * Bundle: positions `xAll/yAll` (all points), `x/y/el/t` (valid); per-step `dt`, planar `planarStep`; the
  * PLANAR kinematic derivatives `velocity` (m/s) and `acceleration` (m/s²), each `{ vec, dir, mag }`
- * (horizontal vector, heading, magnitude); the separate vertical speed `vz` (m/s, Δel/Δt); and `speed`
- * = the device `<speed>` per valid point (or null).
+ * (horizontal vector, heading, magnitude); the separate vertical speed `vz` (m/s, Δel/Δt); `speed` =
+ * the device `<speed>` per valid point (or null); and the raw GPS-chip quality fields `hdop`
+ * (dilution of precision) and `fix` ("2d"/"3d"/"none") per valid point, or null when the source
+ * never populates them (e.g. Android/FitoTrack GPX has neither tag at all).
  * Every array is per-point length `valid.length` — the per-step quantities are padded so the last
  * point reuses the previous step's value, so consumers index directly by point (no n−1 offset).
  *
@@ -69,6 +71,8 @@ export function measure(points, valid) {
   const { velocity, acceleration } = kinematics(x, y, dt); //   block 3 — PLANAR (x/y only)
   const vz = verticalRate(el, dt); //                           block 3b — the separate vertical axis
   const speed = valid.map((i) => points[i].speed ?? null); //   device <speed> per valid point, or null
+  const hdop = valid.map((i) => points[i].hdop ?? null); //     device <hdop> per valid point, or null
+  const fix = valid.map((i) => points[i].fix ?? null); //       device <fix> ("2d"/"3d"/"none") or null
   // Align every per-step array to per-point length n: the last point reuses the previous step's
   // value ("same as its neighbour"), so all bundle arrays index directly by point — no n-1 offset.
   return {
@@ -86,6 +90,8 @@ export function measure(points, valid) {
     acceleration: padOrder(acceleration),
     vz: padLast(vz),
     speed,
+    hdop,
+    fix,
     n: valid.length,
   };
 }

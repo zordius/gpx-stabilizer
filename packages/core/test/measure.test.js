@@ -94,6 +94,21 @@ test("measure: projects all points and takes adjacent deltas over the valid sub-
   assert.ok(Math.abs(m.vz[60]) < 1e-9, `vz=${m.vz[60]}`); // flat run -> zero vertical speed
   assert.equal(m.speed.length, 121); // device speed carried per valid point
   assert.equal(m.speed[60], null); // these synthetic points have no <speed>
+  assert.equal(m.hdop.length, 121); // device hdop carried per valid point
+  assert.equal(m.hdop[60], null); // these synthetic points have no <hdop>
+  assert.equal(m.fix.length, 121); // device fix carried per valid point
+  assert.equal(m.fix[60], null); // these synthetic points have no <fix>
+});
+
+test("measure: carries hdop/fix through per valid point when the source has them", () => {
+  const points = [
+    { lat: 36, lon: 138, ele: 0, time: 0, hdop: 1.5, fix: "3d" },
+    { lat: 36, lon: 138.001, ele: 0, time: 1000, hdop: 12.3, fix: "2d" },
+    { lat: 36, lon: 138.002, ele: 0, time: 2000, hdop: null, fix: null },
+  ];
+  const m = measure(points, [0, 1, 2]);
+  assert.deepEqual(m.hdop, [1.5, 12.3, null]);
+  assert.deepEqual(m.fix, ["3d", "2d", null]);
 });
 
 test("speedOf: device speed when present, else the planar velocity magnitude", () => {
