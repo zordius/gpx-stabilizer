@@ -221,7 +221,13 @@ if (opts.html || opts.png) {
   const tracks = groups.map((g) => ({ name: g.name, points: g.segments.flat() }));
   if (opts.html) {
     const htmlPath = join(outDir, "gopro-view.html");
-    writeFileSync(htmlPath, toHtmlAnalyzedFiles(tracks));
+    // one toHtmlAnalyzedFiles() call analyzes every group (potentially slow — full analyze() over
+    // each merged day's track) with no other progress signal, so report per-group start/done.
+    const onProgress = ({ name, index, total, phase, ms }) => {
+      if (phase === "start") console.log(`  [${index + 1}/${total}] analyzing ${name}...`);
+      else console.log(`  [${index + 1}/${total}] ${name} done (${(ms / 1000).toFixed(1)}s)`);
+    };
+    writeFileSync(htmlPath, toHtmlAnalyzedFiles(tracks, { onProgress }));
     console.log(`html -> ${htmlPath}`);
   }
   if (opts.png) {

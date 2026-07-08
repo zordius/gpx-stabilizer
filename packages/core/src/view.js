@@ -93,18 +93,37 @@ export function toHtml(points, opts = {}) {
 /** analyze stores raw (south-down) y; flip it for north-up SVG, keeping every field. */
 const flipY = (p) => ({ ...p, y: -p.y });
 
+/** Split a time-ordered point array into runs, breaking wherever consecutive points are more than
+ * `maxGapMs` apart — the shared `斷開` rule for anything derived from `stabilize()`'s export (which
+ * carries no `dropReason` of its own to break on, unlike `analyze()`'s own kept points). */
+function splitByGap(points, maxGapMs) {
+  const runs = [];
+  let cur = [];
+  for (const p of points) {
+    if (cur.length && p.time - cur[cur.length - 1].time > maxGapMs) {
+      runs.push(cur);
+      cur = [];
+    }
+    cur.push(p);
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
 /**
  * Run the analysis pipeline and split the result into render layers: a faint `raw` line of every
  * input point (background reference), the clean track (kept points as a line), and a marker layer per
- * drop reason. The **direct** drops — `drift`, `stray`, `outlier`, `activity` — render **red**;
- * `badspan` (the derived glued-region decision) is **brown `#960`**. `despike` is now detection-only
- * (a SIGNAL, not a drop), so it is a **teal `#0c8` overlay** on every despike-flagged point (kept
- * unless its region was dense enough for badspan to glue it) — toggle it against badspan to see what
- * got glued. Plus two GPS-quality overlays (`hdop 2–3`, `hdop ≥3`). Each *dropped* point lands in
- * exactly ONE drop layer by priority drift > stray > outlier > activity > badspan (direct reasons
- * win). Every point already carries `x`/`y` (dropped ones too), so drops plot where they were.
- * The hdop overlays are independent of drop status (a kept point can still be flagged) and self-gate
- * to empty on a track with no `<hdop>`.
+ * drop reason. The **direct** drops — `drift`, `stray`, `outlier`, `activity`, `fixQuality` — render
+ * **red**; `badspan` (the derived glued-region decision) is **brown `#960`**. `despike` is now
+ * detection-only (a SIGNAL, not a drop), so it is a **teal `#0c8` overlay** on every despike-flagged
+ * point (kept unless its region was dense enough for badspan to glue it) — toggle it against badspan
+ * to see what got glued. Plus two hdop GPS-quality overlays (`hdop 2–3`, `hdop ≥3`) — `fixQuality`'s
+ * own signal (non-3D `fix`) is a core builtin now (2026-07-08), so it always shows as a real drop
+ * layer rather than a separate independent-of-drop-status overlay. Each *dropped* point lands in
+ * exactly ONE drop layer by priority drift > stray > outlier > activity > fixQuality > badspan
+ * (direct reasons win). Every point already carries `x`/`y` (dropped ones too), so drops plot where
+ * they were. The hdop overlays are independent of drop status (a kept point can still be flagged) and
+ * self-gate to empty on a track with no `<hdop>`.
  * `opts` flows to `analyze` (e.g. `activities`, param overrides).
  * The clean track is split into separate polylines by `opts.breakLine(out) → runs`; the default
  * cuts it at every dropped point (a drop = a break, no line across the gap). This is the seam the
@@ -140,8 +159,9 @@ export function analyzedLayers(points, opts = {}) {
   // GPS-reported quality overlay (independent of drop status): mark every point whose device hdop
   // falls in a band, so a render shows where the receiver itself flagged low precision. Self-gating:
   // a track without `<hdop>` (e.g. FitoTrack) yields empty layers. The 99.99 sentinel (fix=none,
-  // "no valid fix") is excluded — those points are already shown via the drift layer; capping at <99
-  // keeps the `>=3` band to genuinely poor-but-valid fixes (real hdop tops out ~50).
+  // "no valid fix") is excluded — those points now show via the "fix≠3d drop" layer instead (see
+  // fixQuality.js); capping at <99 keeps the `>=3` band to genuinely poor-but-valid fixes (real hdop
+  // tops out ~50).
   const hdopLayer = (label, lo, hi, color) => ({
     label,
     color,
@@ -189,10 +209,18 @@ export function analyzedLayers(points, opts = {}) {
     dropLayer("stray", "stray", ["drift"]),
     dropLayer("outlier drop", "outlier", ["drift", "stray"]),
     dropLayer("activity drop", "activity", ["drift", "stray", "outlier"]),
+    // fixQuality (core builtin, 2026-07-08): the GPS chip's own reported fix isn't a full 3D lock
+    // (2d, or none — e.g. a pre-lock cold-start run). A direct drop like the others above, so red.
+    dropLayer("fix≠3d drop", "fixQuality", ["drift", "stray", "outlier", "activity"]),
     // `badspan` is the glued-region decision (drops whole high-density garbage stretches) — a
     // DERIVED drop, so a distinct brown from the red direct drops. Lower priority than the direct
     // reasons, so a point with a direct drop still shows red.
-    dropLayer("badspan (glue)", "badspan", ["drift", "stray", "outlier", "activity"], "#960"),
+    dropLayer(
+      "badspan (glue)",
+      "badspan",
+      ["drift", "stray", "outlier", "activity", "fixQuality"],
+      "#960",
+    ),
     // despike is detection-only now (a SIGNAL, not a drop) — teal OVERLAY on every despike-flagged
     // point (kept unless its region was dense enough for badspan to glue it). It feeds the bad-span
     // density; on its own it never drops a point. (Toggle it against badspan to see what got glued.)
@@ -241,18 +269,8 @@ export function analyzedLayers(points, opts = {}) {
       const { x, y } = projectTo(p.lat, p.lon, lat0, lon0);
       return flipY({ ...p, x, y });
     });
-    const maxGapMs = (opts.stabilizedMaxGap ?? 10) * 1000;
-    const runs = [];
-    let cur = [];
-    for (const p of shipped) {
-      if (cur.length && p.time - cur[cur.length - 1].time > maxGapMs) {
-        runs.push(cur);
-        cur = [];
-      }
-      cur.push(p);
-    }
-    if (cur.length) runs.push(cur);
-    layers.push({ label: "stabilized", color: "#f0a", width: 1.5, lines: runs });
+    const runs = splitByGap(shipped, (opts.stabilizedMaxGap ?? 10) * 1000);
+    layers.push({ label: "stabilized", color: "#0a0", width: 1.5, lines: runs });
   }
   // opts.labels → a black head/tail label per clean segment, on top (opts.labelSize sets font size)
   if (opts.labels) layers.push(segmentLabels(cleanLayer.lines, { fontSize: opts.labelSize }));
@@ -260,9 +278,158 @@ export function analyzedLayers(points, opts = {}) {
   return layers;
 }
 
+const ELE_TICK_M = 100; // elevation gridline/label spacing (metres)
+const TIME_TICK_MS = 10 * 60 * 1000; // time gridline/label spacing (10 minutes)
+
+const RAW_DOT_PX = 1; // red raw-point marker diameter
+const LINE_PX = 1; // stabilized elevation line width
+const LABEL_CHAR_PX = 10; // rough per-character width at the tick font-size, for label-skip spacing
+const STAB_COLOR = "#0a0"; // stabilized line, outside any lift segment
+const LIFT_COLOR = "#06f"; // stabilized line, inside a segment.type === "lift" run
+
+/**
+ * Split a run of consecutive points into contiguous same-`flag(p)` sub-runs, each carrying the
+ * transition point on BOTH sides of the split (so adjacent sub-runs still share an endpoint and the
+ * drawn line stays visually continuous across a color change instead of gapping).
+ */
+function splitByFlag(run, flag) {
+  if (run.length === 0) return [];
+  const segs = [];
+  let curFlag = flag(run[0]);
+  let cur = [run[0]];
+  for (let i = 1; i < run.length; i++) {
+    const f = flag(run[i]);
+    cur.push(run[i]);
+    if (f !== curFlag) {
+      segs.push({ flag: curFlag, pts: cur });
+      cur = [run[i]];
+      curFlag = f;
+    }
+  }
+  segs.push({ flag: curFlag, pts: cur });
+  return segs;
+}
+
 /** Min/max of an array via reduce (avoids spread-arg limits on long tracks). */
 function minMax(nums) {
   return nums.reduce(([lo, hi], v) => [Math.min(lo, v), Math.max(hi, v)], [Infinity, -Infinity]);
+}
+
+/**
+ * A time-vs-elevation chart (own coordinate system, independent of the map's lat/lon projection) of
+ * the real `stabilize(points, opts)` export's elevation — the same series the "stabilized" map layer
+ * draws, just plotted against time instead of position — as a thin green line (blue wherever
+ * `segment.type === "lift"`), with every RAW input
+ * point (unfiltered, so a dropped/despiked point still shows) plotted underneath as small red dots,
+ * so the cleaned line's effect is visible against the noise it replaced. The line is broken into
+ * separate polylines at any `opts.stabilizedMaxGap`-second time gap (`splitByGap`, the same rule the
+ * "stabilized" map layer uses), so a stretch the pipeline dropped shows as a visible break rather
+ * than a straight bridge across the missing time. The TIME axis domain covers whichever of the raw
+ * or stabilized series is wider, so neither ever clips off-canvas; the ELEVATION axis domain is the
+ * stabilized series only, so a despiked-away raw outlier can't compress the scale (a raw dot outside
+ * that range is clipped rather than widening it). Gridlines every `ELE_TICK_M` (100 m)
+ * on elevation and every `TIME_TICK_MS` (10 min, aligned to the clock, e.g. :00/:10/:20…) on time;
+ * time tick LABELS (not the gridlines) skip enough of those ticks to stay legible when the span is
+ * long enough that every-10-min labels would overlap.
+ *
+ * Renders as its own full-viewport `<section>` (html.js's `Panel.chart`), one per panel, alternating
+ * panel → chart → panel → chart — NOT an overlay on the map. Sized the same way as a map `<svg>`
+ * (`section > svg { width:100vw; height:100vh }`, already in html.js's stylesheet) with
+ * `preserveAspectRatio="xMidYMid meet"` (like `toSvg`'s own root element) so it scales UNIFORMLY —
+ * unlike the map, this chart's own x/y (time/elevation) don't share a real-world unit that needs
+ * preserving, but "none" stretching would distort the tick text/gridlines non-uniformly, so `meet`
+ * (with some letterboxing when the viewport's aspect ratio doesn't match the chosen internal one) is
+ * still the right choice here too.
+ * @param {import("./measure.js").TrackPoint[]} points
+ * @param {Parameters<typeof analyze>[1] & { stabilizedMaxGap?: number }} [opts]
+ * @param {{ width?: number, height?: number }} [size]  the SVG's internal viewBox units
+ * @returns {{ svg: string, total: number, kept: number, t0: number, t1: number } | null}  `svg` is a
+ *   `class="elev-chart"` string; `total`/`kept` are point counts (for a caller-built title, e.g.
+ *   `toHtmlAnalyzedFiles`'s `chartTitle`); null when there's nothing to draw
+ */
+export function elevationChartSvg(points, opts = {}, size = {}) {
+  const shipped = stabilize(points, opts).filter((p) => Number.isFinite(p.ele) && p.time != null);
+  if (shipped.length < 2) return null;
+  const raw = points.filter((p) => Number.isFinite(p.ele) && p.time != null);
+  const runs = splitByGap(shipped, (opts.stabilizedMaxGap ?? 10) * 1000);
+  // segment.type === "lift" runs, for coloring the stabilized line — a separate `analyze()` pass
+  // (stabilize() doesn't carry `segment` into its own {lat,lon,ele,time} output) over the same points,
+  // so it sees the identical drop set (segment/liftConfirm aren't affected by the smooth/gradeBound
+  // compute modules stabilize() may add on top).
+  const liftTimes = new Set(
+    analyze(points, opts)
+      .filter((p) => !p.dropReason && p.segment?.type === "lift")
+      .map((p) => p.time),
+  );
+  const isLift = (p) => liftTimes.has(p.time);
+
+  // elevation domain is the STABILIZED (kept/adjusted) series only — a despiked-away raw outlier must
+  // not compress the scale the stabilized line is read against.
+  const [eleMin, eleMax] = minMax(shipped.map((p) => p.ele));
+  const [t0S, t1S] = [shipped[0].time, shipped.at(-1).time];
+  const [t0R, t1R] = minMax(raw.map((p) => p.time));
+  const t0 = Math.min(t0S, t0R);
+  const t1 = Math.max(t1S, t1R);
+  const w = size.width ?? 1200;
+  const h = size.height ?? 500;
+  const padL = 70; // room for elevation tick labels
+  const padR = 20;
+  const padT = 20;
+  const padB = 50; // room for time tick labels
+  const eleSpan = Math.max(eleMax - eleMin, 1e-6);
+  const tSpan = Math.max(t1 - t0, 1);
+  const sx = (t) => padL + ((t - t0) / tSpan) * (w - padL - padR);
+  const sy = (ele) => h - padB - ((ele - eleMin) / eleSpan) * (h - padT - padB); // higher ele -> higher on screen
+
+  const parts = [`<rect x="0" y="0" width="${w}" height="${h}" fill="#fff" stroke="#000"/>`];
+
+  for (let e = Math.ceil(eleMin / ELE_TICK_M) * ELE_TICK_M; e <= eleMax; e += ELE_TICK_M) {
+    const y = sy(e).toFixed(1);
+    parts.push(
+      `<line x1="${padL}" y1="${y}" x2="${w - padR}" y2="${y}" stroke="#ccc" stroke-width="1"/>`,
+      `<text x="${padL - 8}" y="${y}" font-size="18" text-anchor="end" dominant-baseline="middle">${e}m</text>`,
+    );
+  }
+  // gridlines stay at every TIME_TICK_MS, but labels skip enough ticks to stay legible: estimate how
+  // many ticks fit in the available width before "HH:MM" labels (5 chars) would start overlapping.
+  const availW = w - padL - padR;
+  const numTicks = Math.floor((t1 - t0) / TIME_TICK_MS) + 1;
+  const pxPerTick = availW / Math.max(1, numTicks - 1);
+  const labelStep = Math.max(1, Math.ceil((5 * LABEL_CHAR_PX) / Math.max(1, pxPerTick)));
+  let tickIdx = 0;
+  for (let t = Math.ceil(t0 / TIME_TICK_MS) * TIME_TICK_MS; t <= t1; t += TIME_TICK_MS, tickIdx++) {
+    const x = sx(t).toFixed(1);
+    parts.push(
+      `<line x1="${x}" y1="${padT}" x2="${x}" y2="${h - padB}" stroke="#ccc" stroke-width="1"/>`,
+    );
+    if (tickIdx % labelStep === 0) {
+      parts.push(
+        `<text x="${x}" y="${h - padB + 20}" font-size="18" text-anchor="middle">${fmtTime(t).slice(-5)}</text>`,
+      );
+    }
+  }
+
+  // raw points (unfiltered — a dropped/despiked point still shows) as small red dots, UNDER the line
+  const rawD = raw.map((p) => `M${sx(p.time).toFixed(1)},${sy(p.ele).toFixed(1)} h0`).join(" ");
+  parts.push(
+    `<path d="${rawD}" stroke="#f00" stroke-width="${RAW_DOT_PX}" stroke-linecap="round"/>`,
+  );
+
+  for (const run of runs) {
+    for (const seg of splitByFlag(run, isLift)) {
+      if (seg.pts.length < 2) continue; // a lone point can't draw a line segment
+      const d = `M${seg.pts.map((p) => `${sx(p.time).toFixed(1)},${sy(p.ele).toFixed(1)}`).join(" ")}`;
+      const color = seg.flag ? LIFT_COLOR : STAB_COLOR;
+      parts.push(`<path d="${d}" fill="none" stroke="${color}" stroke-width="${LINE_PX}"/>`);
+    }
+  }
+  return {
+    svg: `<svg class="elev-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${parts.join("")}</svg>`,
+    total: points.length,
+    kept: shipped.length,
+    t0: t0R, // the file's own raw time range (matches the page-level summarize()'s own convention),
+    t1: t1R, // not just the kept/shipped subset — a dropped stretch still had a real timestamp
+  };
 }
 
 /** Epoch ms → "YYYY-MM-DD HH:MM" (UTC). */
@@ -318,18 +485,49 @@ export function toHtmlFiles(files, opts = {}) {
 
 /**
  * Like `toHtmlFiles`, but each panel shows the analysed result — the clean track plus drop markers
- * via `analyzedLayers`. `opts` flows to `analyze`.
+ * via `analyzedLayers`. `opts` flows to `analyze`. Each panel is also followed by its own
+ * `elevationChartSvg` chart section (see that function's doc) — same opt-out as the "stabilized" map
+ * layer it's derived from (`opts.stabilized: false` skips both). The chart section gets its own
+ * title (file name · raw time range · deleted/total point count), built from `elevationChartSvg`'s
+ * returned counts.
+ *
+ * `opts.onProgress`, if given, is called twice per file — `{ name, index, total, phase: "start" }`
+ * just before that file's (potentially slow — full analyze() + every ski-mode module) processing
+ * begins, then `{ ..., phase: "done", ms }` right after — so a caller with many/large files (e.g.
+ * the CLI's `--html`, one synchronous call with no other progress signal) can report progress. Never
+ * reaches `analyze()` itself (stripped before `rest` is built), so it can't leak into `ctx.g`.
  * @param {Array<{ name: string, points: import("./measure.js").TrackPoint[] }>} files
- * @param {Parameters<typeof analyze>[1] & { title?: string, heading?: string }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { title?: string, heading?: string, onProgress?: (info: { name: string, index: number, total: number, phase: "start" | "done", ms?: number }) => void }} [opts]
  */
 export function toHtmlAnalyzedFiles(files, opts = {}) {
-  const panels = files.map((f) => {
-    const layers = analyzedLayers(f.points, opts);
-    return { title: f.name, layers, opts: { origin: layers.origin } };
+  const { onProgress, ...rest } = opts;
+  const panels = files.map((f, i) => {
+    const startedAt = Date.now();
+    onProgress?.({ name: f.name, index: i, total: files.length, phase: "start" });
+    const layers = analyzedLayers(f.points, rest);
+    const chartResult = rest.stabilized !== false ? elevationChartSvg(f.points, rest) : null;
+    onProgress?.({
+      name: f.name,
+      index: i,
+      total: files.length,
+      phase: "done",
+      ms: Date.now() - startedAt,
+    });
+    const chartTitle = chartResult
+      ? `${f.name} · ${fmtTime(chartResult.t0)} – ${fmtTime(chartResult.t1)} · ` +
+        `${chartResult.total - chartResult.kept}/${chartResult.total} deleted`
+      : null;
+    return {
+      title: f.name,
+      layers,
+      chart: chartResult?.svg ?? null,
+      chartTitle,
+      opts: { origin: layers.origin },
+    };
   });
   return writeHtml(panels, {
-    title: opts.title ?? "GPX Stabilizer",
-    heading: opts.heading ?? "GPX Stabilizer — analyzed",
+    title: rest.title ?? "GPX Stabilizer",
+    heading: rest.heading ?? "GPX Stabilizer — analyzed",
     summary: summarize(files),
   });
 }

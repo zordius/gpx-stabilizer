@@ -58,11 +58,17 @@ if (dis) cfg.disable = [...(cfg.disable ?? []), ...dis.split(",")];
 if (has("no-stabilized")) cfg.stabilized = false;
 
 if (has("html")) {
-  // one HTML document with a scrolling panel per file
+  // one HTML document with a scrolling panel per file. A single toHtmlAnalyzedFiles() call analyzes
+  // every file (full analyze() + every ski-mode module, potentially slow for many/large files) with
+  // no other progress signal, so report per-file start/done via onProgress.
   const tracks = files.map((f) => ({ name: basename(f), points: readGpx(f).segments.flat() }));
   for (const t of tracks) console.log(`${t.name}: ${t.points.length} points`);
   const out = optFile("html", "out.html");
-  writeFileSync(out, toHtmlAnalyzedFiles(tracks, cfg));
+  const onProgress = ({ name, index, total, phase, ms }) => {
+    if (phase === "start") console.log(`  [${index + 1}/${total}] analyzing ${name}...`);
+    else console.log(`  [${index + 1}/${total}] ${name} done (${(ms / 1000).toFixed(1)}s)`);
+  };
+  writeFileSync(out, toHtmlAnalyzedFiles(tracks, { ...cfg, onProgress }));
   console.log(`html -> ${out}`);
 } else if (has("png")) {
   // one PNG per file

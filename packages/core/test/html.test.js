@@ -231,6 +231,51 @@ test("writeHtml: each panel's own opts.origin lands on its own svg (multi-file, 
   assert.match(html, /data-lat0="3" data-lon0="4"/);
 });
 
+test("writeHtml: panel.chart renders as its OWN section right after the panel's, not inside it", () => {
+  const html = writeHtml([
+    {
+      layers: [{ label: "t", lines: [pts([0, 0], [1, 1])] }],
+      chart: '<svg class="elev-chart"></svg>',
+    },
+    { layers: [{ label: "t", lines: [pts([0, 0], [1, 1])] }] }, // no chart -> just one section
+  ]);
+  assert.equal([...html.matchAll(/class="elev-chart"/g)].length, 1);
+  // panel -> chart -> panel: the chart's own <section> follows the first panel's closing </section>,
+  // and precedes the second panel's own <section> (order proves it's a sibling, not embedded inside)
+  assert.match(
+    html,
+    /<\/section>\n<section><svg class="elev-chart">[\s\S]*?<\/section>\n<section>/,
+  );
+});
+
+test("writeHtml: panel.chartTitle renders as a sticky <h2> before the chart svg; escaped, omitted when absent", () => {
+  const withTitle = writeHtml([
+    {
+      layers: [{ label: "t", lines: [pts([0, 0], [1, 1])] }],
+      chart: '<svg class="elev-chart"></svg>',
+      chartTitle: "a.gpx & <b>",
+    },
+  ]);
+  assert.match(
+    withTitle,
+    /<section><header><h2>a\.gpx &amp; &lt;b&gt;<\/h2><\/header><svg class="elev-chart">/,
+  );
+
+  const withoutTitle = writeHtml([
+    {
+      layers: [{ label: "t", lines: [pts([0, 0], [1, 1])] }],
+      chart: '<svg class="elev-chart"></svg>',
+    },
+  ]);
+  assert.doesNotMatch(withoutTitle, /<h2>/);
+});
+
+test("writeHtml: a chart svg click scroll-fits it instead of zooming (wired into the script)", () => {
+  const html = writeHtml([]);
+  assert.match(html, /classList\.contains\("elev-chart"\)/);
+  assert.match(html, /scrollIntoView/);
+});
+
 test("writeHtml embeds the click-to-show-coordinates script (lat0/lon0 inversion)", () => {
   const html = writeHtml([]);
   assert.match(html, /showCoords/);

@@ -267,13 +267,21 @@ function renderLayer(layer, id) {
  * @property {Layer[]} layers   the layers for this SVG
  * @property {string} [title]   panel heading, rendered as a sticky `<h2>` above the SVG (e.g. file name)
  * @property {Parameters<typeof toSvg>[1]} [opts]   per-SVG toSvg options
+ * @property {string} [chart]  a raw, pre-rendered SVG string (e.g. view.js's `elevationChartSvg`) —
+ *   rendered as its OWN full-viewport `<section>` immediately after this panel's own section (not an
+ *   overlay on it), so the document reads panel → chart → panel → chart. writeHtml embeds it
+ *   opaquely, without needing to understand its content; a click scroll-fits it, same as a panel.
+ * @property {string} [chartTitle]  plain text/HTML for the chart section's own sticky `<h2>` (same
+ *   header styling as a panel's own title); ignored when `chart` is absent.
  */
 
 /**
  * Render a standalone HTML document (semantic markup, no `<div>`): a page `<header>` with the `<h1>`
  * heading and an optional summary `<p>`, then one `<section>` per panel — each holding a sticky
  * `<header>` (the panel title as `<h2>` plus an overlaid legend) and one full-viewport SVG that
- * scrolls past underneath. Each panel is drawn by `toSvg` and inlined (no intermediate files). A
+ * scrolls past underneath. When a panel carries `p.chart`, its own full-viewport `<section>` follows
+ * immediately after — panel → chart → panel → chart — so a click scroll-fits either one, but the
+ * chart never zooms/pans. Each panel is drawn by `toSvg` and inlined (no intermediate files). A
  * `<style>` block sizes every `<svg>` to one viewport (`100vw` x `100vh`, white card on a grey
  * page); combined with each SVG's `preserveAspectRatio` the drawing scales to fill and stays
  * centred, keeping its aspect ratio. Any element's hover fade eases in over 0.3 s and out over 0.7 s.
@@ -304,7 +312,15 @@ export function writeHtml(panels = [], opts = {}) {
       const id = p.title != null ? slug(p.title) : null;
       const open = id ? `<section id="${id}">` : "<section>";
       const svg = toSvg(layers, { ...p.opts, ontop: true, idPrefix: id ?? `p${i}` });
-      return `${open}\n${renderHead(p.title, layers, id)}${svg}\n</section>`;
+      const mapSection = `${open}\n${renderHead(p.title, layers, id)}${svg}\n</section>`;
+      // the chart is its OWN full-viewport section, a sibling right after the map's — panel → chart
+      // → panel → chart — not an overlay on the map (see Panel.chart's doc). Its title reuses the
+      // same sticky-header <h2> styling as a map panel's own title (no anchor/link — charts have no
+      // section id to link to).
+      const chartHead =
+        p.chartTitle != null ? `<header><h2>${enc(p.chartTitle)}</h2></header>` : "";
+      const chartSection = p.chart ? `<section>${chartHead}${p.chart}</section>` : "";
+      return chartSection ? `${mapSection}\n${chartSection}` : mapSection;
     })
     .join("\n");
   // Pure-CSS rules per labelled layer slug: unchecking a panel's legend checkbox dims that panel's
@@ -361,6 +377,7 @@ section li input:checked::before { transform: scale(1); }
 section > svg { grid-area: 1 / 1; display: block; width: 100vw; height: 100vh; cursor: zoom-in; }
 section > svg polyline, section > svg path { vector-effect: non-scaling-stroke; }
 .ontop { opacity: 0; pointer-events: none; }
+.elev-chart { cursor: pointer; } /* a click scroll-fits it, not zoom — see the click handler below */
 * { transition: opacity 0.7s ease, background-color 0.7s ease, stroke-width 0.3s ease; }
 *:hover { transition-duration: 0.3s; }
 ${toggles}
@@ -466,6 +483,10 @@ document.body.addEventListener("contextmenu", (e) => {
 document.body.addEventListener("click", (e) => {
   if (e.target === btn) return restore();
   const svg = e.target.closest("section > svg");
+  // a chart svg never zooms/pans — one click just scroll-fits it, same as a panel out of view
+  if (svg && svg.classList.contains("elev-chart")) {
+    return svg.scrollIntoView({ behavior: "smooth", block: "start" });
+  }
   if (svg && svg === zoomed) {
     if (!lastDragMoved) showCoords(svg, e.clientX, e.clientY); // plain click (no pan) -> show lat/lon
     return;
