@@ -82,6 +82,28 @@ test("stabilize: opts.tangleSnap swaps lat/lon ahead of liftSnap when point.tang
   assert.equal(neither[0].lat, 36); // both flags off -> stays raw
 });
 
+test("stabilize: opts.liftBoardingEle's ele wins over liftSnap's when point.liftBoardingEle is present", () => {
+  const fakeSnaps = {
+    name: "fakeSnaps",
+    finalize: (out) => {
+      out[0].liftSnap = { lat: out[0].lat, lon: out[0].lon, ele: 500 };
+      out[0].liftBoardingEle = { ele: 700 };
+    },
+  };
+  const pts = [
+    { lat: 36, lon: 138, ele: 1000, time: 0 },
+    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 1000 },
+  ];
+  const withBoth = stabilize(pts, { modules: [fakeSnaps], liftSnap: true, liftBoardingEle: true });
+  assert.equal(withBoth[0].ele, 700); // liftBoardingEle wins over liftSnap
+
+  const liftOnly = stabilize(pts, { modules: [fakeSnaps], liftSnap: true });
+  assert.equal(liftOnly[0].ele, 500); // liftBoardingEle flag off -> falls through to liftSnap
+
+  const neither = stabilize(pts, { modules: [fakeSnaps] });
+  assert.equal(neither[0].ele, 1000); // both flags off -> stays raw
+});
+
 // A gentle, long-wavelength lateral wobble (one sine cycle spans the whole run, ~1m amplitude) —
 // large enough for liftSnap's best-fit line to visibly flatten, gentle enough to stay well within
 // liftConfirm's straightness/turn-rate gates (unlike a per-step alternating jitter, which reads as a

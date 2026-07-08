@@ -51,17 +51,24 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  * `liftSnap`'s own position as its input where available, so its output is the more-refined answer.
  * Does not touch `ele`.
  *
+ * A fifth, ski-specific `ele` rewrite: **`opts.liftBoardingEle`** — same decoupled-loading
+ * convention (module: `mods/liftBoardingEle.js`). Reads `point.liftBoardingEle` (`{ ele }`, only
+ * present on the handful of points inside a lift-boarding/unloading elevation-sag artifact it
+ * bridges over — see that module's doc) and, when present, overrides `ele` ahead of `liftSnap`'s own
+ * `ele` (the two almost never overlap in practice, but this one is the more targeted, validated fix
+ * when they do).
+ *
  * **`opts.mode`** (e.g. `"ski"`) expands to a preset's params + modules via `resolveMode`
  * (./modes.js) BEFORE any of the above is read — so `MODES.ski`'s own `liftSnap`/`tangleSnap`/
- * `gradeBound: true` and its `enable` modules are already in effect by the time this function's own
- * destructuring runs. An explicit field on `opts` still wins over the preset (same precedence the
- * CLI's `--mode` + `--config` already had).
+ * `gradeBound`/`liftBoardingEle: true` and its `enable` modules are already in effect by the time
+ * this function's own destructuring runs. An explicit field on `opts` still wins over the preset
+ * (same precedence the CLI's `--mode` + `--config` already had).
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { mode?: string, smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { mode?: string, smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean, liftBoardingEle?: boolean }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { smooth, gradeBound, liftSnap, tangleSnap, ...rest } = resolveMode(opts);
+  const { smooth, gradeBound, liftSnap, tangleSnap, liftBoardingEle, ...rest } = resolveMode(opts);
   const modules = [...(rest.modules ?? [])];
   if (smooth) modules.push(smoothModule);
   if (gradeBound) modules.push(gradeBoundModule);
@@ -79,9 +86,11 @@ export function stabilize(points, opts = {}) {
     .map((p) => ({
       lat: (tangleSnap ? p.tangleSnap?.lat : null) ?? (liftSnap ? p.liftSnap?.lat : null) ?? p.lat,
       lon: (tangleSnap ? p.tangleSnap?.lon : null) ?? (liftSnap ? p.liftSnap?.lon : null) ?? p.lon,
-      // liftSnap (a confirmed-lift pause reposition) wins when present, then gradeBound (despike)
-      // over smooth when both set (terrain-preserving), else whichever, else raw
+      // liftBoardingEle (the lift-boarding sag fix) wins when present, then liftSnap (a confirmed-
+      // lift pause reposition), then gradeBound (despike) over smooth when both set (terrain-
+      // preserving), else whichever, else raw
       ele:
+        (liftBoardingEle ? p.liftBoardingEle?.ele : null) ??
         (liftSnap ? p.liftSnap?.ele : null) ??
         (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ??
         p.ele,

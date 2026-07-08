@@ -10,6 +10,7 @@
 
 import { validateModule } from "./mods/index.js";
 import * as kink from "./mods/kink.js";
+import * as liftBoardingEle from "./mods/liftBoardingEle.js";
 import * as liftConfirm from "./mods/liftConfirm.js";
 import * as liftSnap from "./mods/liftSnap.js";
 import * as segment from "./mods/segment.js";
@@ -34,6 +35,7 @@ function getModuleRegistry() {
       segment: validateModule("segment", segment),
       liftConfirm: validateModule("liftConfirm", liftConfirm),
       liftSnap: validateModule("liftSnap", liftSnap),
+      liftBoardingEle: validateModule("liftBoardingEle", liftBoardingEle),
       tangleSnap: validateModule("tangleSnap", tangleSnap),
     };
   }
@@ -52,6 +54,7 @@ export const MODES = {
       liftSnap: true,
       tangleSnap: true,
       gradeBound: true,
+      liftBoardingEle: true,
     },
     // `gradeBound` (2026-07-08) was already shipped and general-purpose but never enabled by
     // EITHER mode — ski-mode output had zero elevation despiking by default (the physically-
@@ -64,7 +67,10 @@ export const MODES = {
     // because ski mode is currently the only mode doing survivor repositioning at all, and it must
     // run AFTER `liftSnap` (its own module doc: prefers `point.liftSnap`'s position when present).
     // A non-ski caller can still `loadModule("tangleSnap")` and pass `tangleSnap: true` manually.
-    enable: ["kink", "segment", "liftConfirm", "liftSnap", "tangleSnap"],
+    // `liftBoardingEle` (2026-07-08) fixes the lift-boarding/unloading elevation-sag artifact (see
+    // that module's doc) — validated against 53 real confirmed-lift runs across 9 real files, ~17%
+    // (likely an undercount) show the exact shape. Must run after `liftConfirm` (reads its verdict).
+    enable: ["kink", "segment", "liftConfirm", "liftSnap", "liftBoardingEle", "tangleSnap"],
   },
 };
 
