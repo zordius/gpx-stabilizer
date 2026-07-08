@@ -14,7 +14,17 @@ const ramp = (n, f = (i) => i) => Array.from({ length: n }, (_, i) => f(i));
 test("mods: builtins are the named modules, routed by callback", () => {
   assert.deepEqual(
     builtins.map((m) => m.name),
-    ["dequantizeTime", "noTime", "oversample", "outlier", "stray", "activity", "drift", "despike"],
+    [
+      "dequantizeTime",
+      "noTime",
+      "oversample",
+      "outlier",
+      "stray",
+      "activity",
+      "drift",
+      "despike",
+      "fixQuality",
+    ],
   );
   assert.deepEqual(
     labelMods.map((m) => m.name),

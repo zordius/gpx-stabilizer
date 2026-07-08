@@ -20,6 +20,7 @@ import * as activity from "./activity.js";
 import * as dequantizeTime from "./dequantizeTime.js";
 import * as despike from "./despike.js";
 import * as drift from "./drift.js";
+import * as fixQuality from "./fixQuality.js";
 import * as noTime from "./noTime.js";
 import * as outlier from "./outlier.js";
 import * as oversample from "./oversample.js";
@@ -63,13 +64,15 @@ export function validateModule(name, def) {
  * `./kink.js` stays; opt back in for the future ski work via `opts.modules: [await loadModule("kink")]`.
  * It originally sat after `drift` / before `despike`, but compute-module ORDER IS COSMETIC (each runs
  * on the same ctx independently; assemble/glue come after), so re-add it anywhere among the computes.
- * `gpsQuality` is ALSO intentionally not here, for a different reason: it gates on the raw GPS chip's
- * own `hdop`/`fix`, and its default threshold is calibrated to one specific chip generation (see the
- * module's own doc) — a caller that knows which device/model produced the track opts in via
+ * `fixQuality` IS here (2026-07-08) — a non-3D GPS `fix` is a chip-agnostic, unconditionally-bad
+ * signal (the device itself distrusts the position), unlike `gpsQuality`'s `hdop` threshold, which
+ * genuinely needs per-chip calibration (see that module's doc) and stays opt-in for that reason. A
+ * caller that knows the device/model still opts into the hdop half via
  * `opts.modules: [await loadModule("gpsQuality")]` (e.g. packages/gopro, gated on `meta.model`).
- * `segment`/`liftConfirm`/`liftSnap` are also not here — ski-specific (lift/descent/flat + cable-line
- * confirmation + reconstruction), untuned first-look thresholds, no value for a non-ski track. All
- * three (plus `kink`) are bundled by `MODES.ski` in `../modes.js`, the intended way to opt in.
+ * `segment`/`liftConfirm`/`liftSnap`/`liftBoardingEle` are also not here — ski-specific (lift/descent/
+ * flat + cable-line confirmation + reconstruction + the lift-boarding elevation-sag fix), untuned
+ * first-look thresholds, no value for a non-ski track. All four (plus `kink`) are bundled by
+ * `MODES.ski` in `../modes.js`, the intended way to opt in.
  * `tangleSnap` is also not here, though it's general-purpose rather than ski-specific (a very-low-
  * speed GPS-tangle thin+reinflate, no sport assumptions) — its thresholds are equally untuned, and it
  * still needs to run after `liftSnap` when both are present, so it's bundled by `MODES.ski` alongside
@@ -83,6 +86,7 @@ export const builtins = [
   validateModule("activity", activity),
   validateModule("drift", drift),
   validateModule("despike", despike),
+  validateModule("fixQuality", fixQuality),
 ];
 
 /**

@@ -4,11 +4,9 @@ import { compute } from "../src/mods/gpsQuality.js";
 
 const ctx = (hdop, fix, g = {}) => ({ n: hdop.length, hdop, fix, g });
 
-test("gpsQuality: drops a non-3d fix regardless of hdop", () => {
+test("gpsQuality: a non-3d fix with in-bound hdop is NOT dropped here (moved to fixQuality.js)", () => {
   const { drop } = compute(ctx([1, 1, 1], ["3d", "2d", "none"]));
-  assert.equal(drop[0], null);
-  assert.deepEqual(drop[1], { hdop: 1, fix: "2d" });
-  assert.deepEqual(drop[2], { hdop: 1, fix: "none" });
+  assert.deepEqual(drop, [null, null, null]);
 });
 
 test("gpsQuality: drops a 3d fix whose hdop is at/over the default threshold (10)", () => {
