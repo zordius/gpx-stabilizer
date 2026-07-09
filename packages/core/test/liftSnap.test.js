@@ -18,7 +18,7 @@ test("liftSnap: a straight run gets snapped onto its own line, at least 20m from
   for (const p of out.slice(2, 8)) {
     assert.ok(Math.abs(p.liftSnap.lon - p.x / DEG_LON_M) < 1e-9);
     assert.ok(Math.abs(p.liftSnap.lat - 0) < 1e-9); // y=0 throughout -> lat stays 0
-    assert.equal(p.liftSnap.ele, undefined); // forward points: ele untouched
+    assert.equal(p.liftSnap.ele, undefined); // no `hs` set -> never a pause event -> ele untouched
   }
 });
 
@@ -51,15 +51,62 @@ test("liftSnap: fades the snap weight 0->1 over the first/last 20m, not a hard o
   assert.ok(faded[1].liftSnap.lat > lo && faded[1].liftSnap.lat < hi);
 });
 
-test("liftSnap: a backward point (well inside the fade-free core) moves onto the anchor (lat, lon, AND elevation)", () => {
-  // span 0..150m, backward event at x=80 (70m from the start, 50m from the end — both well past the
-  // 20m fade) so weight=1 throughout and this exercises the anchor-snap alone, undiluted by fading.
-  const out = [0, 50, 100, 80, 150].map((x, i) => pt({ x, y: 0, ele: 1000 + i, time: i * 1000 }));
+test("liftSnap: a pause EVENT (hysteresis on hs) moves every point in it onto the SAME anchor position and elevation", () => {
+  // span 0..150m; hs drops to 0.1 m/s (well under the 0.5 HS_ON default) for a 1s stretch (indices
+  // 3-4) while x holds at 100 -- a genuine stop, well inside the fade-free core (>=20m from either
+  // end) so weight=1 throughout and this exercises the anchor-snap alone, undiluted by fading.
+  const out = [0, 50, 100, 100, 100, 150].map((x, i) =>
+    pt({ x, y: 0, ele: 1000 + i, time: i * 1000, hs: [5, 5, 5, 0.1, 0.1, 5][i] }),
+  );
   finalize(out, ctx);
   assert.equal(out[3].liftSnap.lat, out[2].liftSnap.lat);
   assert.equal(out[3].liftSnap.lon, out[2].liftSnap.lon);
-  assert.equal(out[3].liftSnap.ele, out[2].ele); // the anchor's ORIGINAL elevation
-  assert.ok(out[4].liftSnap.lon > out[2].liftSnap.lon); // forward points keep progressing past it
+  assert.equal(out[4].liftSnap.lat, out[2].liftSnap.lat); // both event points share ONE anchor
+  assert.equal(out[4].liftSnap.lon, out[2].liftSnap.lon);
+  assert.equal(out[3].liftSnap.ele, out[4].liftSnap.ele); // both event points share ONE elevation
+  assert.equal(out[3].liftSnap.ele, (out[3].ele + out[4].ele) / 2); // the event's own median raw ele
+  assert.ok(out[5].liftSnap.lon > out[2].liftSnap.lon); // forward points keep progressing past it
+});
+
+test("liftSnap: GPS jitter inside a pause event doesn't split it — every point still gets the SAME median elevation", () => {
+  // the bug this replaces: per-point along-line regression flipped individual points inside a real
+  // pause between "still advancing" (no ele) and "paused" (anchored ele) whenever position jitter
+  // pushed one sample's projection a hair past the running high-water mark. Speed-based event
+  // detection doesn't care about that jitter at all -- every point here has hs=0.1 (a real stop), so
+  // all four must land in ONE event with ONE shared elevation despite the raw ele wobbling.
+  const xs = [100, 100.001, 99.999, 100.0005];
+  const eles = [1058.05, 1057.97, 1058.05, 1057.97]; // noisy raw ele, median = 1058.01
+  const out = [
+    pt({ x: 0, y: 0, ele: 1000, time: 0, hs: 5 }),
+    pt({ x: 50, y: 0, ele: 1050, time: 1000, hs: 5 }),
+    ...xs.map((x, i) => pt({ x, y: 0, ele: eles[i], time: (2 + i) * 1000, hs: 0.1 })),
+    pt({ x: 150, y: 0, ele: 1100, time: 6000, hs: 5 }),
+  ];
+  finalize(out, ctx);
+  const eventPts = out.slice(2, 6);
+  const eleValues = new Set(eventPts.map((p) => p.liftSnap.ele));
+  assert.equal(eleValues.size, 1, "every point in the pause shares exactly one elevation value");
+  const expectedMedian = (1057.97 + 1058.05) / 2; // median of the 4 sorted raw eles
+  assert.equal([...eleValues][0], expectedMedian);
+  assert.ok(eventPts.every((p) => p.liftSnap.ele !== undefined), "no point in the event is left out");
+});
+
+test("liftSnap: a low-speed dip shorter than LIFTSNAP_PAUSE_MIN_S is not treated as a pause", () => {
+  // hs dips to 0.1 for a single 0-duration sample (index 3 alone) then immediately recovers -- too
+  // brief to trust as a real stop, so it stays on the forward branch (no ele override).
+  const out = [0, 50, 100, 150].map((x, i) =>
+    pt({ x, y: 0, ele: 1000 + i, time: i * 1000, hs: [5, 5, 0.1, 5][i] }),
+  );
+  finalize(out, ctx);
+  assert.equal(out[2].liftSnap.ele, undefined);
+});
+
+test("liftSnap: a point with unknown hs never triggers or clears a pause on its own", () => {
+  // hs missing throughout (as in most of this file's other tests) -> never enters a pause, even
+  // though x briefly holds still at index 2-3 -- purely positional stillness is no longer the signal.
+  const out = [0, 50, 100, 100, 150].map((x, i) => pt({ x, y: 0, ele: 1000 + i, time: i * 1000 }));
+  finalize(out, ctx);
+  assert.ok(out.every((p) => p.liftSnap.ele === undefined));
 });
 
 test("liftSnap: only confirmed-lift runs get a signal; other verdicts are untouched", () => {
