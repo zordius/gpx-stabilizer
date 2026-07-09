@@ -13,6 +13,7 @@ import * as kink from "./mods/kink.js";
 import * as liftBoardingEle from "./mods/liftBoardingEle.js";
 import * as liftConfirm from "./mods/liftConfirm.js";
 import * as liftSnap from "./mods/liftSnap.js";
+import * as noise from "./mods/noise.js";
 import * as segment from "./mods/segment.js";
 import * as tangleSnap from "./mods/tangleSnap.js";
 
@@ -37,6 +38,7 @@ function getModuleRegistry() {
       liftSnap: validateModule("liftSnap", liftSnap),
       liftBoardingEle: validateModule("liftBoardingEle", liftBoardingEle),
       tangleSnap: validateModule("tangleSnap", tangleSnap),
+      noise: validateModule("noise", noise),
     };
   }
   return moduleRegistry;
@@ -70,7 +72,9 @@ export const MODES = {
     // `liftBoardingEle` (2026-07-08) fixes the lift-boarding/unloading elevation-sag artifact (see
     // that module's doc) — validated against 53 real confirmed-lift runs across 9 real files, ~17%
     // (likely an undercount) show the exact shape. Must run after `liftConfirm` (reads its verdict).
-    enable: ["kink", "segment", "liftConfirm", "liftSnap", "liftBoardingEle", "tangleSnap"],
+    // `noise` (2026-07-08) is diagnostic-only (see that module's doc) — bundled here so its map/chart
+    // layer is available whenever ski mode is, no separate opt-in needed to go look at it.
+    enable: ["kink", "segment", "liftConfirm", "liftSnap", "liftBoardingEle", "tangleSnap", "noise"],
   },
 };
 
