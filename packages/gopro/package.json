@@ -1,6 +1,6 @@
 {
   "name": "gpx-from-gopro",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "description": "Extract a GoPro video's GPS telemetry as GPX or render-agnostic TrackPoints (points + meta + timezone + UTC anchor).",
   "keywords": [
     "gopro",
@@ -32,7 +32,7 @@
     "directory": "packages/gopro"
   },
   "dependencies": {
-    "gpx-stabilizer": "^0.3.0",
+    "gpx-stabilizer": "^0.4.0",
     "egm96-universal": "^1.1.1",
     "gopro-telemetry": "^1.2.11",
     "gpmf-extract": "^0.3.3",
