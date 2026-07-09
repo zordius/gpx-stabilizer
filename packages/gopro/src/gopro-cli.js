@@ -46,6 +46,11 @@ const LOCAL_TZ = -new Date().getTimezoneOffset() / 60; // hours, may be fraction
 // ---- args ----
 const argv = process.argv.slice(2);
 const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize", "width", "height"]);
+const KNOWN_BOOL = new Set(["no-cache", "html", "png", "yes"]);
+const USAGE =
+  "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
+  " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes]" +
+  " [--html] [--png [--width N] [--height N]]";
 const inputs = [];
 const opts = {};
 for (let i = 0; i < argv.length; i++) {
@@ -53,15 +58,18 @@ for (let i = 0; i < argv.length; i++) {
   if (a.startsWith("--")) {
     const name = a.slice(2);
     if (WITH_VALUE.has(name)) opts[name] = argv[++i];
-    else opts[name] = true;
+    else if (KNOWN_BOOL.has(name)) opts[name] = true;
+    else {
+      // an unrecognized flag (e.g. --mode, which only the LIBRARY entry point's
+      // readGoproTelemetry({ stabilize: { mode } }) understands, not this CLI) must fail loudly --
+      // silently accepting it into `opts` would look like it took effect while doing nothing.
+      console.error(`gpx-from-gopro: unknown option --${name}\n\n${USAGE}`);
+      process.exit(1);
+    }
   } else inputs.push(a);
 }
 if (inputs.length === 0) {
-  console.error(
-    "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
-      " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes]" +
-      " [--html] [--png [--width N] [--height N]]",
-  );
+  console.error(USAGE);
   process.exit(1);
 }
 const outExplicit = opts.out != null; // --organize only sweeps the .gpx along when this is false
