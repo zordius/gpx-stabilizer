@@ -177,6 +177,19 @@ function sustainedTrue(arr, start, count) {
   return true;
 }
 
+// Minimum standard for the `"ascent"` label itself, applied at every site that assigns it below: the
+// stretch must have actually gained net elevation (end higher than start) — a `"lift"` candidate that
+// fails confirmation but never climbed isn't an ascent of any kind (most concretely, the tail of a
+// real ski-away descent after unloading, which segment.js's vertical-speed grouping can still glue
+// into the same `"lift"`-typed run as the climb before it; trimToCore then correctly splits it off
+// for having a different heading/speed, but with no elevation check that split alone doesn't stop it
+// from being mislabeled "ascent" and then, e.g., swept into a lift-boundary search as if still
+// climbing). Points that fail the label's underlying check AND this gain check get no
+// `liftConfirm` at all, not a fallback label — they're neither a lift nor an ascent.
+function gainedElevation(points) {
+  return (points.at(-1)?.ele ?? 0) - (points[0]?.ele ?? 0) > 0;
+}
+
 // Find the run's own consistent "core" and split off any head/tail that doesn't locally match it.
 // The core's reference heading/speed is estimated from the middle 60% of the run (index-based) so a
 // head/tail anomaly can't skew the very reference it's being trimmed against. Only trims when the
@@ -263,23 +276,23 @@ export const finalize = (out, ctx) => {
       sustain: trimSustain,
       minCoreFrac: trimMinCoreFrac,
     });
-    for (const p of headExcess) p.liftConfirm = { type: "ascent" };
-    for (const p of tailExcess) p.liftConfirm = { type: "ascent" };
+    if (gainedElevation(headExcess)) for (const p of headExcess) p.liftConfirm = { type: "ascent" };
+    if (gainedElevation(tailExcess)) for (const p of tailExcess) p.liftConfirm = { type: "ascent" };
     r.points = core;
   }
 
-  // ① base confirmation: not straight enough, or too fast for a cable -> ascent
+  // ① base confirmation: not straight enough, or too fast for a cable -> ascent (if it climbed)
   for (const r of runs) {
     const strt = median(r.points.map((p) => p.straightLong ?? p.straightShort ?? 0));
     const vmed = median(r.points.map((p) => p.hs ?? 0));
-    if (!(strt > straight && vmed < hsMax)) r.verdict = "ascent";
+    if (!(strt > straight && vmed < hsMax)) r.verdict = gainedElevation(r.points) ? "ascent" : null;
   }
 
-  // ② minimum duration: still `lift`, but too short -> ascent
+  // ② minimum duration: still `lift`, but too short -> ascent (if it climbed)
   for (const r of runs) {
     if (r.verdict !== "lift") continue;
     const dur = (r.points.at(-1).time - r.points[0].time) / 1000;
-    if (dur < minDur) r.verdict = "ascent";
+    if (dur < minDur) r.verdict = gainedElevation(r.points) ? "ascent" : null;
   }
 
   // ③ fake-lift-by-turning / fake-lift-by-speed: a real cable line can't wiggle or go this fast
@@ -333,6 +346,11 @@ export const finalize = (out, ctx) => {
     v.verdict = "powered";
   }
 
-  // write the verdict into its own namespace — point.segment is never touched
-  for (const r of runs) for (const p of r.points) p.liftConfirm = { type: r.verdict };
+  // write the verdict into its own namespace — point.segment is never touched. A `null` verdict
+  // (failed its confirmation check AND never climbed — see `gainedElevation`) gets no liftConfirm at
+  // all: it's neither a lift nor an ascent, so it stays unclassified rather than mislabeled.
+  for (const r of runs) {
+    if (r.verdict == null) continue;
+    for (const p of r.points) p.liftConfirm = { type: r.verdict };
+  }
 };
