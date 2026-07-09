@@ -197,7 +197,7 @@ for (const name of emptyGroups) console.error(`  no real fix, skip group: ${name
 const written = [];
 for (const g of groups) {
   const track = {
-    segments: g.segments,
+    tracks: g.tracks, // one <trk> per recording session, named after its own original video file
     meta: {
       name: g.name,
       time: g.startMs != null ? new Date(g.startMs).toISOString() : null,
@@ -206,8 +206,9 @@ for (const g of groups) {
   };
   const path = join(outDir, `${g.name}.gpx`);
   saveGpx(track, path, { creator: "gpx-from-gopro" });
-  const npts = g.segments.reduce((s, seg) => s + seg.length, 0);
-  written.push(`${g.name}.gpx (${npts} pts, ${g.segments.length} seg)`);
+  const npts = g.tracks.reduce((s, t) => s + t.segments.reduce((s2, seg) => s2 + seg.length, 0), 0);
+  const nseg = g.tracks.reduce((s, t) => s + t.segments.length, 0);
+  written.push(`${g.name}.gpx (${npts} pts, ${g.tracks.length} trk, ${nseg} seg)`);
 }
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
@@ -218,7 +219,10 @@ for (const w of written) console.log(`  -> ${join(outDir, w)}`);
 // "core" defaults gpx-stabilizer's own CLI uses with no --mode — so drop reasons / hdop overlays
 // are visible without a separate `gpx-stabilizer --html` pass on the merged .gpx.)
 if (opts.html || opts.png) {
-  const tracks = groups.map((g) => ({ name: g.name, points: g.segments.flat() }));
+  const tracks = groups.map((g) => ({
+    name: g.name,
+    points: g.tracks.flatMap((t) => t.segments).flat(),
+  }));
   if (opts.html) {
     const htmlPath = join(outDir, "gopro-view.html");
     // one toHtmlAnalyzedFiles() call analyzes every group (potentially slow — full analyze() over

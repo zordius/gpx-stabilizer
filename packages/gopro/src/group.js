@@ -48,16 +48,41 @@ export function fileNumber(file) {
  * @property {string | null} session   recording id = filename file-number (a recording's
  *   chapters share it; a new recording / crash restart gets a new one), or null
  * @property {import("gpx-stabilizer").TrackPoint[]} points
- * @property {string} [file]    source video path — optional, unused by buildGroups() itself,
- *   carried through for organize.js's planMove() (see ./organize.js)
+ * @property {string} [file]    source video path — optional; also carried through for
+ *   organize.js's planMove() (see ./organize.js), and used by buildGroups() itself to name each
+ *   session's own <trk> after its earliest chapter (see {@link sessionName})
+ */
+
+/**
+ * @typedef {object} GpxTrack one <trk> within a GpxGroup — one recording session
+ * @property {string | null} name  the session's own original video file's basename (no extension),
+ *   or null when no file path was available to derive one (see {@link sessionName})
+ * @property {import("gpx-stabilizer").TrackPoint[][]} segments  one per <trkseg> (a session usually
+ *   has one, but (A)'s time-gap sub-split — see buildGroups — can produce several)
  */
 
 /**
  * @typedef {object} GpxGroup one output GPX
- * @property {string} name      file stem (no extension)
- * @property {import("gpx-stabilizer").TrackPoint[][]} segments  one per <trkseg>
+ * @property {string} name      file stem (no extension) — the day+camera group name
+ * @property {GpxTrack[]} tracks  one per recording session (<trk>), in chronological order
  * @property {number | null} startMs  earliest real fix (epoch ms), for meta.time
  */
+
+/**
+ * A session's own name for its `<trk>`: the earliest (chapter-order) contributing file's basename,
+ * no extension — e.g. chapters `GH010042.MP4`/`GH020042.MP4` sharing file-number "0042" both carry
+ * their file path here, and plain alphabetical sort picks `GH010042` (chapter 1) over `GH020042`
+ * (chapter 2), which also happens to hold for the older GOPR/GP01/GP02 scheme (`"GO" < "GP"`).
+ * `null` when no file path was available at all (e.g. a caller that never set `GroupEntry.file`).
+ * @param {string[]} files
+ * @returns {string | null}
+ */
+function sessionName(files) {
+  if (!files || files.length === 0) return null;
+  const bases = files.map((f) => basename(f).replace(/\.[^.]+$/, ""));
+  bases.sort();
+  return bases[0];
+}
 
 /**
  * Merge key = (camera, day): serial when known (two same-model bodies stay separate), else
@@ -118,13 +143,16 @@ export function groupNames(entries) {
  *   A crash still lands in the one daily file (merge key is serial+date) as a separate segment.
  * - Placeholder (0,0) pre-lock fixes are dropped per segment; a session that never
  *   locks drops to empty, and a group with no real fix lands in `skipped`.
+ * - **Each session becomes its own `<trk>`** (`GpxTrack`), named after its own original video file
+ *   (see {@link sessionName}) — kept distinct from the day+camera group `name` used for the `.gpx`
+ *   file itself, so a multi-session day's file carries one `<trk>` per recording, not one big track.
  *
  * @param {GroupEntry[]} entries
  * @returns {{ groups: GpxGroup[], skipped: string[] }}
  */
 export function buildGroups(entries) {
   const names = groupNames(entries);
-  // gkey -> sessions: Map<fileNumber, points[]>
+  // gkey -> sessions: Map<fileNumber, { points: [], files: [] }>
   const groups = new Map();
   for (const e of entries) {
     const gkey = gkeyOf(e);
@@ -132,23 +160,26 @@ export function buildGroups(entries) {
     const sessions = groups.get(gkey).sessions;
     // (B) bucket by file-number; files with none share one fallback bucket that (A) below splits.
     const skey = e.session ?? "__nofilenum__";
-    if (!sessions.has(skey)) sessions.set(skey, []);
+    if (!sessions.has(skey)) sessions.set(skey, { points: [], files: [] });
+    const bucket = sessions.get(skey);
     // loop-push, not push(...points): a file can carry tens of thousands of points
     // and spreading that many args overflows the call stack.
-    const bucket = sessions.get(skey);
-    for (const p of e.points) bucket.push(p);
+    for (const p of e.points) bucket.points.push(p);
+    if (e.file) bucket.files.push(e.file);
   }
 
   const out = [];
   const skipped = [];
   for (const [gkey, g] of groups) {
     const name = names.get(gkey);
-    const segments = [];
-    for (const pts of g.sessions.values()) {
-      const clean = pts.filter((p) => !PLACEHOLDER(p));
+    const tracks = [];
+    for (const { points, files } of g.sessions.values()) {
+      const clean = points.filter((p) => !PLACEHOLDER(p));
       if (clean.length === 0) continue;
       clean.sort((a, b) => (a.time ?? 0) - (b.time ?? 0));
-      // (A) sub-split this session wherever consecutive kept points jump more than BIG_GAP_MS.
+      // (A) sub-split this session wherever consecutive kept points jump more than BIG_GAP_MS —
+      // all resulting <trkseg>s still belong to this ONE session's <trk>.
+      const segments = [];
       let run = [clean[0]];
       for (let i = 1; i < clean.length; i++) {
         if ((clean[i].time ?? 0) - (clean[i - 1].time ?? 0) > BIG_GAP_MS) {
@@ -158,20 +189,23 @@ export function buildGroups(entries) {
         run.push(clean[i]);
       }
       segments.push(run);
+      tracks.push({ name: sessionName(files), segments });
     }
-    if (segments.length === 0) {
+    if (tracks.length === 0) {
       skipped.push(name);
       continue;
     }
-    // order segments by start time so the day's trksegs read chronologically
-    segments.sort((A, B) => (A[0].time ?? 0) - (B[0].time ?? 0));
+    // order tracks by start time so the day's <trk>s read chronologically
+    tracks.sort((A, B) => (A.segments[0][0].time ?? 0) - (B.segments[0][0].time ?? 0));
     let startMs = null;
-    for (const seg of segments) {
-      for (const p of seg) {
-        if (p.time != null && (startMs === null || p.time < startMs)) startMs = p.time;
+    for (const trk of tracks) {
+      for (const seg of trk.segments) {
+        for (const p of seg) {
+          if (p.time != null && (startMs === null || p.time < startMs)) startMs = p.time;
+        }
       }
     }
-    out.push({ name, segments, startMs });
+    out.push({ name, tracks, startMs });
   }
   return { groups: out, skipped };
 }

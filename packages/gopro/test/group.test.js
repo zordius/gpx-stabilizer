@@ -50,11 +50,12 @@ test("buildGroups: no serial -> falls back to family grouping", () => {
   ]);
   assert.equal(groups.length, 1); // both merge by family+date
   assert.equal(groups[0].name, "20260628-GOPR");
-  assert.equal(groups[0].segments.length, 1); // one recording -> one segment
-  assert.equal(groups[0].segments[0].length, 2);
+  assert.equal(groups[0].tracks.length, 1); // one recording -> one <trk>
+  assert.equal(groups[0].tracks[0].segments.length, 1); // -> one segment
+  assert.equal(groups[0].tracks[0].segments[0].length, 2);
 });
 
-test("buildGroups (B): a recording's chapters share a file-number -> one merged segment", () => {
+test("buildGroups (B): a recording's chapters share a file-number -> one merged <trk>, one segment", () => {
   // the Hero10 over-split fix: many chapters of one continuous recording, contiguous in time
   const { groups } = buildGroups([
     { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(3, 3, 300)] },
@@ -62,14 +63,15 @@ test("buildGroups (B): a recording's chapters share a file-number -> one merged 
     { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(2, 2, 200)] },
   ]);
   assert.equal(groups.length, 1);
-  assert.equal(groups[0].segments.length, 1); // all one recording
+  assert.equal(groups[0].tracks.length, 1); // all one recording -> one <trk>
+  assert.equal(groups[0].tracks[0].segments.length, 1);
   assert.deepEqual(
-    groups[0].segments[0].map((p) => p.time),
+    groups[0].tracks[0].segments[0].map((p) => p.time),
     [100, 200, 300], // chapters merged and time-sorted
   );
 });
 
-test("buildGroups (B): different file-numbers are separate sessions, ordered by start time", () => {
+test("buildGroups (B): different file-numbers are separate <trk>s, ordered by start time", () => {
   const { groups } = buildGroups([
     // later recording listed first; recording 5131 spans two chapter files (same number)
     { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [pt(5, 5, 500)] },
@@ -77,14 +79,14 @@ test("buildGroups (B): different file-numbers are separate sessions, ordered by 
     { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(2, 2, 200)] },
   ]);
   assert.equal(groups.length, 1);
-  const segs = groups[0].segments;
-  assert.equal(segs.length, 2);
+  const tracks = groups[0].tracks;
+  assert.equal(tracks.length, 2); // two distinct sessions -> two <trk>s, not one track/two segments
   assert.deepEqual(
-    segs[0].map((p) => p.time),
+    tracks[0].segments[0].map((p) => p.time),
     [100, 200],
   );
   assert.deepEqual(
-    segs[1].map((p) => p.time),
+    tracks[1].segments[0].map((p) => p.time),
     [500],
   );
   assert.equal(groups[0].startMs, 100);
@@ -97,16 +99,16 @@ test("buildGroups (B): back-to-back recordings with a tiny gap still split (file
     { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
     { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [pt(2, 2, 150)] },
   ]);
-  assert.equal(groups[0].segments.length, 2);
+  assert.equal(groups[0].tracks.length, 2);
 });
 
-test("buildGroups: a crash (new file-number, same serial+date) rejoins into one daily file, two segments", () => {
+test("buildGroups: a crash (new file-number, same serial+date) rejoins into one daily file, two <trk>s", () => {
   const { groups } = buildGroups([
     { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
     { family: "GX", date: "20260628", serial: "s1", session: "5132", points: [pt(2, 2, 300)] },
   ]);
   assert.equal(groups.length, 1); // one file (rejoined)
-  assert.equal(groups[0].segments.length, 2); // crash shows as a segment break
+  assert.equal(groups[0].tracks.length, 2); // crash shows as a genuinely separate <trk>
 });
 
 test("buildGroups (A): a large time gap within one file-number sub-splits (restart / dropout hole)", () => {
@@ -119,8 +121,9 @@ test("buildGroups (A): a large time gap within one file-number sub-splits (resta
       points: [pt(1, 1, 0), pt(1, 1, 1000), pt(2, 2, 1000 + GAP)],
     },
   ]);
-  const segs = groups[0].segments;
-  assert.equal(segs.length, 2); // the > BIG_GAP jump breaks the session
+  assert.equal(groups[0].tracks.length, 1); // still one session -> one <trk>
+  const segs = groups[0].tracks[0].segments;
+  assert.equal(segs.length, 2); // the > BIG_GAP jump sub-splits it into two <trkseg>s
   assert.deepEqual(
     segs[0].map((p) => p.time),
     [0, 1000],
@@ -141,7 +144,38 @@ test("buildGroups (A): with no file-number, the time gap is the sole session clu
       points: [pt(1, 1, 100), pt(1, 1, 200), pt(2, 2, 200 + GAP)],
     },
   ]);
-  assert.equal(groups[0].segments.length, 2); // near points cluster; the far one splits off
+  assert.equal(groups[0].tracks.length, 1); // one fallback bucket -> one <trk>
+  assert.equal(groups[0].tracks[0].segments.length, 2); // near points cluster; the far one splits off
+});
+
+test("buildGroups: each <trk>'s name is the earliest (chapter-order) contributing file's basename", () => {
+  const { groups } = buildGroups([
+    {
+      family: "GX",
+      date: "20260628",
+      serial: "s1",
+      session: "5131",
+      points: [pt(1, 1, 100)],
+      file: "/media/GX020042.MP4", // chapter 2
+    },
+    {
+      family: "GX",
+      date: "20260628",
+      serial: "s1",
+      session: "5131",
+      points: [pt(2, 2, 200)],
+      file: "/media/GX010042.MP4", // chapter 1 -- alphabetically first, should win
+    },
+  ]);
+  assert.equal(groups[0].tracks.length, 1);
+  assert.equal(groups[0].tracks[0].name, "GX010042");
+});
+
+test("buildGroups: a <trk> with no contributing file path at all gets a null name", () => {
+  const { groups } = buildGroups([
+    { family: "GX", date: "20260628", serial: "s1", session: "5131", points: [pt(1, 1, 100)] },
+  ]);
+  assert.equal(groups[0].tracks[0].name, null);
 });
 
 test("groupNames: matches buildGroups' naming (readable name, serial-clash suffix)", () => {
@@ -183,7 +217,7 @@ test("buildGroups: drops (0,0) placeholder fixes; an all-placeholder session is 
   ]);
   assert.equal(groups.length, 1);
   assert.equal(groups[0].name, "20260628-GX");
-  assert.equal(groups[0].segments[0].length, 1); // placeholder dropped
-  assert.equal(groups[0].segments[0][0].lat, 1);
+  assert.equal(groups[0].tracks[0].segments[0].length, 1); // placeholder dropped
+  assert.equal(groups[0].tracks[0].segments[0][0].lat, 1);
   assert.deepEqual(skipped, ["20260629-GX"]); // never-locked session reported as skipped
 });
