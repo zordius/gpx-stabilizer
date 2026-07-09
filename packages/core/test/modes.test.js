@@ -37,6 +37,10 @@ test("modes: ski also enables liftBoardingEle, loaded after liftConfirm, and tur
   assert.ok(enable.indexOf("liftConfirm") < enable.indexOf("liftBoardingEle"));
 });
 
+test("modes: ski turns on smooth by default too (gradeBound still wins in stabilize's own ele chain)", () => {
+  assert.equal(MODES.ski.params.smooth, true);
+});
+
 test("profile: carve is gated on g.CARVE (off → zeros, on → computed)", () => {
   const step = 5 / (Math.cos((36 * Math.PI) / 180) * 111320); // ~5 m/s east
   const track = Array.from({ length: 80 }, (_, i) => ({

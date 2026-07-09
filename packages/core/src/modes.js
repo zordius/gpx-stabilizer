@@ -57,7 +57,17 @@ export const MODES = {
       tangleSnap: true,
       gradeBound: true,
       liftBoardingEle: true,
+      smooth: true,
     },
+    // `smooth` (2026-07-10) bundled here so a bare `mode: "ski"` caller gets the same opts a manual
+    // caller (e.g. movie-layers, which already passes its own `smooth: true` alongside `mode`)
+    // would — a caller that only sets `mode` and never separately opts into `smooth` currently gets
+    // NO distance-domain smoothing at all, only gradeBound's terrain-preserving despike (which is a
+    // different algorithm — it clamps grade-change curvature, not a moving average). Doesn't change
+    // ski mode's own OUTPUT: stabilize.js's own ele-precedence chain already prefers `gradeBound`
+    // over `smooth` whenever both are set (see that file's doc), and ski mode's `gradeBound: true`
+    // above is unchanged — this only means an explicit `smooth: false` no longer has anything to
+    // override (there was nothing on for it to turn off before this).
     // `gradeBound` (2026-07-08) was already shipped and general-purpose but never enabled by
     // EITHER mode — ski-mode output had zero elevation despiking by default (the physically-
     // impossible spikes, e.g. 989->988->989, just passed straight through). Empirically checked
