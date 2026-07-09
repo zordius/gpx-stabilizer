@@ -121,6 +121,72 @@ test("analyzedLayers: opts.stabilized diverges from clean exactly where a reposi
   assert.equal(clean.lines[0][0].y, stabilized.lines[0][0].y);
 });
 
+test("analyzedLayers: 'liftBoardingEle fix' layer covers exactly the points that module overrode", () => {
+  const fakeBoardingFix = {
+    name: "fakeBoardingFix",
+    finalize: (out) => {
+      out[1].liftBoardingEle = { ele: out[1].ele + 5 };
+      out[2].liftBoardingEle = { ele: out[2].ele + 3 };
+    },
+  };
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx;
+  const track = Array.from({ length: 5 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const layers = analyzedLayers(track, { modules: [fakeBoardingFix] });
+  const fix = layers.find((l) => l.label === "liftBoardingEle fix");
+  assert.ok(fix);
+  assert.equal(fix.points.length, 2);
+});
+
+test("analyzedLayers: 'liftBoardingEle fix' layer also covers points the module DROPPED (ele: null)", () => {
+  // the HEAD mechanism now drops a queue region's elevation rather than correcting it (see
+  // mods/liftBoardingEle.js) — the field is still present, just with a null `ele`, and this layer's
+  // job is "did the module touch this point at all", so it must not disappear from view.
+  const fakeBoardingDrop = {
+    name: "fakeBoardingDrop",
+    finalize: (out) => {
+      out[1].liftBoardingEle = { ele: null };
+    },
+  };
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx;
+  const track = Array.from({ length: 5 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const layers = analyzedLayers(track, { modules: [fakeBoardingDrop] });
+  const fix = layers.find((l) => l.label === "liftBoardingEle fix");
+  assert.equal(fix.points.length, 1);
+});
+
+test("analyzedLayers: 'lift start/end' layer covers the first+last point of each segment.type===\"lift\" run", () => {
+  const fakeLiftSegment = {
+    name: "fakeLiftSegment",
+    finalize: (out) => {
+      for (let i = 1; i <= 3; i++) out[i].segment = { id: 0, type: "lift" };
+    },
+  };
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx;
+  const track = Array.from({ length: 6 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const layers = analyzedLayers(track, { modules: [fakeLiftSegment] });
+  const boundary = layers.find((l) => l.label === "lift start/end");
+  assert.ok(boundary);
+  assert.equal(boundary.points.length, 2); // just index 1 (start) and index 3 (end), not the middle
+});
+
 test("analyzedLayers: a policy drop (oversample) doesn't break the clean line", () => {
   // A high native-sample-rate source (e.g. a Hero10's raw ~10 Hz GPS5): oversample thins it to the
   // 0.5 s gate, so a policy-dropped point sits between nearly every survivor. Those must NOT break
@@ -139,6 +205,29 @@ test("analyzedLayers: a policy drop (oversample) doesn't break the clean line", 
   const clean = layers.find((l) => l.label === "clean");
   assert.equal(clean.lines.length, 1, "oversample thinning stays one continuous run, not many");
   assert.ok(clean.lines[0].length >= 10); // holds every surviving (non-oversample-dropped) point
+});
+
+test("analyzedLayers: clean also breaks on a plain TIME gap between two kept points, not just a drop", () => {
+  // a source recording gap (e.g. a GPS dropout) can leave two adjacent KEPT points (neither carries a
+  // dropReason -- nothing was measured there to drop) far apart in time. Barely moving during the gap
+  // keeps this from also tripping an implausible-motion drop, isolating the time-gap check itself.
+  const mx = Math.cos((36 * Math.PI) / 180) * 111320;
+  const step = 5 / mx; // ~5 m/s eastward
+  const before = Array.from({ length: 10 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + i * step,
+    ele: 1000,
+    time: i * 1000,
+  }));
+  const after = Array.from({ length: 10 }, (_, i) => ({
+    lat: 36,
+    lon: 138 + (10 + i) * step,
+    ele: 1000,
+    time: 30000 + i * 1000, // 21 s gap from the last `before` point (9000 -> 30000)
+  }));
+  const layers = analyzedLayers([...before, ...after], { stabilized: false });
+  const clean = layers.find((l) => l.label === "clean");
+  assert.equal(clean.lines.length, 2, "a plain time gap between two kept points still breaks clean");
 });
 
 test("analyzedLayers: clean track line + per-reason drop layers, unified red circles", () => {

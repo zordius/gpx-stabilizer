@@ -177,13 +177,27 @@ export function analyzedLayers(points, opts = {}) {
   // oversample-dropped point between nearly every survivor, shattering the clean line into
   // one-point runs (each drawn as a lone `M`, invisible — see docs/gpmf-sensors.md's badspan
   // dilution finding for the same-shaped bug in analyze.js's glueBadSpans, 2026-07-05).
-  // opts.breakLine(out) can override with richer cut rules (time/distance gaps); it receives the
+  //
+  // ALSO cut on a plain TIME gap between two consecutive kept points, even when NEITHER carries a
+  // dropReason (2026-07-09): a source recording gap (e.g. a GPS dropout inside a GoPro clip, which
+  // shows up as a genuine `<trkseg>` boundary once `readGpx` sees it — see `stabilizeTrack`'s own
+  // doc) can leave a real multi-second/minute hole with no dropped point marking it at all — nothing
+  // was measured there to drop. Without this check `clean` drew a single straight line across such a
+  // hole while `stabilized`'s own `splitByGap` correctly broke there, an inconsistency found by eye:
+  // the two lines diverging made `stabilized`'s break visible where it overlaid `clean`. Same
+  // threshold/param as `stabilized` (`opts.stabilizedMaxGap`, default 10 s) so the two stay aligned.
+  // opts.breakLine(out) can override with richer cut rules (e.g. distance gaps); it receives the
   // full ordered point list (drops included) and returns the runs of points to draw.
+  const cleanMaxGapMs = (opts.stabilizedMaxGap ?? 10) * 1000;
   const splitAtDrops = (pts) => {
     const runs = [];
     let cur = [];
     for (const p of pts) {
       if (!p.dropReason) {
+        if (cur.length && p.time - cur[cur.length - 1].time > cleanMaxGapMs) {
+          runs.push(cur);
+          cur = [];
+        }
         cur.push(p);
       } else if (isQualityDropped(p)) {
         if (cur.length) runs.push(cur);
@@ -253,6 +267,45 @@ export function analyzedLayers(points, opts = {}) {
       size: 4,
       opacity: 0.7,
       points: out.filter((p) => p.kink?.at).map(flipY),
+    },
+    // liftBoardingEle-touched points (mods/liftBoardingEle.js — self-gates to empty when that
+    // module wasn't loaded, e.g. outside ski mode): every point ANY of its three mechanisms wrote
+    // to. All three now DROP rather than correct (`ele: null` — see that module's doc), so presence
+    // of the field, not a non-null `ele`, is the marker; they all write the same namespaced field, so
+    // this layer doesn't distinguish which mechanism fired.
+    {
+      label: "liftBoardingEle fix",
+      color: "#0cf",
+      size: 3,
+      opacity: 0.7,
+      points: out.filter((p) => p.liftBoardingEle != null).map(flipY),
+    },
+    // the first/last point of every segment.type==="lift" run — lets a render confirm where the
+    // pipeline itself thinks a lift starts and ends, independent of liftConfirm's own verdict.
+    {
+      label: "lift start/end",
+      color: "#f0c",
+      size: 5,
+      opacity: 0.8,
+      points: (() => {
+        // scan the KEPT track only — a dropped point in the middle of a lift run has no `.segment`
+        // (segment.js labels kept points only), so scanning raw `out` would break the run at every
+        // drop and re-open it right after, pushing a spurious (start,start) duplicate each time.
+        const kept = out.filter((p) => !p.dropReason);
+        const boundaries = [];
+        let i = 0;
+        while (i < kept.length) {
+          if (kept[i].segment?.type !== "lift") {
+            i++;
+            continue;
+          }
+          const startIdx = i;
+          const id = kept[i].segment.id;
+          while (i < kept.length && kept[i].segment?.type === "lift" && kept[i].segment?.id === id) i++;
+          boundaries.push(kept[startIdx], kept[i - 1]);
+        }
+        return boundaries.map(flipY);
+      })(),
     },
     { label: "raw", color: "#888", width: 1, opacity: 0.7, lines: [out.map(flipY)] },
     cleanLayer,
