@@ -53,10 +53,14 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  *
  * A fifth, ski-specific `ele` rewrite: **`opts.liftBoardingEle`** — same decoupled-loading
  * convention (module: `mods/liftBoardingEle.js`). Reads `point.liftBoardingEle` (`{ ele }`, only
- * present on the handful of points inside a lift-boarding/unloading elevation-sag artifact it
- * bridges over — see that module's doc) and, when present, overrides `ele` ahead of `liftSnap`'s own
- * `ele` (the two almost never overlap in practice, but this one is the more targeted, validated fix
- * when they do).
+ * present on the handful of points inside a lift-boarding/unloading elevation artifact it deals
+ * with — see that module's doc) and, when present, wins outright ahead of `liftSnap`'s own `ele`
+ * (the two almost never overlap in practice, but this one is the more targeted, validated fix when
+ * they do) — INCLUDING when its own `ele` is `null`: the module can determine a stretch is
+ * unrecoverable (no way to back out the true elevation) without being able to supply a replacement,
+ * and that verdict must stand as the final answer (drop the elevation) rather than fall through to
+ * `liftSnap`/raw the way an *absent* `point.liftBoardingEle` does. Presence of the field, not
+ * truthiness of its `ele`, is what wins.
  *
  * **`opts.mode`** (e.g. `"ski"`) expands to a preset's params + modules via `resolveMode`
  * (./modes.js) BEFORE any of the above is read — so `MODES.ski`'s own `liftSnap`/`tangleSnap`/
@@ -84,16 +88,24 @@ export function stabilize(points, opts = {}) {
   return analyze(points, analyzeOpts)
     .filter((p) => !p.dropReason)
     .map((p) => ({
+      // passed through untouched when the caller tagged its own input points with it (stabilizeTrack
+      // uses this to re-split the cleaned stream at the ORIGINAL <trkseg> boundaries after analyzing
+      // the whole track as one continuous stream — see that function's doc); absent for any other
+      // caller, so this is a no-op addition to the existing shape.
+      ...(p.origSeg != null ? { origSeg: p.origSeg } : {}),
       lat: (tangleSnap ? p.tangleSnap?.lat : null) ?? (liftSnap ? p.liftSnap?.lat : null) ?? p.lat,
       lon: (tangleSnap ? p.tangleSnap?.lon : null) ?? (liftSnap ? p.liftSnap?.lon : null) ?? p.lon,
-      // liftBoardingEle (the lift-boarding sag fix) wins when present, then liftSnap (a confirmed-
-      // lift pause reposition), then gradeBound (despike) over smooth when both set (terrain-
-      // preserving), else whichever, else raw
+      // liftBoardingEle (the lift-boarding fix) wins when present — its OWN `ele` is the final
+      // answer even when `null` (a deliberate "drop, unrecoverable" verdict, not "no opinion"), so
+      // this does NOT chain through `??` like the others below it. Then liftSnap (a confirmed-lift
+      // pause reposition), then gradeBound (despike) over smooth when both set (terrain-preserving),
+      // else whichever, else raw.
       ele:
-        (liftBoardingEle ? p.liftBoardingEle?.ele : null) ??
-        (liftSnap ? p.liftSnap?.ele : null) ??
-        (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ??
-        p.ele,
+        liftBoardingEle && p.liftBoardingEle
+          ? p.liftBoardingEle.ele
+          : (liftSnap ? p.liftSnap?.ele : null) ??
+            (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ??
+            p.ele,
       time: p.time,
     }));
 }
@@ -101,21 +113,63 @@ export function stabilize(points, opts = {}) {
 /**
  * Stabilize every segment of a parsed Track, preserving its metadata.
  *
- * With `opts.resample`, each cleaned segment is regularised onto a uniform time grid AFTER cleaning
- * + smoothing (see ./resample.js); a segment whose interior has a gap longer than `maxGap` splits
- * into several, so the Track can gain segments. `resample` is `true` for defaults, or an options
- * object (e.g. `{ RESAMPLE_HZ: 2, maxGap: 5 }`). It is handled here, not in the single-segment
- * `stabilize`, because the split is expressed as multiple `<trkseg>`s.
+ * Analyzes the WHOLE track as one continuous stream (2026-07-09), not segment-by-segment: a
+ * `<trkseg>` boundary in the source is often just a recording-tool artifact (e.g. GoPro starts a new
+ * segment across a brief GPS dropout or a clip switch, not necessarily anything physically
+ * discontinuous) — analyzing each segment in isolation would cut that artificial boundary right
+ * through a real lift ride or ski run that happens to straddle it, the same kind of needless
+ * fragmentation `mods/segment.js`'s own lift-sandwich merge exists to undo one level up. Merging
+ * first lets every module (segment/liftConfirm/windowed hs, …) see the true, uninterrupted motion.
+ *
+ * The ORIGINAL segment boundaries still matter for OUTPUT, though: unlike a same-segment gap (which
+ * `opts.resample`'s own `maxGap` already splits on, see below), a genuine boundary BETWEEN two
+ * source `<trkseg>`s means the recording itself stopped and restarted — collapsing that into one
+ * output segment would silently claim continuous coverage across a real gap. So every point is
+ * tagged (`point.origSeg`, a plain integer index into the source `Track.segments`) before flattening
+ * — `stabilize()` passes this field through untouched (see its own doc) purely because it rides on
+ * the point object through every stage's spread-copy, so it survives all the way to the cleaned
+ * output despite drops/repairs/re-timing along the way, unlike keying by `time` (which a repair
+ * module, e.g. dequantizeTime, can rewrite). The cleaned stream is then re-split at every point where
+ * that tag changes, before any `resample`-driven splitting runs, and the tag is stripped again since
+ * it's bookkeeping internal to this function, not part of the public point shape.
+ *
+ * With `opts.resample`, each resulting segment is further regularised onto a uniform time grid AFTER
+ * cleaning + smoothing (see ./resample.js); a segment whose interior has a gap longer than `maxGap`
+ * splits again, so the Track can gain even more segments. `resample` is `true` for defaults, or an
+ * options object (e.g. `{ RESAMPLE_HZ: 2, maxGap: 5 }`).
  * @param {import("./gpx.js").Track} track
  * @param {Parameters<typeof analyze>[1] & { smooth?, resample?: boolean | Record<string, number> }} [opts]
  * @returns {import("./gpx.js").Track}  a Track with cleaned (and optionally resampled) segments
  */
 export function stabilizeTrack(track, opts = {}) {
   const { resample: resampleOpts, ...rest } = opts;
-  const cleaned = (track?.segments ?? []).map((seg) => stabilize(seg, rest));
+  const rawSegments = track?.segments ?? [];
+
+  const flat = [];
+  rawSegments.forEach((seg, i) => {
+    for (const p of seg) flat.push({ ...p, origSeg: i });
+  });
+
+  const cleanedFlat = stabilize(flat, rest);
+
+  // re-split at every ORIGINAL <trkseg> boundary (see doc above) -- independent of any dropReason or
+  // resample gap, since a boundary here means the source recording itself stopped and restarted
+  const bySourceBoundary = [];
+  let cur = [];
+  let curSeg = null;
+  for (const { origSeg, ...p } of cleanedFlat) {
+    if (cur.length && curSeg !== origSeg) {
+      bySourceBoundary.push(cur);
+      cur = [];
+    }
+    curSeg = origSeg;
+    cur.push(p); // origSeg stripped -- internal bookkeeping, not part of the public point shape
+  }
+  if (cur.length) bySourceBoundary.push(cur);
+
   const segments = resampleOpts
-    ? cleaned.flatMap((seg) => resample(seg, typeof resampleOpts === "object" ? resampleOpts : {}))
-    : cleaned;
+    ? bySourceBoundary.flatMap((seg) => resample(seg, typeof resampleOpts === "object" ? resampleOpts : {}))
+    : bySourceBoundary;
   return { segments, meta: track?.meta ?? {} };
 }
 

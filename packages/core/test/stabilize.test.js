@@ -104,6 +104,28 @@ test("stabilize: opts.liftBoardingEle's ele wins over liftSnap's when point.lift
   assert.equal(neither[0].ele, 1000); // both flags off -> stays raw
 });
 
+test("stabilize: opts.liftBoardingEle's null ele is a final DROP, not a fall-through to liftSnap/raw", () => {
+  // liftBoardingEle's HEAD mechanism drops an unrecoverable queue-region elevation via `{ ele: null
+  // }` rather than a `??`-transparent "no opinion" — presence of the field must win outright, same as
+  // when it carries a real replacement value.
+  const fakeSnaps = {
+    name: "fakeSnaps",
+    finalize: (out) => {
+      out[0].liftSnap = { lat: out[0].lat, lon: out[0].lon, ele: 500 };
+      out[0].liftBoardingEle = { ele: null };
+    },
+  };
+  const pts = [
+    { lat: 36, lon: 138, ele: 1000, time: 0 },
+    { lat: 36, lon: 138 + STEP5, ele: 1000, time: 1000 },
+  ];
+  const withBoth = stabilize(pts, { modules: [fakeSnaps], liftSnap: true, liftBoardingEle: true });
+  assert.equal(withBoth[0].ele, null); // dropped, not liftSnap's 500
+
+  const liftOnly = stabilize(pts, { modules: [fakeSnaps], liftSnap: true });
+  assert.equal(liftOnly[0].ele, 500); // liftBoardingEle flag off -> falls through to liftSnap as usual
+});
+
 // A gentle, long-wavelength lateral wobble (one sine cycle spans the whole run, ~1m amplitude) —
 // large enough for liftSnap's best-fit line to visibly flatten, gentle enough to stay well within
 // liftConfirm's straightness/turn-rate gates (unlike a per-step alternating jitter, which reads as a
@@ -158,4 +180,50 @@ test("stabilizeTrack: stabilizes each segment and preserves meta", () => {
   assert.equal(out.meta.name, "demo"); // metadata preserved
   assert.equal(out.segments.length, 1);
   assert.equal(out.segments[0].length, 3); // duplicate re-timed and kept (0, 0.5, 1 s)
+});
+
+test("stabilizeTrack: re-splits at ORIGINAL segment boundaries even with zero time gap between them", () => {
+  // two source <trkseg>s that continue seamlessly (same direction/speed, no gap at all) -- e.g. a
+  // GoPro clip switch with no real interruption. The boundary must still show up in the OUTPUT: it's
+  // tracked by which source segment a point came from, not by any gap/drop heuristic.
+  const track = {
+    segments: [
+      [
+        { lat: 36, lon: 138, ele: 1000, time: 0 },
+        { lat: 36, lon: 138 + STEP5, ele: 1001, time: 1000 },
+      ],
+      [
+        { lat: 36, lon: 138 + 2 * STEP5, ele: 1002, time: 2000 },
+        { lat: 36, lon: 138 + 3 * STEP5, ele: 1003, time: 3000 },
+      ],
+    ],
+  };
+  const out = stabilizeTrack(track);
+  assert.equal(out.segments.length, 2); // original boundary preserved despite zero gap
+  assert.equal(out.segments[0].length, 2);
+  assert.equal(out.segments[1].length, 2);
+  assert.equal(out.segments[1][0].time, 2000); // second output segment starts exactly at the source's
+  assert.ok(!("origSeg" in out.segments[0][0])); // internal bookkeeping stripped from the public shape
+});
+
+test("stabilizeTrack: analyzes across the ORIGINAL boundary as one continuous stream (merged, not per-segment)", () => {
+  // a step in elevation exactly at the source boundary -- if each segment were smoothed in ISOLATION
+  // (the old behaviour), segment 1's own smoothed ele could never see segment 2's 2000 m readings at
+  // all, so it would stay exactly 1000 throughout it. Seeing it pulled up near the boundary proves the
+  // whole track was analyzed as one continuous stream before being re-split for output.
+  const track = {
+    segments: [
+      Array.from({ length: 10 }, (_, i) => ({ lat: 36, lon: 138 + i * STEP5, ele: 1000, time: i * 1000 })),
+      Array.from({ length: 10 }, (_, i) => ({
+        lat: 36,
+        lon: 138 + (10 + i) * STEP5,
+        ele: 2000,
+        time: (10 + i) * 1000,
+      })),
+    ],
+  };
+  const out = stabilizeTrack(track, { smooth: true });
+  assert.equal(out.segments.length, 2); // the boundary is still preserved in the output
+  const lastOfFirst = out.segments[0].at(-1);
+  assert.ok(lastOfFirst.ele > 1000, `expected smoothing to reach across the boundary, got ${lastOfFirst.ele}`);
 });
