@@ -64,6 +64,34 @@ test("omits <ele>/<time> for points that lack them", () => {
   assert.doesNotMatch(gpx, /<trkpt[^>]*><time>/);
 });
 
+test("writes one <trk> per entry in track.tracks, each with its own name", () => {
+  const t = {
+    meta: { name: "20260211-GOPR", time: "2026-02-11T02:13:55Z" },
+    tracks: [
+      { name: "GH010042", segments: [[{ lat: 1, lon: 2, ele: null, time: null }]] },
+      { name: "GH010043", segments: [[{ lat: 3, lon: 4, ele: null, time: null }]] },
+    ],
+  };
+  const gpx = writeGpx(t);
+  assert.equal([...gpx.matchAll(/<trk>/g)].length, 2);
+  assert.match(gpx, /<trk>\s*<name>GH010042<\/name>[\s\S]*<trkpt lat="1" lon="2">/);
+  assert.match(gpx, /<trk>\s*<name>GH010043<\/name>[\s\S]*<trkpt lat="3" lon="4">/);
+  // the file-level <metadata><name> still reflects the overall group, not either sub-track
+  assert.match(gpx, /<metadata>[\s\S]*<name>20260211-GOPR<\/name>/);
+});
+
+test("track.tracks entries without a name omit <name> for that <trk>", () => {
+  const gpx = writeGpx({
+    meta: {},
+    tracks: [{ segments: [[{ lat: 1, lon: 2, ele: null, time: null }]] }],
+  });
+  assert.doesNotMatch(gpx, /<name>/);
+});
+
+test("omitting track.tracks reproduces the single-<trk> output exactly as before", () => {
+  assert.equal(writeGpx(sample), writeGpx({ ...sample, tracks: undefined }));
+});
+
 test("omits <metadata> block when there is no name or time", () => {
   const gpx = writeGpx({
     segments: [[{ lat: 1, lon: 2, ele: null, time: null }]],

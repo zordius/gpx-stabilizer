@@ -25,6 +25,14 @@ import { readFileSync, writeFileSync } from "node:fs";
  * @typedef {object} Track
  * @property {TrackPoint[][]} segments one array of points per <trkseg>, in document order
  * @property {Meta} meta               preserved file-level metadata
+ * @property {{ name?: string | null, type?: string | null, segments: TrackPoint[][] }[]} [tracks]
+ *   optional MULTIPLE `<trk>` elements, each with its own `name`/`type` — when present, `writeGpx`
+ *   emits one `<trk>` per entry instead of the single one built from `segments`/`meta.name`/
+ *   `meta.type` (e.g. gpx-from-gopro uses this to give each recording session — possibly spanning
+ *   several `<trkseg>`s of its own — its own `<trk>`, named after its original video file). Purely
+ *   additive and write-only: `parseGpx` never sets it (reading always flattens every `<trk>` in the
+ *   file into one `segments` array, see its own doc), and omitting it reproduces today's single-`<trk>`
+ *   output exactly, so every existing caller is unaffected.
  */
 
 const LAT_RE = /\blat\s*=\s*["']([^"']+)["']/;
@@ -168,7 +176,7 @@ export function readGpx(path) {
  * @returns {string}
  */
 export function writeGpx(track, opts = {}) {
-  const { segments = [], meta = {} } = track ?? {};
+  const { segments = [], meta = {}, tracks } = track ?? {};
   const creator = opts.creator ?? meta.creator ?? "gpx-stabilizer";
   const llDigits = opts.latlonDigits ?? 7;
   const eleDigits = opts.eleDigits ?? 2;
@@ -183,26 +191,32 @@ export function writeGpx(track, opts = {}) {
   if (meta.time != null) metaLines.push(`    <time>${xmlEncode(meta.time)}</time>`);
   if (metaLines.length > 0) out.push("  <metadata>", ...metaLines, "  </metadata>");
 
-  out.push("  <trk>");
-  if (meta.name != null) out.push(`    <name>${xmlEncode(meta.name)}</name>`);
-  if (meta.type != null) out.push(`    <type>${xmlEncode(meta.type)}</type>`);
-  for (const seg of segments) {
-    out.push("    <trkseg>");
-    for (const p of seg) {
-      let pt = `      <trkpt lat="${fmt(p.lat, llDigits)}" lon="${fmt(p.lon, llDigits)}">`;
-      if (p.ele != null) pt += `<ele>${fmt(p.ele, eleDigits)}</ele>`;
-      if (p.time != null) pt += `<time>${isoTime(p.time)}</time>`;
-      // GPX 1.1 trkpt child order: ele, time, fix, sat, hdop, ... then extensions.
-      if (p.fix != null) pt += `<fix>${xmlEncode(p.fix)}</fix>`;
-      if (p.hdop != null) pt += `<hdop>${fmt(p.hdop, hdopDigits)}</hdop>`;
-      // Device speed (m/s) goes in <extensions> (not a standard GPX 1.1 trkpt child); parseGpx reads it back.
-      if (p.speed != null)
-        pt += `<extensions><speed>${fmt(p.speed, speedDigits)}</speed></extensions>`;
-      out.push(`${pt}</trkpt>`);
+  // multiple <trk>s when the caller supplied `tracks` (see Track's own doc); otherwise the single
+  // <trk> this always used to write, built from `segments`/`meta.name`/`meta.type` as before.
+  const trkList = tracks ?? [{ name: meta.name, type: meta.type, segments }];
+  for (const trk of trkList) {
+    out.push("  <trk>");
+    if (trk.name != null) out.push(`    <name>${xmlEncode(trk.name)}</name>`);
+    if (trk.type != null) out.push(`    <type>${xmlEncode(trk.type)}</type>`);
+    for (const seg of trk.segments) {
+      out.push("    <trkseg>");
+      for (const p of seg) {
+        let pt = `      <trkpt lat="${fmt(p.lat, llDigits)}" lon="${fmt(p.lon, llDigits)}">`;
+        if (p.ele != null) pt += `<ele>${fmt(p.ele, eleDigits)}</ele>`;
+        if (p.time != null) pt += `<time>${isoTime(p.time)}</time>`;
+        // GPX 1.1 trkpt child order: ele, time, fix, sat, hdop, ... then extensions.
+        if (p.fix != null) pt += `<fix>${xmlEncode(p.fix)}</fix>`;
+        if (p.hdop != null) pt += `<hdop>${fmt(p.hdop, hdopDigits)}</hdop>`;
+        // Device speed (m/s) goes in <extensions> (not a standard GPX 1.1 trkpt child); parseGpx reads it back.
+        if (p.speed != null)
+          pt += `<extensions><speed>${fmt(p.speed, speedDigits)}</speed></extensions>`;
+        out.push(`${pt}</trkpt>`);
+      }
+      out.push("    </trkseg>");
     }
-    out.push("    </trkseg>");
+    out.push("  </trk>");
   }
-  out.push("  </trk>", "</gpx>", "");
+  out.push("</gpx>", "");
   return out.join("\n");
 }
 
