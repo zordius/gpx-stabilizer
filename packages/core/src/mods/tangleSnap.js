@@ -19,7 +19,7 @@
 // Reads `point.liftSnap`'s position when present (a lift-confirmed point's real position for this
 // purpose IS the already-reconstructed one), else the point's own `x`/`y`.
 //
-// Emits `point.tangleSnap = { lat, lon }` — non-destructive (same convention as `smooth`/
+// Emits `point.tangleSnap = { lat, lon }` — non-destructive (same convention as
 // `gradeBound`/`liftSnap`); `stabilize`'s `opts.tangleSnap` decides whether the export uses it (and
 // takes priority over `liftSnap`'s own lat/lon there, since this module already folds liftSnap's
 // position in as its own input). `ele` is left untouched — this only addresses horizontal tangle.

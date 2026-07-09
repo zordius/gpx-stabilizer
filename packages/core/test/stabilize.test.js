@@ -42,7 +42,7 @@ test("stabilize: opts.liftSnap swaps lat/lon when point.liftSnap is present, els
   assert.equal(withoutFlag[0].lat, 36); // stays raw even though point.liftSnap was computed
 });
 
-test("stabilize: opts.liftSnap's ele wins over gradeBound/smooth when present, else falls through", () => {
+test("stabilize: opts.liftSnap's ele wins over gradeBound when present, else falls through", () => {
   const fakeLiftSnap = {
     name: "fakeLiftSnap",
     finalize: (out) => {
@@ -54,9 +54,9 @@ test("stabilize: opts.liftSnap's ele wins over gradeBound/smooth when present, e
     { lat: 36, lon: 138 + STEP5, ele: 1000, time: 1000 },
     { lat: 36, lon: 138 + 2 * STEP5, ele: 1000, time: 2000 },
   ];
-  const out = stabilize(pts, { modules: [fakeLiftSnap], liftSnap: true, smooth: true });
-  assert.equal(out[0].ele, 500); // liftSnap wins over smooth
-  assert.notEqual(out[1].ele, 500); // no liftSnap.ele here -> falls through to smooth's value
+  const out = stabilize(pts, { modules: [fakeLiftSnap], liftSnap: true, gradeBound: true });
+  assert.equal(out[0].ele, 500); // liftSnap wins over gradeBound
+  assert.notEqual(out[1].ele, 500); // no liftSnap.ele here -> falls through to gradeBound's value
 });
 
 test("stabilize: opts.tangleSnap swaps lat/lon ahead of liftSnap when point.tangleSnap is present", () => {
@@ -222,7 +222,7 @@ test("stabilizeTrack: analyzes across the ORIGINAL boundary as one continuous st
       })),
     ],
   };
-  const out = stabilizeTrack(track, { smooth: true });
+  const out = stabilizeTrack(track, { gradeBound: { GRADE_SMOOTH_WIN_M: 30 } });
   assert.equal(out.segments.length, 2); // the boundary is still preserved in the output
   const lastOfFirst = out.segments[0].at(-1);
   assert.ok(lastOfFirst.ele > 1000, `expected smoothing to reach across the boundary, got ${lastOfFirst.ele}`);

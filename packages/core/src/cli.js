@@ -52,7 +52,7 @@ const cfgPath = opt("config", null);
 const cfg = { mode, ...(cfgPath ? JSON.parse(readFileSync(cfgPath, "utf8")) : {}) };
 const dis = opt("disable", null);
 if (dis) cfg.disable = [...(cfg.disable ?? []), ...dis.split(",")];
-// --html's "stabilized" layer (the REAL stabilize() export — reflects liftSnap/smooth/gradeBound
+// --html's "stabilized" layer (the REAL stabilize() export — reflects liftSnap/gradeBound
 // repositioning, unlike `clean`'s own untouched analysis-time positions) is ON by default;
 // --no-stabilized opts back out. See analyzedLayers' doc for why the two layers can diverge.
 if (has("no-stabilized")) cfg.stabilized = false;

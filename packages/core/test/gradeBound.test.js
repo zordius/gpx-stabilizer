@@ -42,3 +42,25 @@ test("gradeBound: fewer than 3 points returns ele unchanged", () => {
   assert.deepEqual(compute(ctx([10, 20])).ele, [10, 20]);
   assert.deepEqual(compute(ctx([])).ele, []);
 });
+
+test("gradeBound: GRADE_SMOOTH_WIN_M defaults to 0 (off) — no change from the despike-only result", () => {
+  const el = Array.from({ length: 11 }, (_, i) => 0.5 * i * i);
+  const despikeOnly = compute(ctx(el, { GRADE_AMAX: 1.5 })).ele;
+  const noWin = compute(ctx(el, { GRADE_AMAX: 1.5, GRADE_SMOOTH_WIN_M: 0 })).ele;
+  assert.deepEqual(noWin, despikeOnly);
+});
+
+test("gradeBound: a nonzero GRADE_SMOOTH_WIN_M smooths the POST-despike series, not the raw input", () => {
+  // a spike for despike to fix, plus a noisy alternation the boxcar mean should flatten out —
+  // 10 m steps at 1 s each (see ctx doc), so a ±30 m window spans ~6 points either side.
+  const el = Array.from({ length: 21 }, (_, i) => 100 + (i % 2 === 0 ? 1 : -1));
+  el[10] = 500; // impossible spike, well beyond anything a 30 m boxcar mean alone would erase
+  const despikeOnly = compute(ctx(el, { GRADE_AMAX: 1.5 })).ele;
+  const smoothed = compute(ctx(el, { GRADE_AMAX: 1.5, GRADE_SMOOTH_WIN_M: 30 })).ele;
+
+  assert.ok(despikeOnly[10] < 200, `despike alone already clamps the spike: ${despikeOnly[10]}`);
+  // the alternating ±1 noise should be averaged away by the boxcar mean, which the despike-only
+  // pass (a targeted curvature clamp, not a general smoother) leaves in place
+  const noiseRange = (arr) => Math.max(...arr.slice(2, 8)) - Math.min(...arr.slice(2, 8));
+  assert.ok(noiseRange(smoothed) < noiseRange(despikeOnly), "smoothing pass flattens residual noise");
+});

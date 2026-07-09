@@ -13,8 +13,8 @@
 //      in lat, lon, AND elevation) rather than discarded as noise.
 //
 // Emits a namespaced signal, `point.liftSnap = { lat, lon, ele? }` — never mutates the point itself
-// (same non-destructive convention as `mods/smooth.js`/`mods/gradeBound.js`'s `point.smooth.ele` /
-// `point.gradeBound.ele`). `ele` is present ONLY for a point moved onto an anchor (the pause case);
+// (same non-destructive convention as `mods/gradeBound.js`'s `point.gradeBound.ele`). `ele` is
+// present ONLY for a point moved onto an anchor (the pause case);
 // every snapped point gets `lat`/`lon`, since the line-projection touches all of them. `stabilize`'s
 // `opts.liftSnap` decides whether the export actually uses this signal (see stabilize.js).
 //

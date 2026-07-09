@@ -37,8 +37,8 @@ test("modes: ski also enables liftBoardingEle, loaded after liftConfirm, and tur
   assert.ok(enable.indexOf("liftConfirm") < enable.indexOf("liftBoardingEle"));
 });
 
-test("modes: ski turns on smooth by default too (gradeBound still wins in stabilize's own ele chain)", () => {
-  assert.equal(MODES.ski.params.smooth, true);
+test("modes: ski turns on gradeBound's own post-despike smoothing pass via GRADE_SMOOTH_WIN_M", () => {
+  assert.equal(MODES.ski.params.GRADE_SMOOTH_WIN_M, 30);
 });
 
 test("profile: carve is gated on g.CARVE (off → zeros, on → computed)", () => {

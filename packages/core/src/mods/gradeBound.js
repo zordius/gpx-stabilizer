@@ -10,10 +10,19 @@
 // Validated (experiment A, `gpx_eval/grade_recon.mjs`, vs the IMU-fused truth): preserves terrain
 // (RMS-to-truth stays ~raw where a mean over-flattens), but only catches the impossible spikes —
 // in-bound noise passes (physics can't tell a small real grade-change from a small noise one). So
-// this is a despike, NOT a full smoother. Emits a namespaced signal `point.gradeBound.ele`; the raw
-// `el` is untouched in-pipeline (the export decides — `stabilize`'s `opts.gradeBound`). Params follow the
-// in-module `g.X ?? default` convention.
-
+// the curvature clamp alone is a despike, NOT a full smoother. Emits a namespaced signal
+// `point.gradeBound.ele`; the raw `el` is untouched in-pipeline (the export decides —
+// `stabilize`'s `opts.gradeBound`). Params follow the in-module `g.X ?? default` convention.
+//
+// Optional distance-domain smoothing pass (2026-07-10, folded in from the former standalone
+// `smooth` module — see git history): a plain boxcar mean over the ±GRADE_SMOOTH_WIN_M along-track
+// window, run AFTER the curvature clamp above, over its OUTPUT (so a caller wanting both gets
+// despike-then-smooth in one pass rather than two competing independent rewrites — the previous
+// design had `smooth`/`gradeBound` as separate compute modules reading the same raw `el` in
+// parallel, so `stabilize`'s own export had to arbitrarily pick a winner when both were set).
+// Reuses the SAME cumulative-distance array `s` the curvature clamp already built. Defaults to 0
+// (off — pure despike, matching this module's own behavior before this pass existed, so every
+// existing caller of gradeBound alone is unaffected); `MODES.ski` sets it explicitly.
 export const compute = ({ el, planarStep, dt, g }) => {
   const n = el.length;
   const ele = el.slice();
@@ -21,6 +30,8 @@ export const compute = ({ el, planarStep, dt, g }) => {
   const aMax = g?.GRADE_AMAX ?? 1.5; //   tolerable vertical accel (m/s²) — a physical constant, not tuning
   const HS_MIN = g?.GRADE_HS_MIN ?? 1.5; // m/s floor: near a stop don't let aMax/hs² blow the bound up
   const ITERS = g?.GRADE_ITERS ?? 400; //  iteration cap (converges far sooner for isolated spikes)
+  const smoothWinM = g?.GRADE_SMOOTH_WIN_M ?? 0; // along-track half-window (m) for the optional
+  // post-despike smoothing pass above — 0 disables it (see doc)
 
   // cumulative along-track horizontal distance + horizontal speed per point
   const s = new Array(n);
@@ -52,5 +63,19 @@ export const compute = ({ el, planarStep, dt, g }) => {
     }
     if (maxAdj < 1e-4) break;
   }
-  return { ele };
+  if (smoothWinM <= 0) return { ele };
+
+  // boxcar mean over the ±smoothWinM-metre neighbourhood via a two-pointer sweep (s is sorted, so
+  // both window edges advance monotonically -> O(n) overall) — same algorithm the former `smooth`
+  // module used, now over the despiked `ele` instead of raw `el`.
+  const smoothed = new Array(n);
+  let lo = 0;
+  let hi = 0;
+  let sum = 0;
+  for (let i = 0; i < n; i++) {
+    while (lo < n && s[i] - s[lo] > smoothWinM) sum -= ele[lo++];
+    while (hi < n && s[hi] - s[i] <= smoothWinM) sum += ele[hi++];
+    smoothed[i] = sum / (hi - lo);
+  }
+  return { ele: smoothed };
 };

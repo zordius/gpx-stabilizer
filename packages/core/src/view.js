@@ -130,7 +130,7 @@ function splitByGap(points, maxGapMs) {
  * fuller `斷開` function (time/distance-gap cuts) plugs into.
  *
  * **`stabilized` line — ON BY DEFAULT** (`opts.stabilized: false` to turn it off): the actual
- * `stabilize(points, opts)` export (same `opts`, so `smooth`/`gradeBound`/`liftSnap` all apply
+ * `stabilize(points, opts)` export (same `opts`, so `gradeBound`/`liftSnap` all apply
  * exactly as they would to the real shipped output) — NOT the same thing as `clean` above. `clean`
  * is `analyze()`'s own kept points at their analysis-time position; a survivor-repositioning module
  * (`liftSnap`) never touches that position, only the separate `point.liftSnap` signal
@@ -310,7 +310,7 @@ export function analyzedLayers(points, opts = {}) {
     { label: "raw", color: "#888", width: 1, opacity: 0.7, lines: [out.map(flipY)] },
     cleanLayer,
   ];
-  // the real stabilize() export, on top of clean, so a liftSnap-repositioned (or smooth/gradeBound-
+  // the real stabilize() export, on top of clean, so a liftSnap-repositioned (or gradeBound-
   // rewritten) run visibly diverges from its own analysis-time position — ON by default, opt out
   // via opts.stabilized: false. stabilize()'s output carries no dropReason (already filtered away),
   // so — same `斷開` concern as the clean line's own splitAtDrops — break at a time gap
@@ -407,8 +407,8 @@ export function elevationChartSvg(points, opts = {}, size = {}) {
   const runs = splitByGap(shipped, (opts.stabilizedMaxGap ?? 10) * 1000);
   // segment.type === "lift" runs, for coloring the stabilized line — a separate `analyze()` pass
   // (stabilize() doesn't carry `segment` into its own {lat,lon,ele,time} output) over the same points,
-  // so it sees the identical drop set (segment/liftConfirm aren't affected by the smooth/gradeBound
-  // compute modules stabilize() may add on top).
+  // so it sees the identical drop set (segment/liftConfirm aren't affected by the gradeBound
+  // compute module stabilize() may add on top).
   const liftTimes = new Set(
     analyze(points, opts)
       .filter((p) => !p.dropReason && p.segment?.type === "lift")

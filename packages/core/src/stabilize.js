@@ -1,57 +1,53 @@
 // Stabilize a GPX track: run the analysis pipeline and keep only the points it did NOT flag for a
 // drop — duplicate timestamps, oversampling (so the survivors land at ~1 Hz), GPS outliers, and
 // physically-implausible motion (the activity envelopes) — yielding a cleaned track. The base only
-// removes noise points; an opt-in `smooth` rewrites the survivors' elevation to a slope-stable value
-// (distance-domain smoothing — see ./mods/smooth.js), the first survivor-rewriting module.
+// removes noise points; an opt-in `gradeBound` rewrites the survivors' elevation to a slope-stable
+// value (grade-change-bounded despike, optionally followed by distance-domain smoothing — see
+// ./mods/gradeBound.js), the first survivor-rewriting module.
 
 import { analyze } from "./analyze.js";
 import { readGpx, saveGpx } from "./gpx.js";
 import { resolveMode } from "./modes.js";
 import * as gradeBoundMod from "./mods/gradeBound.js";
 import { validateModule } from "./mods/index.js";
-import * as smoothMod from "./mods/smooth.js";
 import { resample } from "./resample.js";
 
-const smoothModule = validateModule("smooth", smoothMod);
 const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
 
 /**
  * Stabilize one segment's points: analyze, drop every point that picked up a `dropReason`, and
  * reduce the survivors back to plain track points (the analysis signals are not carried into output).
  *
- * Two opt-in survivor-`ele` rewrites (the `{lat,lon,ele,time}` shape is unchanged — only the *meaning*
- * of `ele` flips):
- * - **`opts.smooth`** — distance-domain mean smoothing (`point.smooth.ele`, see ./mods/smooth.js).
- * - **`opts.gradeBound`** — a terrain-preserving grade-change-bounded despike (`point.gradeBound.ele`,
- *   see ./mods/gradeBound.js): removes physically-impossible `ele` spikes without over-flattening real
- *   terrain. The portable answer to the "stabilize is horizontal-only, ele spikes survive" gap.
- *   (Named after the module, NOT `despike`, to avoid colliding with the horizontal `despike` builtin.)
+ * One opt-in survivor-`ele` rewrite (the `{lat,lon,ele,time}` shape is unchanged — only the *meaning*
+ * of `ele` flips): **`opts.gradeBound`** — a terrain-preserving grade-change-bounded despike
+ * (`point.gradeBound.ele`, see ./mods/gradeBound.js): removes physically-impossible `ele` spikes
+ * without over-flattening real terrain, optionally followed by a distance-domain smoothing pass over
+ * its own output (`g.GRADE_SMOOTH_WIN_M`, off by default — folded in from a former separate `smooth`
+ * module, 2026-07-10, so a caller wanting both gets one coherent despike-then-smooth rewrite instead
+ * of two independent ones competing for the same field; `MODES.ski` sets it). `true` for defaults, or
+ * an object of param overrides (e.g. `{ GRADE_AMAX: 2, GRADE_SMOOTH_WIN_M: 30 }`). (Named after the
+ * module, NOT `despike`, to avoid colliding with the horizontal `despike` builtin.)
  *
- * Each is `true` for defaults or an object of param overrides (e.g. `{ SMOOTH_WIN_M: 50 }` /
- * `{ GRADE_AMAX: 2 }`). They are independent compute signals, so they don't chain in-pipeline; if both
- * are set the export prefers `gradeBound` (terrain-preserving) — true despike-then-smooth awaits the
- * proposed `finalize` phase.
- *
- * A third, three-axis rewrite: **`opts.liftSnap`** — a plain boolean (the module it reads,
+ * A second, three-axis rewrite: **`opts.liftSnap`** — a plain boolean (the module it reads,
  * `mods/liftSnap.js`, is parameter-free; the caller tunes its upstream module, `liftConfirm`, via the
  * normal `g.LIFT_*` params, unrelated to this export switch). Reads `point.liftSnap` (`{ lat, lon,
  * ele? }`, only present on points inside a run `liftConfirm` actually confirmed as a real lift —
  * see that module's doc) and, when present, overrides `lat`/`lon` unconditionally and `ele` ahead of
- * `gradeBound`/`smooth` (liftSnap only ever sets `ele` for the handful of points it reinterprets as a
- * pause; everywhere else it's absent, so the existing `gradeBound`/`smooth`/raw chain is untouched).
- * Unlike `smooth`/`gradeBound`, this does NOT auto-load its module — `liftConfirm`/`liftSnap` are
+ * `gradeBound` (liftSnap only ever sets `ele` for the handful of points it reinterprets as a
+ * pause; everywhere else it's absent, so the existing `gradeBound`/raw chain is untouched).
+ * Unlike `gradeBound`, this does NOT auto-load its module — `liftConfirm`/`liftSnap` are
  * loaded via `opts.modules` (ski mode bundles both, see `modes.js`), so the export switch and the
  * module that feeds it stay decoupled; passing `liftSnap: true` without loading the modules is a
  * harmless no-op (no `point.liftSnap` ever appears, so every `??` falls through to the raw value).
  *
- * A fourth, general-purpose (not ski-gated) rewrite: **`opts.tangleSnap`** — same plain-boolean,
+ * A third, general-purpose (not ski-gated) rewrite: **`opts.tangleSnap`** — same plain-boolean,
  * decoupled-loading convention as `liftSnap` (module: `mods/tangleSnap.js`). Reads `point.tangleSnap`
  * (`{ lat, lon }`, only present on points inside a very-low-speed run that module thinned and
  * reinflated) and, when present, overrides `lat`/`lon` ahead of `liftSnap` — it already reads
  * `liftSnap`'s own position as its input where available, so its output is the more-refined answer.
  * Does not touch `ele`.
  *
- * A fifth, ski-specific `ele` rewrite: **`opts.liftBoardingEle`** — same decoupled-loading
+ * A fourth, ski-specific `ele` rewrite: **`opts.liftBoardingEle`** — same decoupled-loading
  * convention (module: `mods/liftBoardingEle.js`). Reads `point.liftBoardingEle` (`{ ele }`, only
  * present on the handful of points inside a lift-boarding/unloading elevation artifact it deals
  * with — see that module's doc) and, when present, wins outright ahead of `liftSnap`'s own `ele`
@@ -68,23 +64,16 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  * this function's own destructuring runs. An explicit field on `opts` still wins over the preset
  * (same precedence the CLI's `--mode` + `--config` already had).
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { mode?: string, smooth?: boolean | Record<string, number>, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean, liftBoardingEle?: boolean }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { mode?: string, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean, liftBoardingEle?: boolean }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { smooth, gradeBound, liftSnap, tangleSnap, liftBoardingEle, ...rest } = resolveMode(opts);
+  const { gradeBound, liftSnap, tangleSnap, liftBoardingEle, ...rest } = resolveMode(opts);
   const modules = [...(rest.modules ?? [])];
-  if (smooth) modules.push(smoothModule);
   if (gradeBound) modules.push(gradeBoundModule);
-  const analyzeOpts =
-    smooth || gradeBound
-      ? {
-          ...rest,
-          modules,
-          ...(typeof smooth === "object" ? smooth : {}),
-          ...(typeof gradeBound === "object" ? gradeBound : {}),
-        }
-      : rest;
+  const analyzeOpts = gradeBound
+    ? { ...rest, modules, ...(typeof gradeBound === "object" ? gradeBound : {}) }
+    : rest;
   return analyze(points, analyzeOpts)
     .filter((p) => !p.dropReason)
     .map((p) => ({
@@ -98,14 +87,12 @@ export function stabilize(points, opts = {}) {
       // liftBoardingEle (the lift-boarding fix) wins when present — its OWN `ele` is the final
       // answer even when `null` (a deliberate "drop, unrecoverable" verdict, not "no opinion"), so
       // this does NOT chain through `??` like the others below it. Then liftSnap (a confirmed-lift
-      // pause reposition), then gradeBound (despike) over smooth when both set (terrain-preserving),
-      // else whichever, else raw.
+      // pause reposition), then gradeBound (despike, optionally chained into a smoothing pass — see
+      // that module's doc), else raw.
       ele:
         liftBoardingEle && p.liftBoardingEle
           ? p.liftBoardingEle.ele
-          : (liftSnap ? p.liftSnap?.ele : null) ??
-            (gradeBound ? p.gradeBound?.ele : smooth ? p.smooth?.ele : null) ??
-            p.ele,
+          : (liftSnap ? p.liftSnap?.ele : null) ?? (gradeBound ? p.gradeBound?.ele : null) ?? p.ele,
       time: p.time,
     }));
 }
@@ -138,7 +125,7 @@ export function stabilize(points, opts = {}) {
  * splits again, so the Track can gain even more segments. `resample` is `true` for defaults, or an
  * options object (e.g. `{ RESAMPLE_HZ: 2, maxGap: 5 }`).
  * @param {import("./gpx.js").Track} track
- * @param {Parameters<typeof analyze>[1] & { smooth?, resample?: boolean | Record<string, number> }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { resample?: boolean | Record<string, number> }} [opts]
  * @returns {import("./gpx.js").Track}  a Track with cleaned (and optionally resampled) segments
  */
 export function stabilizeTrack(track, opts = {}) {
