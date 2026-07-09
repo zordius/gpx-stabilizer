@@ -1,7 +1,14 @@
 #!/usr/bin/env node
 // gpx-from-gopro — extract GoPro GPS into merged GPX, one file per camera per local date.
 //   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-//                                [--organize DIR] [--yes] [--html] [--png [--width N] [--height N]]
+//                                [--organize DIR] [--yes] [--mode core|ski]
+//                                [--html] [--png [--width N] [--height N]]
+//
+// - --mode core|ski: runs the merged points through gpx-stabilizer's own `stabilizeTrack` (per
+//   recording session — see the `--out` loop below) before writing, instead of shipping today's
+//   default raw extraction. --html/--png (below) render under the SAME mode when both are given,
+//   so the preview always matches what actually got written. Omitting --mode leaves every output
+//   exactly as before (raw, unstabilized) — this is purely additive.
 //
 // - --html / --png: alongside the merged .gpx (never instead of it), also render each group's merged
 //   track through the SAME analyzed view core's own CLI uses (clean track + drop markers) — an eval
@@ -34,7 +41,7 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { analyzedSvg, saveGpx, savePng, toHtmlAnalyzedFiles } from "gpx-stabilizer";
+import { analyzedSvg, MODES, saveGpx, savePng, stabilizeTrack, toHtmlAnalyzedFiles } from "gpx-stabilizer";
 import { buildGroups, family, fileNumber } from "./group.js";
 import { cacheMovePlan, executeMove, findSidecars, planMove } from "./organize.js";
 import { readGoproSamples } from "./telemetry.js";
@@ -45,11 +52,11 @@ const LOCAL_TZ = -new Date().getTimezoneOffset() / 60; // hours, may be fraction
 
 // ---- args ----
 const argv = process.argv.slice(2);
-const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize", "width", "height"]);
+const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize", "width", "height", "mode"]);
 const KNOWN_BOOL = new Set(["no-cache", "html", "png", "yes"]);
 const USAGE =
   "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
-  " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes]" +
+  " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes] [--mode core|ski]" +
   " [--html] [--png [--width N] [--height N]]";
 const inputs = [];
 const opts = {};
@@ -60,9 +67,8 @@ for (let i = 0; i < argv.length; i++) {
     if (WITH_VALUE.has(name)) opts[name] = argv[++i];
     else if (KNOWN_BOOL.has(name)) opts[name] = true;
     else {
-      // an unrecognized flag (e.g. --mode, which only the LIBRARY entry point's
-      // readGoproTelemetry({ stabilize: { mode } }) understands, not this CLI) must fail loudly --
-      // silently accepting it into `opts` would look like it took effect while doing nothing.
+      // an unrecognized flag must fail loudly -- silently accepting it into `opts` would look like
+      // it took effect while doing nothing.
       console.error(`gpx-from-gopro: unknown option --${name}\n\n${USAGE}`);
       process.exit(1);
     }
@@ -70,6 +76,10 @@ for (let i = 0; i < argv.length; i++) {
 }
 if (inputs.length === 0) {
   console.error(USAGE);
+  process.exit(1);
+}
+if (opts.mode != null && !MODES[opts.mode]) {
+  console.error(`gpx-from-gopro: unknown --mode "${opts.mode}" (use: ${Object.keys(MODES).join(", ")})\n\n${USAGE}`);
   process.exit(1);
 }
 const outExplicit = opts.out != null; // --organize only sweeps the .gpx along when this is false
@@ -204,8 +214,18 @@ const { groups, skipped: emptyGroups } = buildGroups(entries);
 for (const name of emptyGroups) console.error(`  no real fix, skip group: ${name}`);
 const written = [];
 for (const g of groups) {
+  // --mode stabilizes each recording session independently (stabilizeTrack analyzes a session's own
+  // <trkseg>s as one continuous stream, same handling core itself gives a multi-segment track) --
+  // sessions themselves stay separate <trk>s, matching buildGroups' own "one <trk> per recording"
+  // design. Omitting --mode ships today's raw extraction unchanged.
+  const tracks = opts.mode
+    ? g.tracks.map((trk) => ({
+        name: trk.name,
+        segments: stabilizeTrack({ segments: trk.segments }, { mode: opts.mode }).segments,
+      }))
+    : g.tracks;
   const track = {
-    tracks: g.tracks, // one <trk> per recording session, named after its own original video file
+    tracks, // one <trk> per recording session, named after its own original video file
     meta: {
       name: g.name,
       time: g.startMs != null ? new Date(g.startMs).toISOString() : null,
@@ -214,23 +234,28 @@ for (const g of groups) {
   };
   const path = join(outDir, `${g.name}.gpx`);
   saveGpx(track, path, { creator: "gpx-from-gopro" });
-  const npts = g.tracks.reduce((s, t) => s + t.segments.reduce((s2, seg) => s2 + seg.length, 0), 0);
-  const nseg = g.tracks.reduce((s, t) => s + t.segments.length, 0);
-  written.push(`${g.name}.gpx (${npts} pts, ${g.tracks.length} trk, ${nseg} seg)`);
+  const npts = tracks.reduce((s, t) => s + t.segments.reduce((s2, seg) => s2 + seg.length, 0), 0);
+  const nseg = tracks.reduce((s, t) => s + t.segments.length, 0);
+  written.push(`${g.name}.gpx (${npts} pts, ${tracks.length} trk, ${nseg} seg)`);
 }
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
 for (const w of written) console.log(`  -> ${join(outDir, w)}`);
 
 // ---- --html / --png: eval visualization of each group's merged track, additive to the .gpx above ----
-// (analyzedLayers/analyzedSvg run core's noise-removal pipeline over the flattened group, same
-// "core" defaults gpx-stabilizer's own CLI uses with no --mode — so drop reasons / hdop overlays
-// are visible without a separate `gpx-stabilizer --html` pass on the merged .gpx.)
+// (analyzedLayers/analyzedSvg run core's noise-removal pipeline over the flattened group, under the
+// same --mode as the .gpx above (core's own default when --mode is omitted) — so drop reasons / hdop
+// overlays are visible without a separate `gpx-stabilizer --html` pass on the merged .gpx.)
 if (opts.html || opts.png) {
+  // fed from the RAW groups (not the --mode-stabilized `tracks` written above) -- these views run
+  // their OWN analyze()/stabilize() pass internally, so raw points go in and `analyzeOpts` (below)
+  // carries the SAME --mode through, keeping the preview consistent with the .gpx without double
+  // -stabilizing anything.
   const tracks = groups.map((g) => ({
     name: g.name,
     points: g.tracks.flatMap((t) => t.segments).flat(),
   }));
+  const analyzeOpts = opts.mode ? { mode: opts.mode } : {};
   if (opts.html) {
     const htmlPath = join(outDir, "gopro-view.html");
     // one toHtmlAnalyzedFiles() call analyzes every group (potentially slow — full analyze() over
@@ -239,7 +264,7 @@ if (opts.html || opts.png) {
       if (phase === "start") console.log(`  [${index + 1}/${total}] analyzing ${name}...`);
       else console.log(`  [${index + 1}/${total}] ${name} done (${(ms / 1000).toFixed(1)}s)`);
     };
-    writeFileSync(htmlPath, toHtmlAnalyzedFiles(tracks, { onProgress }));
+    writeFileSync(htmlPath, toHtmlAnalyzedFiles(tracks, { ...analyzeOpts, onProgress }));
     console.log(`html -> ${htmlPath}`);
   }
   if (opts.png) {
@@ -247,7 +272,7 @@ if (opts.html || opts.png) {
     const height = Number(opts.height ?? 720);
     for (const t of tracks) {
       const pngPath = join(outDir, `${t.name}.png`);
-      await savePng(analyzedSvg(t.points, { width, height }), pngPath);
+      await savePng(analyzedSvg(t.points, { ...analyzeOpts, width, height }), pngPath);
       console.log(`png -> ${pngPath}`);
     }
   }
