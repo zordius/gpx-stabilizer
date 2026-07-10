@@ -282,6 +282,16 @@ test("writeHtml embeds the click-to-show-coordinates script (lat0/lon0 inversion
   assert.match(html, /dataset\.lat0/);
 });
 
+test("writeHtml embeds the click-to-show-time/elevation script for charts (t0/elemin inversion)", () => {
+  const html = writeHtml([]);
+  assert.match(html, /showChartValue/);
+  assert.match(html, /dataset\.t0/);
+  assert.match(html, /dataset\.elemin/);
+  // reparented into the clicked chart's own section before showing the value, same convention the
+  // zoomed-map-panel path uses for its own coordBox
+  assert.match(html, /appendChild\(coordBox\)/);
+});
+
 test("writeHtml sets and escapes the document title", () => {
   assert.match(writeHtml([], { title: "A & B" }), /<title>A &amp; B<\/title>/);
   assert.match(writeHtml([]), /<title>gpx-stabilizer<\/title>/);

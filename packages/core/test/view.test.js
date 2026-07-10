@@ -328,6 +328,13 @@ test("elevationChartSvg: returns total/kept point counts and the raw time range"
   assert.equal(chart.t1, track.at(-1).time);
 });
 
+test("elevationChartSvg: embeds data-t0/t1/elemin/elemax/pad* on the root svg for click-to-show-value", () => {
+  // straightClimb(): time 0..9000ms, ele 1000..1009 -> exact expected values, no drops in this fixture
+  const chart = elevationChartSvg(straightClimb());
+  assert.match(chart.svg, /data-t0="0" data-t1="9000" data-elemin="1000" data-elemax="1009"/);
+  assert.match(chart.svg, /data-padl="70" data-padr="20" data-padt="20" data-padb="50"/);
+});
+
 test("elevationChartSvg: raw points render as small red dots under the 1px green line", () => {
   const chart = elevationChartSvg(straightClimb());
   assert.match(

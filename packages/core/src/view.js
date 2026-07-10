@@ -393,6 +393,12 @@ function minMax(nums) {
  * preserving, but "none" stretching would distort the tick text/gridlines non-uniformly, so `meet`
  * (with some letterboxing when the viewport's aspect ratio doesn't match the chosen internal one) is
  * still the right choice here too.
+ *
+ * `data-t0`/`data-t1`/`data-elemin`/`data-elemax`/`data-padl`/`data-padr`/`data-padt`/`data-padb` ride
+ * as data attributes on the root `<svg>` (harmless — ignored — outside the viewer) so html.js's
+ * click-to-show-time/elevation script can invert a clicked SVG-space point back through the exact
+ * same `sx`/`sy` this function used to place everything, the same convention `toSvg`'s own
+ * `data-lat0`/`data-lon0` uses for the map's click-to-show-coordinates.
  * @param {import("./measure.js").TrackPoint[]} points
  * @param {Parameters<typeof analyze>[1] & { stabilizedMaxGap?: number }} [opts]
  * @param {{ width?: number, height?: number }} [size]  the SVG's internal viewBox units
@@ -477,7 +483,7 @@ export function elevationChartSvg(points, opts = {}, size = {}) {
     }
   }
   return {
-    svg: `<svg class="elev-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet">${parts.join("")}</svg>`,
+    svg: `<svg class="elev-chart" viewBox="0 0 ${w} ${h}" preserveAspectRatio="xMidYMid meet" data-t0="${t0}" data-t1="${t1}" data-elemin="${eleMin}" data-elemax="${eleMax}" data-padl="${padL}" data-padr="${padR}" data-padt="${padT}" data-padb="${padB}">${parts.join("")}</svg>`,
     total: points.length,
     kept: shipped.length,
     t0: t0R, // the file's own raw time range (matches the page-level summarize()'s own convention),

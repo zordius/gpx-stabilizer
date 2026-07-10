@@ -377,7 +377,7 @@ section li input:checked::before { transform: scale(1); }
 section > svg { grid-area: 1 / 1; display: block; width: 100vw; height: 100vh; cursor: zoom-in; }
 section > svg polyline, section > svg path { vector-effect: non-scaling-stroke; }
 .ontop { opacity: 0; pointer-events: none; }
-.elev-chart { cursor: pointer; } /* a click scroll-fits it, not zoom — see the click handler below */
+.elev-chart { cursor: pointer; } /* a click scroll-fits it (if not centred) or shows time/ele, not zoom — see the click handler below */
 * { transition: opacity 0.7s ease, background-color 0.7s ease, stroke-width 0.3s ease; }
 *:hover { transition-duration: 0.3s; }
 ${toggles}
@@ -389,13 +389,17 @@ ${toggles}
 ${summary}${nav}</header>
 ${body}
 <script>
-// click a chart — a panel must be the current # anchor before it zooms (so the FIRST click on any
+// click a MAP panel — a panel must be the current # anchor before it zooms (so the FIRST click on any
 // panel, including on load when # is empty, just selects it):
 //  - not the # anchor          -> click its title (sets # and scrolls it into view)
 //  - the # anchor, out of view  -> scrollIntoView (# unchanged, so a title click wouldn't move it)
 //  - the # anchor, in viewport  -> zoom to the clicked point at 1 m = 5 px, then DRAG to pan
 //  - already zoomed, plain click (no drag) -> show the clicked point's lat/lon bottom-left
 // Zoom out with a RIGHT-CLICK or the bottom-right "zoom out" button. One panel zoomed; legend/header ignored.
+//
+// click a CHART (.elev-chart, never zooms/pans) — simpler, no # anchor/drag state at all:
+//  - not centred in the viewport -> scrollIntoView
+//  - centred                     -> show the clicked point's time/elevation bottom-left
 let zoomed = null;
 let drag = null;
 let lastDragMoved = false; // did the most recent pointerdown->up actually pan (vs. a plain click)?
@@ -425,6 +429,21 @@ const showCoords = (svg, clientX, clientY) => {
   const lat = lat0 - u.y / DEG_LAT_M;
   const lon = lon0 + u.x / mx;
   coordBox.textContent = lat.toFixed(6) + ", " + lon.toFixed(6);
+  coordBox.style.display = "block";
+};
+// invert a clicked SVG-space point back to time/elevation via the chart's own sx/sy domain (see
+// view.js's elevationChartSvg doc) — same "invert through the embedded data-*" convention as showCoords.
+const showChartValue = (svg, clientX, clientY) => {
+  const t0 = Number(svg.dataset.t0), t1 = Number(svg.dataset.t1);
+  const eleMin = Number(svg.dataset.elemin), eleMax = Number(svg.dataset.elemax);
+  const padL = Number(svg.dataset.padl), padR = Number(svg.dataset.padr);
+  const padT = Number(svg.dataset.padt), padB = Number(svg.dataset.padb);
+  if (![t0, t1, eleMin, eleMax, padL, padR, padT, padB].every(Number.isFinite)) return;
+  const u = new DOMPoint(clientX, clientY).matrixTransform(svg.getScreenCTM().inverse());
+  const vb = svg.viewBox.baseVal;
+  const t = t0 + ((u.x - padL) / (vb.width - padL - padR)) * (t1 - t0);
+  const ele = eleMin + ((vb.height - padB - u.y) / (vb.height - padT - padB)) * (eleMax - eleMin);
+  coordBox.textContent = new Date(t).toISOString().slice(0, 19).replace("T", " ") + " · " + ele.toFixed(1) + "m";
   coordBox.style.display = "block";
 };
 const restore = () => {
@@ -483,9 +502,16 @@ document.body.addEventListener("contextmenu", (e) => {
 document.body.addEventListener("click", (e) => {
   if (e.target === btn) return restore();
   const svg = e.target.closest("section > svg");
-  // a chart svg never zooms/pans — one click just scroll-fits it, same as a panel out of view
+  // a chart svg never zooms/pans: scroll-fit it first if it isn't centred yet (same "out of view"
+  // check the map panel below uses), otherwise show the clicked point's time/elevation bottom-left.
   if (svg && svg.classList.contains("elev-chart")) {
-    return svg.scrollIntoView({ behavior: "smooth", block: "start" });
+    const rect = svg.getBoundingClientRect();
+    const mid = innerHeight / 2;
+    if (rect.top >= mid || rect.bottom <= mid) {
+      return svg.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+    svg.closest("section").appendChild(coordBox);
+    return showChartValue(svg, e.clientX, e.clientY);
   }
   if (svg && svg === zoomed) {
     if (!lastDragMoved) showCoords(svg, e.clientX, e.clientY); // plain click (no pan) -> show lat/lon
