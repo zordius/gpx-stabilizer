@@ -15,6 +15,7 @@ import * as liftConfirm from "./mods/liftConfirm.js";
 import * as liftSnap from "./mods/liftSnap.js";
 import * as noise from "./mods/noise.js";
 import * as segment from "./mods/segment.js";
+import * as segmentBoundaryEle from "./mods/segmentBoundaryEle.js";
 import * as tangleSnap from "./mods/tangleSnap.js";
 
 // Statically imported (not `loadModule()`) so `resolveMode` stays synchronous — every one of these
@@ -37,6 +38,7 @@ function getModuleRegistry() {
       liftConfirm: validateModule("liftConfirm", liftConfirm),
       liftSnap: validateModule("liftSnap", liftSnap),
       liftBoardingEle: validateModule("liftBoardingEle", liftBoardingEle),
+      segmentBoundaryEle: validateModule("segmentBoundaryEle", segmentBoundaryEle),
       tangleSnap: validateModule("tangleSnap", tangleSnap),
       noise: validateModule("noise", noise),
     };
@@ -57,6 +59,7 @@ export const MODES = {
       tangleSnap: true,
       gradeBound: true,
       liftBoardingEle: true,
+      segmentBoundaryEle: true,
       GRADE_SMOOTH_WIN_M: 30,
     },
     // `GRADE_SMOOTH_WIN_M` (2026-07-10) turns on gradeBound's own optional post-despike smoothing
@@ -80,7 +83,24 @@ export const MODES = {
     // (likely an undercount) show the exact shape. Must run after `liftConfirm` (reads its verdict).
     // `noise` (2026-07-08) is diagnostic-only (see that module's doc) — bundled here so its map/chart
     // layer is available whenever ski mode is, no separate opt-in needed to go look at it.
-    enable: ["kink", "segment", "liftConfirm", "liftSnap", "liftBoardingEle", "tangleSnap", "noise"],
+    // `segmentBoundaryEle` (2026-07-10) generalises liftBoardingEle's own boundary-artifact hunting to
+    // ANY segment.js run (not just confirmed-lift ones), gated on a plain time gap to the neighbouring
+    // segment (or its absence) rather than liftConfirm's verdict — needs only `segment` to find its
+    // candidate stretches, but MUST run after `liftSnap` (its own module doc: skips any point liftSnap
+    // already reconstructed, same deference as liftBoardingEle's own EXTREME mechanism — reading
+    // `point.liftSnap` before liftSnap's finalize has run would always see it absent, silently
+    // disabling that deference). Listed right after `liftSnap`, ahead of `liftBoardingEle` — the two
+    // don't read each other's output, so their relative order doesn't matter.
+    enable: [
+      "kink",
+      "segment",
+      "liftConfirm",
+      "liftSnap",
+      "segmentBoundaryEle",
+      "liftBoardingEle",
+      "tangleSnap",
+      "noise",
+    ],
   },
 };
 

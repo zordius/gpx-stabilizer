@@ -58,17 +58,27 @@ const gradeBoundModule = validateModule("gradeBound", gradeBoundMod);
  * `liftSnap`/raw the way an *absent* `point.liftBoardingEle` does. Presence of the field, not
  * truthiness of its `ele`, is what wins.
  *
+ * A fifth, general-purpose (not lift-specific) `ele` rewrite: **`opts.segmentBoundaryEle`** — same
+ * decoupled-loading convention (module: `mods/segmentBoundaryEle.js`). Reads
+ * `point.segmentBoundaryEle` (`{ ele }`, only present at the head/tail of a `segment.js` run that sits
+ * next to a long real time gap or has no neighbour at all, and where `liftSnap` had no reconstruction
+ * of its own to defer to — see that module's doc) with the SAME present-including-`null`-wins
+ * semantics as `liftBoardingEle`, checked right after it (so `liftBoardingEle`'s own more targeted
+ * lift-boarding verdict still wins on the rare point both could have an opinion on) and ahead of
+ * `liftSnap`/`gradeBound`/raw.
+ *
  * **`opts.mode`** (e.g. `"ski"`) expands to a preset's params + modules via `resolveMode`
  * (./modes.js) BEFORE any of the above is read — so `MODES.ski`'s own `liftSnap`/`tangleSnap`/
- * `gradeBound`/`liftBoardingEle: true` and its `enable` modules are already in effect by the time
- * this function's own destructuring runs. An explicit field on `opts` still wins over the preset
- * (same precedence the CLI's `--mode` + `--config` already had).
+ * `gradeBound`/`liftBoardingEle`/`segmentBoundaryEle: true` and its `enable` modules are already in
+ * effect by the time this function's own destructuring runs. An explicit field on `opts` still wins
+ * over the preset (same precedence the CLI's `--mode` + `--config` already had).
  * @param {import("./gpx.js").TrackPoint[]} points
- * @param {Parameters<typeof analyze>[1] & { mode?: string, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean, liftBoardingEle?: boolean }} [opts]
+ * @param {Parameters<typeof analyze>[1] & { mode?: string, gradeBound?: boolean | Record<string, number>, liftSnap?: boolean, tangleSnap?: boolean, liftBoardingEle?: boolean, segmentBoundaryEle?: boolean }} [opts]
  * @returns {import("./gpx.js").TrackPoint[]}  the cleaned points
  */
 export function stabilize(points, opts = {}) {
-  const { gradeBound, liftSnap, tangleSnap, liftBoardingEle, ...rest } = resolveMode(opts);
+  const { gradeBound, liftSnap, tangleSnap, liftBoardingEle, segmentBoundaryEle, ...rest } =
+    resolveMode(opts);
   const modules = [...(rest.modules ?? [])];
   if (gradeBound) modules.push(gradeBoundModule);
   const analyzeOpts = gradeBound
@@ -86,13 +96,16 @@ export function stabilize(points, opts = {}) {
       lon: (tangleSnap ? p.tangleSnap?.lon : null) ?? (liftSnap ? p.liftSnap?.lon : null) ?? p.lon,
       // liftBoardingEle (the lift-boarding fix) wins when present — its OWN `ele` is the final
       // answer even when `null` (a deliberate "drop, unrecoverable" verdict, not "no opinion"), so
-      // this does NOT chain through `??` like the others below it. Then liftSnap (a confirmed-lift
-      // pause reposition), then gradeBound (despike, optionally chained into a smoothing pass — see
-      // that module's doc), else raw.
+      // this does NOT chain through `??` like the others below it. Then segmentBoundaryEle (same
+      // present-wins semantics, more general/less targeted, checked second), then liftSnap (a
+      // confirmed-lift pause reposition), then gradeBound (despike, optionally chained into a
+      // smoothing pass — see that module's doc), else raw.
       ele:
         liftBoardingEle && p.liftBoardingEle
           ? p.liftBoardingEle.ele
-          : (liftSnap ? p.liftSnap?.ele : null) ?? (gradeBound ? p.gradeBound?.ele : null) ?? p.ele,
+          : segmentBoundaryEle && p.segmentBoundaryEle
+            ? p.segmentBoundaryEle.ele
+            : (liftSnap ? p.liftSnap?.ele : null) ?? (gradeBound ? p.gradeBound?.ele : null) ?? p.ele,
       time: p.time,
     }));
 }

@@ -41,6 +41,15 @@ test("modes: ski turns on gradeBound's own post-despike smoothing pass via GRADE
   assert.equal(MODES.ski.params.GRADE_SMOOTH_WIN_M, 30);
 });
 
+test("modes: ski also enables segmentBoundaryEle, loaded after liftSnap, and turns on its export", () => {
+  assert.equal(MODES.ski.params.segmentBoundaryEle, true);
+  // must load after liftSnap -- it defers to any point.liftSnap.ele already reconstructed, so reading
+  // it before liftSnap's own finalize has run would always see it absent
+  const enable = MODES.ski.enable;
+  assert.ok(enable.includes("segmentBoundaryEle"));
+  assert.ok(enable.indexOf("liftSnap") < enable.indexOf("segmentBoundaryEle"));
+});
+
 test("profile: carve is gated on g.CARVE (off → zeros, on → computed)", () => {
   const step = 5 / (Math.cos((36 * Math.PI) / 180) * 111320); // ~5 m/s east
   const track = Array.from({ length: 80 }, (_, i) => ({
