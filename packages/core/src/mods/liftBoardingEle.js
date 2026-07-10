@@ -10,7 +10,7 @@
 // `liftBoardingEle.ele` as the final answer (not "no opinion"), so it actually removes the `<ele>`
 // tag on export rather than falling through to a raw/liftSnap value.
 //
-// Three sub-mechanisms, differing only in HOW each finds the region to drop:
+// Four sub-mechanisms, differing only in HOW each finds the region to drop:
 //
 // HEAD (boarding/queueing) — queue-region discard (see the STAGE 1/STAGE 2 doc further down for how
 // the region itself is found: a confirmed low-speed stop directly adjacent to boarding, extended
@@ -25,8 +25,24 @@
 // threshold on both sides — those two anchors are themselves left untouched (they're what makes the
 // shape detectable at all); only the interior between them gets dropped.
 //
-// A fourth, cross-cutting step — POSITION drop (2026-07-09) — runs last, over EVERY point any of the
-// three mechanisms above already ele-dropped: where hdop ALSO independently reads poor
+// EXTREME LOW-SPEED SWING (2026-07-10) — no shape/anchor comparison at all, unlike the three above:
+// within a `segment.type === "lift"` run, a stretch where horizontal speed AND cumulative distance
+// both stay small (barely moving) has no physical way to also show a large elevation swing — real
+// terrain needs horizontal travel to change grade; near-zero travel means near-zero real elevation
+// change, so any big swing there is noise, independent of whether it forms a dip/bump/monotonic-climb
+// shape (`findExcursion` requires a recovery on BOTH sides to even look; a swing that never recovers,
+// e.g. one that runs straight into the real ride with no return-to-baseline anchor, has no shape for
+// it to find at all — see `LIFT_EXTREME_*` below and `fixExtremeLowSpeed`'s own doc for why this
+// catches exactly that case). Runs on `segment.type` directly (same as HEAD, not `liftConfirm` — see
+// `groupSegLiftRuns`'s own doc), so it isn't blocked by this file/session having no room for HEAD's
+// own backward queue search at all (`run.startIdx` sitting right at the front of the analyzed data).
+// LOWER priority than `liftSnap`'s own pause-event reconstruction (`stabilize.js`'s override chain
+// puts `liftBoardingEle` ahead of `liftSnap`, but this specific sub-mechanism skips any point
+// `liftSnap` already gave its own `ele` to): dropping is the last resort for a point this module has
+// no way to reconstruct, not a substitute for a reconstruction that already exists.
+//
+// A fifth, cross-cutting step — POSITION drop (2026-07-09) — runs last, over EVERY point any of the
+// mechanisms above already ele-dropped: where hdop ALSO independently reads poor
 // (LIFT_QUEUE_DROP_HDOP_MAX), that's strong enough evidence the point's horizontal position is
 // unusable too, not just its elevation, so the point is dropped ENTIRELY (`addDrop`) rather than
 // just losing `ele`. Unlike the ele-only drops, this can't selectively blank `lat`/`lon` and keep
@@ -297,6 +313,52 @@ function groupSegLiftRuns(kept) {
   return runs;
 }
 
+// --- EXTREME LOW-SPEED SWING (2026-07-10, see module doc) ---
+
+const LIFT_EXTREME_HS_MAX = 2; // m/s — at/under this counts as "barely moving" for this check
+const LIFT_EXTREME_DIST_MAX = 15; // m — cumulative horizontal distance ceiling for a candidate
+// window; real terrain can't change grade enough to explain a big elevation swing within this little
+// travel, so exceeding LIFT_EXTREME_ELE_RANGE_MIN inside a window this short/slow is noise
+const LIFT_EXTREME_ELE_RANGE_MIN = 10; // m — elevation range (max-min) within a candidate window that
+// counts as an implausible swing (first-look guess, like this module's sibling thresholds — see
+// module doc — not independently tuned per-value)
+
+/**
+ * Scan one `segment.type === "lift"` run for stretches where `hs` stays at/under `hsMax` AND
+ * cumulative horizontal distance stays under `distMax` throughout, yet the raw elevation range inside
+ * that same stretch reaches `eleRangeMin` — no dip/bump/anchor shape required (see module doc for why
+ * `findExcursion`'s shape search can miss this). Greedily grows a window from each qualifying start
+ * point as far as both gates keep holding, then jumps past it (whether or not it triggered) rather
+ * than rescanning overlapping windows. Drops (`{ ele: null }`) every point in a triggering window
+ * EXCEPT any point `liftSnap` already reconstructed its own `ele` for (`point.liftSnap?.ele != null`)
+ * — this sub-mechanism is a last resort, not a substitute for a reconstruction that already exists.
+ */
+function fixExtremeLowSpeed(kept, run, hsMax, distMax, eleRangeMin) {
+  let i = run.startIdx;
+  while (i <= run.endIdx) {
+    if ((kept[i].hs ?? 0) > hsMax) {
+      i++;
+      continue;
+    }
+    let j = i;
+    let dist = 0;
+    while (j + 1 <= run.endIdx && (kept[j + 1].hs ?? 0) <= hsMax) {
+      const step = Math.hypot(kept[j + 1].x - kept[j].x, kept[j + 1].y - kept[j].y);
+      if (dist + step > distMax) break;
+      dist += step;
+      j++;
+    }
+    const eles = kept.slice(i, j + 1).map((p) => p.ele);
+    const range = Math.max(...eles) - Math.min(...eles);
+    if (range >= eleRangeMin) {
+      for (let k = i; k <= j; k++) {
+        if (kept[k].liftSnap?.ele == null) kept[k].liftBoardingEle = { ele: null };
+      }
+    }
+    i = j + 1;
+  }
+}
+
 /**
  * STAGE 1 (see module doc): walk backward from `run.startIdx` while `hs` stays under `hsMax`,
  * contiguously. Returns the start index of that stretch if its own duration reaches `minS`, else -1
@@ -421,11 +483,15 @@ export const finalize = (out, ctx) => {
   const spanHsMax = g.LIFT_BOARD_SPAN_HS_MAX ?? SPAN_HS_MAX;
   const dropHdopMax = g.LIFT_QUEUE_DROP_HDOP_MAX ?? QUEUE_DROP_HDOP_MAX;
   const dropGlueS = g.LIFT_QUEUE_DROP_GLUE_S ?? QUEUE_DROP_GLUE_S;
+  const extremeHsMax = g.LIFT_EXTREME_HS_MAX ?? LIFT_EXTREME_HS_MAX;
+  const extremeDistMax = g.LIFT_EXTREME_DIST_MAX ?? LIFT_EXTREME_DIST_MAX;
+  const extremeEleRangeMin = g.LIFT_EXTREME_ELE_RANGE_MIN ?? LIFT_EXTREME_ELE_RANGE_MIN;
   const kept = out.filter((p) => !p.dropReason && p.time != null && Number.isFinite(p.ele));
 
   let searchLo = 0;
   for (const run of groupSegLiftRuns(kept)) {
     fixQueueHead(kept, searchLo, run, g);
+    fixExtremeLowSpeed(kept, run, extremeHsMax, extremeDistMax, extremeEleRangeMin);
     searchLo = run.endIdx + 1;
   }
 

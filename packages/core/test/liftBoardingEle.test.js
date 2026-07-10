@@ -156,6 +156,8 @@ function queueHeadTrack(boardEle) {
       x: 0,
       y: 0,
       ele: i === 0 ? boardEle : 900 + i * 10,
+      hs: 3, // real cable speed -- not this fixture's default queueing hs(0.3), so the EXTREME
+      // low-speed-swing mechanism (below) doesn't mistake the ride's own climb for boarding noise
       segment: { id: 1, type: "lift" },
     }),
   );
@@ -208,6 +210,7 @@ test("liftBoardingEle: HEAD accepts a queue stretch shorter than QUEUE_STOP_MIN_
       x: 0,
       y: 0,
       ele: i === 0 ? 850 : 900 + i * 10,
+      hs: 3, // real cable speed, not this fixture's queueing default -- see queueHeadTrack's own note
       segment: { id: 1, type: "lift" },
     }),
   );
@@ -230,10 +233,72 @@ test("liftBoardingEle: a real, still-moving approach at the very front of the da
       x: 0,
       y: 0,
       ele: i === 0 ? 850 : 900 + i * 10,
+      hs: 3, // real cable speed, not this fixture's queueing default -- see queueHeadTrack's own note
       segment: { id: 1, type: "lift" },
     }),
   );
   const out = [...queue, ...lift];
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+// --- EXTREME LOW-SPEED SWING (2026-07-10) ---
+
+function extremeSwingTrack() {
+  // 10 points, segment.type="lift", barely moving (0.5m apart -> 4.5m total, well under the 15m cap)
+  // and slow (hs=0.3), yet elevation alternates by 12m each step -- no dip/bump shape, no anchors,
+  // just an implausible swing given how little the point actually traveled.
+  return Array.from({ length: 10 }, (_, i) =>
+    pt({
+      x: i * 0.5,
+      y: 0,
+      ele: 900 + (i % 2 === 0 ? 0 : 12),
+      time: i * 1000,
+      hs: 0.3,
+      segment: { id: 1, type: "lift" },
+    }),
+  );
+}
+
+test("liftBoardingEle: EXTREME drops a low-speed/short-distance stretch with an implausible elevation swing", () => {
+  const out = extremeSwingTrack();
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle?.ele === null));
+});
+
+test("liftBoardingEle: EXTREME skips any point liftSnap already reconstructed", () => {
+  const out = extremeSwingTrack();
+  out[3].liftSnap = { lat: 36, lon: 138, ele: 905 }; // liftSnap already gave this point its own ele
+  finalize(out, { g: {} });
+  assert.equal(out[3].liftBoardingEle, undefined); // respected, not overridden with a drop
+  assert.equal(out[2].liftBoardingEle?.ele, null); // neighbours still dropped
+  assert.equal(out[4].liftBoardingEle?.ele, null);
+});
+
+test("liftBoardingEle: EXTREME leaves a low-speed stretch alone when the elevation range stays plausible", () => {
+  const out = Array.from({ length: 10 }, (_, i) =>
+    pt({ x: i * 0.5, y: 0, ele: 900 + i * 0.1, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+  );
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: EXTREME leaves a real, faster climb alone even with a big elevation range", () => {
+  const out = Array.from({ length: 10 }, (_, i) =>
+    pt({ x: i * 5, y: 0, ele: 900 + i * 2, time: i * 1000, hs: 5, segment: { id: 1, type: "lift" } }),
+  );
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: EXTREME's distance cap prevents flagging a genuinely long, steady climb", () => {
+  // 30 points, 1m apart, climbing 0.5m/point -- growing a window past the 15m distance cap stops it
+  // at ~15m of travel (~7.5m of elevation gain), under LIFT_EXTREME_ELE_RANGE_MIN(10), so it never
+  // accumulates enough elevation range in one window to trigger, despite the full run's own range
+  // (29 * 0.5 = 14.5m) being well over the threshold if the cap didn't limit the window at all.
+  const out = Array.from({ length: 30 }, (_, i) =>
+    pt({ x: i * 1, y: 0, ele: 900 + i * 0.5, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+  );
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
 });
