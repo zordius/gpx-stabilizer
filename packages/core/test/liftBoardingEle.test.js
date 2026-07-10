@@ -193,6 +193,51 @@ test("liftBoardingEle: STAGE 2 doesn't extend past QUEUE_DIST_M -- the confirmed
   assert.deepEqual(out[boardIdx].liftBoardingEle, { ele: null });
 });
 
+test("liftBoardingEle: HEAD accepts a queue stretch shorter than QUEUE_STOP_MIN_S when it runs off the front of the analyzed data", () => {
+  // the queue starts at index 0 -- the very front of `kept`, as if this file/session were analyzed
+  // alone with no earlier real data -- and is only ~1s long, well under QUEUE_STOP_MIN_S (5s). The
+  // old code rejected this as "too brief to trust"; hitting the data boundary while still slow is
+  // now accepted outright, since there is no way to see whether the real queue started earlier.
+  const queue = [
+    pt({ time: 0, x: 50, y: 0, ele: 700, hs: 0.3 }),
+    pt({ time: 1000, x: 50, y: 0, ele: 700, hs: 0.3 }),
+  ];
+  const lift = Array.from({ length: 21 }, (_, i) =>
+    pt({
+      time: 2000 + i * 10000,
+      x: 0,
+      y: 0,
+      ele: i === 0 ? 850 : 900 + i * 10,
+      segment: { id: 1, type: "lift" },
+    }),
+  );
+  const out = [...queue, ...lift];
+  finalize(out, { g: {} });
+  const boardIdx = 2; // queue(2) -> lift[0]
+  for (let i = 0; i <= boardIdx; i++) {
+    assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `index ${i}`);
+  }
+  for (let i = boardIdx + 1; i < out.length; i++) assert.equal(out[i].liftBoardingEle, undefined);
+});
+
+test("liftBoardingEle: a real, still-moving approach at the very front of the data is still not treated as a queue", () => {
+  // same boundary position, but hs stays high right up to boarding -- STAGE 1's own first check
+  // (hs >= hsMax) rejects it before the boundary-relaxation can even apply.
+  const queue = [pt({ time: 0, x: 50, y: 0, ele: 700, hs: 5 })];
+  const lift = Array.from({ length: 21 }, (_, i) =>
+    pt({
+      time: 1000 + i * 10000,
+      x: 0,
+      y: 0,
+      ele: i === 0 ? 850 : 900 + i * 10,
+      segment: { id: 1, type: "lift" },
+    }),
+  );
+  const out = [...queue, ...lift];
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
 // --- position drop for confirmed-bad-GPS points (2026-07-09) ---
 // queueHeadTrack's indices: 0 = anchor (never ele-dropped), 1-5 = queue, 6 = boarding point (both
 // ele-dropped by the HEAD mechanism, per the first test above), 7+ = the real ride (never touched).

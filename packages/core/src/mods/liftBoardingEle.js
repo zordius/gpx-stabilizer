@@ -254,7 +254,13 @@ const QUEUE_LOOKBACK_S = 600; // s — safety cap on how far back the queue sear
 // (low threshold, sustained duration) specifically so a real descent's own brief speed dips (a few
 // seconds, never actually near-zero) can't satisfy it — only a genuine, sustained near-stop can. No
 // confirmed stop directly adjacent to boarding -> no evidence of a queue at all -> leave the run
-// untouched.
+// untouched. EXCEPT when the backward walk runs off the front of the analyzed data while still
+// below QUEUE_STOP_HS_MAX (2026-07-10) — e.g. a single video file/session analyzed on its own,
+// starting already mid-queue, with no earlier real data to confirm the stretch's true duration
+// against. There the visible low-speed run, however short, is accepted outright rather than
+// rejected for merely looking too brief within an artificially truncated window — a whole-day
+// merge of the same footage (real data before this file) would see the same stretch clear
+// QUEUE_STOP_MIN_S on its own merits.
 //
 // STAGE 2 — EXTEND: once confirmed, walk further backward from there using DISTANCE to the boarding
 // position (not hs — once you're this close to the lift, hs itself is exactly what gets corrupted by
@@ -294,7 +300,12 @@ function groupSegLiftRuns(kept) {
 /**
  * STAGE 1 (see module doc): walk backward from `run.startIdx` while `hs` stays under `hsMax`,
  * contiguously. Returns the start index of that stretch if its own duration reaches `minS`, else -1
- * (no confirmed stop directly adjacent to boarding).
+ * (no confirmed stop directly adjacent to boarding) — UNLESS the walk runs off the front of the
+ * analyzed data (`searchLo`, e.g. this file/session is the very start of what got analyzed) while
+ * still below `hsMax`: there is no way to see how much earlier the stop actually began, so the
+ * visible low-speed stretch — however short — is already stronger evidence than an ordinary
+ * mid-stream dip that recovered inside the window (which minS exists to filter out), and is accepted
+ * outright without needing to clear minS itself.
  */
 function findConfirmedStop(kept, run, searchLo, hsMax, minS) {
   let i = run.startIdx - 1;
@@ -304,6 +315,7 @@ function findConfirmedStop(kept, run, searchLo, hsMax, minS) {
     i--;
     stopStart = i;
   }
+  if (stopStart === searchLo) return stopStart; // ran off the front of the data, still slow
   const durS = (kept[run.startIdx - 1].time - kept[stopStart].time) / 1000;
   return durS >= minS ? stopStart : -1;
 }
