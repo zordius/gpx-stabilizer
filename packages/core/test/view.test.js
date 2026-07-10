@@ -400,6 +400,22 @@ test("elevationChartSvg: plots the STABILIZED elevation, not raw — a liftSnap-
   );
 });
 
+test("elevationChartSvg: a dropped-ele point between close-together survivors still splits the line, even under stabilizedMaxGap", () => {
+  // 5 points 1 s apart (well under the default 10 s cap) — the middle one has its `ele` discarded by
+  // an ele-rewriting mod. A pure time-gap check would draw one continuous line straight across it
+  // (2026-07-10 bug, found on real data); it must still break here even though nothing is anywhere
+  // near opts.stabilizedMaxGap.
+  const fakeDrop = {
+    name: "fakeDrop",
+    finalize: (out) => {
+      out[2].liftBoardingEle = { ele: null };
+    },
+  };
+  const track = straightClimb(5);
+  const chart = elevationChartSvg(track, { modules: [fakeDrop], liftBoardingEle: true });
+  assert.equal([...pathD(chart.svg).matchAll(/M/g)].length, 2); // split around the dropped point
+});
+
 test("elevationChartSvg: null when fewer than 2 points survive stabilize()", () => {
   assert.equal(elevationChartSvg([]), null);
   assert.equal(elevationChartSvg([straightClimb(1)[0]]), null);

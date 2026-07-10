@@ -110,6 +110,38 @@ function splitByGap(points, maxGapMs) {
   return runs;
 }
 
+/** Split `shipped` (the finite-`ele` subset of `kept`) into runs, breaking on EITHER a plain time gap
+ * over `maxGapMs` (no surviving point at all for a while — a real recording gap) OR, the case a pure
+ * time threshold can't see: `kept` has a point strictly between two `shipped` neighbours (`kept` is
+ * every point that passed the base noise filter, `ele` possibly `null` — see the caller). Such a point
+ * passed the noise filter but had its OWN `ele` discarded by an ele-rewriting mod (liftBoardingEle /
+ * segmentBoundaryEle / …); its neighbours can still be only a fraction of a second apart in real time,
+ * so a pure `maxGapMs` check would silently draw one straight line bridging right across the discarded
+ * reading, making dropped data look like a real continuous measurement (2026-07-10 — found by clicking
+ * the chart on GOPR5138.MP4 and spotting exactly this: a still-connected line crossing a stretch
+ * liftBoardingEle had actually dropped). `kept`/`shipped` are both chronological and `shipped` is a
+ * subsequence of `kept`, so a single forward-only pointer walk finds each "any kept point in between"
+ * check in O(n+m) total, no per-point rescan. */
+function splitStabilized(kept, shipped, maxGapMs) {
+  const runs = [];
+  let cur = [];
+  let ki = 0;
+  for (const p of shipped) {
+    if (cur.length) {
+      const prev = cur[cur.length - 1];
+      while (ki < kept.length && kept[ki].time <= prev.time) ki++;
+      const eleDroppedBetween = ki < kept.length && kept[ki].time < p.time;
+      if (eleDroppedBetween || p.time - prev.time > maxGapMs) {
+        runs.push(cur);
+        cur = [];
+      }
+    }
+    cur.push(p);
+  }
+  if (cur.length) runs.push(cur);
+  return runs;
+}
+
 /**
  * Run the analysis pipeline and split the result into render layers: a faint `raw` line of every
  * input point (background reference), the clean track (kept points as a line), and a marker layer per
@@ -375,9 +407,14 @@ function minMax(nums) {
  * `segment.type === "lift"`), with every RAW input
  * point (unfiltered, so a dropped/despiked point still shows) plotted underneath as small red dots,
  * so the cleaned line's effect is visible against the noise it replaced. The line is broken into
- * separate polylines at any `opts.stabilizedMaxGap`-second time gap (`splitByGap`, the same rule the
- * "stabilized" map layer uses), so a stretch the pipeline dropped shows as a visible break rather
- * than a straight bridge across the missing time. The TIME axis domain covers whichever of the raw
+ * separate polylines (`splitStabilized`) at any `opts.stabilizedMaxGap`-second time gap (the same rule
+ * the "stabilized" map layer's own `splitByGap` uses) OR wherever a point passed the base noise filter
+ * but had its own `ele` discarded by an ele-rewriting mod (liftBoardingEle/segmentBoundaryEle/…) — the
+ * second case a pure time threshold can't see on its own: such a point's surviving neighbours can
+ * still be a fraction of a second apart, so time-only splitting would draw one straight line bridging
+ * right across the discarded reading (2026-07-10 fix — see `splitStabilized`'s own doc). Either way, a
+ * stretch the pipeline dropped shows as a visible break rather than a straight bridge across the
+ * missing data. The TIME axis domain covers whichever of the raw
  * or stabilized series is wider, so neither ever clips off-canvas; the ELEVATION axis domain is the
  * stabilized series only, so a despiked-away raw outlier can't compress the scale (a raw dot outside
  * that range is clipped rather than widening it). Gridlines every `ELE_TICK_M` (100 m)
@@ -407,10 +444,15 @@ function minMax(nums) {
  *   `toHtmlAnalyzedFiles`'s `chartTitle`); null when there's nothing to draw
  */
 export function elevationChartSvg(points, opts = {}, size = {}) {
-  const shipped = stabilize(points, opts).filter((p) => Number.isFinite(p.ele) && p.time != null);
+  // every point that passed the base noise filter (stabilize()'s own `!dropReason` cut) — `ele` may
+  // be `null` where an ele-rewriting mod (liftBoardingEle/segmentBoundaryEle/…) discarded it; `shipped`
+  // narrows to the finite-`ele` subset actually plotted, and `splitStabilized` below cross-references
+  // the two to break the line exactly where a reading was discarded, not just on elapsed time.
+  const kept = stabilize(points, opts);
+  const shipped = kept.filter((p) => Number.isFinite(p.ele) && p.time != null);
   if (shipped.length < 2) return null;
   const raw = points.filter((p) => Number.isFinite(p.ele) && p.time != null);
-  const runs = splitByGap(shipped, (opts.stabilizedMaxGap ?? 10) * 1000);
+  const runs = splitStabilized(kept, shipped, (opts.stabilizedMaxGap ?? 10) * 1000);
   // segment.type === "lift" runs, for coloring the stabilized line — a separate `analyze()` pass
   // (stabilize() doesn't carry `segment` into its own {lat,lon,ele,time} output) over the same points,
   // so it sees the identical drop set (segment/liftConfirm aren't affected by the gradeBound
