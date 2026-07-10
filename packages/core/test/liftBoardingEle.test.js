@@ -339,6 +339,99 @@ test("liftBoardingEle: EXTREME triggers on the same stretch when the span isn't 
   assert.ok(out.every((p) => p.liftBoardingEle?.ele === null));
 });
 
+// --- ASCENT-STRETCH REVERSAL (2026-07-10) ---
+
+// climbs 900->904, peaks at 908, then drops only to 903 and keeps climbing to 907 -- never returns to
+// the pre-peak level (900), the exact shape findExcursion's own "recover to the near anchor" search
+// can't catch, but findReversal's own "best recovery point" search can. liftConfirm never confirms
+// "lift" here at all -- the whole thing stays "ascent". hs=1.5 throughout (a real, non-stationary
+// pace) so the EXTREME mechanism's own hs<=1 gate never fires here too -- this exercises ASCENT-
+// REVERSAL alone.
+function ascentReversalTrack() {
+  const climb = Array.from({ length: 5 }, (_, i) =>
+    pt({ ele: 900 + i, time: i * 1000, hs: 1.5, segment: { id: 1, type: "lift" }, liftConfirm: { type: "ascent" } }),
+  ); // idx 0-4: 900..904
+  const peak = [
+    pt({ ele: 908, time: 5000, hs: 1.5, segment: { id: 1, type: "lift" }, liftConfirm: { type: "ascent" } }), // idx5
+  ];
+  const partialDrop = Array.from({ length: 5 }, (_, i) =>
+    pt({
+      ele: 903 + i,
+      time: (6 + i) * 1000,
+      hs: 1.5,
+      segment: { id: 1, type: "lift" },
+      liftConfirm: { type: "ascent" },
+    }),
+  ); // idx 6-10: 903..907
+  return [...climb, ...peak, ...partialDrop];
+}
+
+test("liftBoardingEle: ASCENT-REVERSAL drops a reversal that never returns to its own pre-peak level", () => {
+  const out = ascentReversalTrack();
+  finalize(out, { g: {} });
+  for (let i = 1; i <= 5; i++) assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `index ${i}`);
+  assert.equal(out[0].liftBoardingEle, undefined); // near anchor untouched
+  assert.equal(out[6].liftBoardingEle, undefined); // far anchor (best recovery point) untouched
+  for (let i = 7; i <= 10; i++) assert.equal(out[i].liftBoardingEle, undefined, `index ${i}`);
+});
+
+test("liftBoardingEle: ASCENT-REVERSAL never touches liftConfirm.type==='lift' points, even with the same shape", () => {
+  const out = ascentReversalTrack().map((p) => ({ ...p, liftConfirm: { type: "lift" } }));
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: ASCENT-REVERSAL leaves a reversal below the threshold alone", () => {
+  const out = ascentReversalTrack();
+  finalize(out, { g: { LIFT_ASCENT_DIP_M: 20 } }); // above this fixture's own ~8m near clearance
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: ASCENT-REVERSAL leaves a monotonic climb (no reversal at all) alone", () => {
+  const out = Array.from({ length: 10 }, (_, i) =>
+    pt({
+      ele: 900 + i * 2,
+      time: i * 1000,
+      hs: 1.5,
+      segment: { id: 1, type: "lift" },
+      liftConfirm: { type: "ascent" },
+    }),
+  );
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: ASCENT-REVERSAL scans every non-'lift' stretch independently, not just a leading prefix", () => {
+  // liftConfirm reverts lift -> ascent -> lift -> ascent within the SAME segment.type="lift" run --
+  // both ascent stretches must be scanned on their own, not just a single leading prefix.
+  const mk = (baseEle, tOffset) =>
+    [0, 1, 2, 3, 4, 8, 3, 4, 5, 6, 7].map((d, i) =>
+      pt({
+        ele: baseEle + d,
+        time: (tOffset + i) * 1000,
+        hs: 1.5,
+        segment: { id: 1, type: "lift" },
+        liftConfirm: { type: "ascent" },
+      }),
+    );
+  const stretch1 = mk(900, 0); // idx 0-10
+  const bridge = Array.from({ length: 5 }, (_, i) =>
+    pt({
+      ele: 910 + i,
+      time: (11 + i) * 1000,
+      hs: 1.5,
+      segment: { id: 1, type: "lift" },
+      liftConfirm: { type: "lift" },
+    }),
+  ); // idx 11-15, confirmed -- must stay untouched
+  const stretch2 = mk(920, 16); // idx 16-26
+  const out = [...stretch1, ...bridge, ...stretch2];
+  finalize(out, { g: {} });
+  for (let i = 1; i <= 5; i++) assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `stretch1 idx ${i}`);
+  for (let i = 11; i <= 15; i++) assert.equal(out[i].liftBoardingEle, undefined, `bridge idx ${i}`);
+  for (let i = 17; i <= 21; i++) assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `stretch2 idx ${i}`);
+});
+
 // --- position drop for confirmed-bad-GPS points (2026-07-09) ---
 // queueHeadTrack's indices: 0 = anchor (never ele-dropped), 1-5 = queue, 6 = boarding point (both
 // ele-dropped by the HEAD mechanism, per the first test above), 7+ = the real ride (never touched).

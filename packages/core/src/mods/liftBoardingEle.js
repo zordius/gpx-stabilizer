@@ -10,7 +10,7 @@
 // `liftBoardingEle.ele` as the final answer (not "no opinion"), so it actually removes the `<ele>`
 // tag on export rather than falling through to a raw/liftSnap value.
 //
-// Four sub-mechanisms, differing only in HOW each finds the region to drop:
+// Five sub-mechanisms, differing only in HOW each finds the region to drop:
 //
 // HEAD (boarding/queueing) — queue-region discard (see the STAGE 1/STAGE 2 doc further down for how
 // the region itself is found: a confirmed low-speed stop directly adjacent to boarding, extended
@@ -41,7 +41,25 @@
 // `liftSnap` already gave its own `ele` to): dropping is the last resort for a point this module has
 // no way to reconstruct, not a substitute for a reconstruction that already exists.
 //
-// A fifth, cross-cutting step — POSITION drop (2026-07-09) — runs last, over EVERY point any of the
+// ASCENT-STRETCH REVERSAL (2026-07-10) — a much LOOSER dip/bump search than TAIL/MID-RUN's, but
+// deliberately scoped to only where `liftConfirm` has NOT (yet, or no longer) confirmed the point as
+// a real, steady `"lift"` ride: within a `segment.type === "lift"` run, find each contiguous stretch
+// where `liftConfirm.type !== "lift"` (`"ascent"`, or unclassified — liftConfirm's own verdict can
+// revert from `"lift"` back to `"ascent"` mid-run, not just hold a single leading prefix, so every
+// such stretch is found, not just the first) and search it with `findReversal` (see its own doc for
+// why this is a DIFFERENT search from `findExcursion`, not just looser thresholds — `findExcursion`'s
+// own "recover exactly back to the near anchor's level" requirement fails here, since a real ongoing
+// climb never returns to a much-earlier, much-lower level at all). Deliberately has NO speed gate of
+// its own (`liftConfirm` already ran its own speed/straightness checks before landing on `"ascent"`),
+// and does not defer to `liftSnap` the way EXTREME does — `liftSnap` only ever touches
+// `liftConfirm.type === "lift"` points, which this mechanism never touches anyway (no overlap
+// possible). Thresholds (`LIFT_ASCENT_DIP_M`/`LIFT_ASCENT_RECOVER_M`) are deliberately much smaller
+// than TAIL/MID-RUN's own `LIFT_BOARD_DIP_M`/`LIFT_BOARD_RECOVER_M` (2m vs 5m) — checked against a
+// real file: 2m catches real artifacts (a 9-17m reversal) without also catching a genuine, sustained
+// climb's own small (~1-2m) GPS jitter; going as low as 1m did start flagging a real ~38m climb's own
+// minor early wobble as if it were the whole excursion, so 1m is too aggressive.
+//
+// A sixth, cross-cutting step — POSITION drop (2026-07-09) — runs last, over EVERY point any of the
 // mechanisms above already ele-dropped: where hdop ALSO independently reads poor
 // (LIFT_QUEUE_DROP_HDOP_MAX), that's strong enough evidence the point's horizontal position is
 // unusable too, not just its elevation, so the point is dropped ENTIRELY (`addDrop`) rather than
@@ -380,6 +398,94 @@ function fixExtremeLowSpeed(kept, run, hsMax, eleRangeMin, maxSpan) {
   }
 }
 
+// --- ASCENT-STRETCH REVERSAL (2026-07-10, see module doc) ---
+
+const LIFT_ASCENT_DIP_M = 2; // m — much smaller than LIFT_BOARD_DIP_M(5): this stretch hasn't been
+// confirmed as a real, steady cable ride yet, so a much smaller reversal is already suspect. Checked
+// against a real file: 2m catches genuine artifacts without also catching a real climb's own small
+// GPS jitter; 1m started flagging a real ~38m climb's own minor early wobble as the whole excursion.
+const LIFT_ASCENT_RECOVER_M = 2;
+
+/**
+ * Find ONE dip- OR bump-shaped reversal in `window`, same `sign`/`se` convention as `findExcursion` —
+ * but NOT the same search: `findExcursion`'s `postIdx` requires recovering all the way back to the
+ * NEAR anchor's own level, which never happens here on purpose (this window sits inside a REAL,
+ * ongoing climb — the whole point of scoping to an unconfirmed-ascent stretch — so "recovers to
+ * whatever level it started the window at" is simply the wrong question). Here `postIdx` is just
+ * wherever the BEST recovery after the extremum happens to land (same point `farMax` already found),
+ * so a reversal only needs to clear `dipM`/`recoverM` on both sides, not fully retrace its steps.
+ * Every scan skips a `NaN` `se(p)` the same way `findExcursion` does (see its own doc).
+ */
+function findReversal(window, sign, dipM, recoverM) {
+  const n = window.length;
+  const se = (p) => sign * curEle(p);
+
+  let extIdx = -1;
+  for (let i = 0; i < n; i++) {
+    const v = se(window[i]);
+    if (!Number.isNaN(v) && (extIdx < 0 || v < se(window[extIdx]))) extIdx = i;
+  }
+  if (extIdx < 1 || extIdx > n - 2) return null;
+
+  let preIdx = -1;
+  for (let i = 0; i < extIdx; i++) {
+    const v = se(window[i]);
+    if (!Number.isNaN(v) && (preIdx < 0 || v > se(window[preIdx]))) preIdx = i;
+  }
+  let postIdx = -1;
+  for (let i = extIdx + 1; i < n; i++) {
+    const v = se(window[i]);
+    if (!Number.isNaN(v) && (postIdx < 0 || v > se(window[postIdx]))) postIdx = i;
+  }
+  if (preIdx < 0 || postIdx < 0) return null;
+
+  const ext = se(window[extIdx]);
+  const near = se(window[preIdx]) - ext;
+  const far = se(window[postIdx]) - ext;
+  if (near < dipM || far < recoverM) return null;
+
+  return { preIdx, postIdx, mag: near + far };
+}
+
+/** Contiguous `[start, end]` stretches (into `run`, indices into `kept`) where `liftConfirm.type` is
+ * anything OTHER than `"lift"` — `liftConfirm`'s own verdict can revert from `"lift"` back to
+ * `"ascent"` partway through a `segment.type === "lift"` run, so every such stretch is returned, not
+ * just a single leading prefix (see module doc). */
+function findAscentStretches(kept, run) {
+  const stretches = [];
+  let i = run.startIdx;
+  while (i <= run.endIdx) {
+    if (kept[i].liftConfirm?.type === "lift") {
+      i++;
+      continue;
+    }
+    const start = i;
+    while (i <= run.endIdx && kept[i].liftConfirm?.type !== "lift") i++;
+    stretches.push({ start, end: i - 1 });
+  }
+  return stretches;
+}
+
+/**
+ * Repeatedly find and drop the largest dip- or bump-shaped reversal (`findReversal`) in each
+ * not-yet-`"lift"`-confirmed stretch of `run`, until neither shape qualifies or `MAX_EXCURSIONS` is
+ * reached — same iterate-to-exhaustion convention as `fixExcursionsInWindow`. Stretches shorter than
+ * 3 points can't have a shape at all and are skipped.
+ */
+function fixAscentReversals(kept, run, dipM, recoverM) {
+  for (const { start, end } of findAscentStretches(kept, run)) {
+    if (end - start + 1 < 3) continue;
+    const window = kept.slice(start, end + 1);
+    for (let iter = 0; iter < MAX_EXCURSIONS; iter++) {
+      const dip = findReversal(window, 1, dipM, recoverM);
+      const bump = findReversal(window, -1, dipM, recoverM);
+      const best = !dip ? bump : !bump ? dip : dip.mag >= bump.mag ? dip : bump;
+      if (!best) break;
+      dropExcursion(window, best.preIdx, best.postIdx);
+    }
+  }
+}
+
 /**
  * STAGE 1 (see module doc): walk backward from `run.startIdx` while `hs` stays under `hsMax`,
  * contiguously. Returns the start index of that stretch if its own duration reaches `minS`, else -1
@@ -507,12 +613,15 @@ export const finalize = (out, ctx) => {
   const extremeHsMax = g.LIFT_EXTREME_HS_MAX ?? LIFT_EXTREME_HS_MAX;
   const extremeEleRangeMin = g.LIFT_EXTREME_ELE_RANGE_MIN ?? LIFT_EXTREME_ELE_RANGE_MIN;
   const extremeMaxSpan = g.LIFT_EXTREME_MAX_SPAN ?? LIFT_EXTREME_MAX_SPAN;
+  const ascentDipM = g.LIFT_ASCENT_DIP_M ?? LIFT_ASCENT_DIP_M;
+  const ascentRecoverM = g.LIFT_ASCENT_RECOVER_M ?? LIFT_ASCENT_RECOVER_M;
   const kept = out.filter((p) => !p.dropReason && p.time != null && Number.isFinite(p.ele));
 
   let searchLo = 0;
   for (const run of groupSegLiftRuns(kept)) {
     fixQueueHead(kept, searchLo, run, g);
     fixExtremeLowSpeed(kept, run, extremeHsMax, extremeEleRangeMin, extremeMaxSpan);
+    fixAscentReversals(kept, run, ascentDipM, ascentRecoverM);
     searchLo = run.endIdx + 1;
   }
 
