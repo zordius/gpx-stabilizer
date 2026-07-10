@@ -58,6 +58,20 @@ test("liftBoardingEle: fixes a head dip — drops the elevation strictly between
   assert.equal(out[19].liftBoardingEle, undefined);
 });
 
+test("liftBoardingEle: findExcursion's shape search still works when the window's own first point is already dropped (NaN)", () => {
+  // index 0 pre-marked as already ele-dropped (curEle -> NaN) -- before the NaN-robustness fix,
+  // extIdx/preIdx/farMax's search all initialized on/touched this NaN, so nothing could ever compare
+  // as "more extreme", and the real dip (indices 11-17) went undetected entirely.
+  const out = headDipTrack();
+  out[0].liftBoardingEle = { ele: null };
+  finalize(out, { g: {} });
+  for (let i = 11; i < 18; i++) {
+    assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `index ${i}`);
+  }
+  assert.equal(out[10].liftBoardingEle, undefined); // pre-dip anchor still untouched
+  assert.equal(out[18].liftBoardingEle, undefined); // recovery anchor still untouched
+});
+
 test("liftBoardingEle: fixes a tail dip — same shape, mirrored at the end of the run", () => {
   // lift phase stays strictly BELOW the dip's own pre-dip peak (930) and above its own min (913), so
   // the whole-window min/max search unambiguously lands on the dip's own shape, not the ascending

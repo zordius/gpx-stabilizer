@@ -124,19 +124,37 @@ const curEle = (p) => (p.liftBoardingEle ? p.liftBoardingEle.ele ?? Number.NaN :
  * turns "find the highest point" into the same "find the lowest point" search a dip uses, so one
  * routine covers both shapes). Returns `{ preIdx, postIdx, mag }` (mag = the excursion's total size,
  * near + far clearance, for ranking against the opposite polarity) or `null` if none qualifies.
+ *
+ * Every scan below explicitly skips a `NaN` `se(p)` (a point `curEle` already dropped, see its own
+ * doc) rather than folding it into the running best/max — `NaN` can't win a `<`/`>` comparison, so
+ * initializing the running index/value AT one (or letting `Math.max` touch one) would silently wreck
+ * the whole search: seeding `extIdx`/`preIdx` on a dropped point's `NaN` makes every later `<`/`>`
+ * against it false too (nothing can ever look "more extreme" than NaN, correctly or not), and even one
+ * `NaN` anywhere in the far-side scan poisons `Math.max`'s entire running result to `NaN` (found chasing
+ * a real window that happened to start on an already-dropped point, 2026-07-10).
  */
 function findExcursion(window, sign, dipM, recoverM, hsMax) {
   const n = window.length;
   const se = (p) => sign * curEle(p);
 
-  let extIdx = 0;
-  for (let i = 1; i < n; i++) if (se(window[i]) < se(window[extIdx])) extIdx = i;
+  let extIdx = -1;
+  for (let i = 0; i < n; i++) {
+    const v = se(window[i]);
+    if (!Number.isNaN(v) && (extIdx < 0 || v < se(window[extIdx]))) extIdx = i;
+  }
   if (extIdx < 1 || extIdx > n - 2) return null; // too close to either edge to see the full shape
 
-  let preIdx = 0;
-  for (let i = 0; i < extIdx; i++) if (se(window[i]) > se(window[preIdx])) preIdx = i;
+  let preIdx = -1;
+  for (let i = 0; i < extIdx; i++) {
+    const v = se(window[i]);
+    if (!Number.isNaN(v) && (preIdx < 0 || v > se(window[preIdx]))) preIdx = i;
+  }
   let farMax = Number.NEGATIVE_INFINITY;
-  for (let i = extIdx + 1; i < n; i++) farMax = Math.max(farMax, se(window[i]));
+  for (let i = extIdx + 1; i < n; i++) {
+    const v = se(window[i]);
+    if (!Number.isNaN(v)) farMax = Math.max(farMax, v);
+  }
+  if (preIdx < 0 || farMax === Number.NEGATIVE_INFINITY) return null; // nothing valid on one side at all
 
   const ext = se(window[extIdx]);
   const near = se(window[preIdx]) - ext;
