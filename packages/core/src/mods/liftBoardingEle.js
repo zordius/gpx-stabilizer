@@ -315,25 +315,34 @@ function groupSegLiftRuns(kept) {
 
 // --- EXTREME LOW-SPEED SWING (2026-07-10, see module doc) ---
 
-const LIFT_EXTREME_HS_MAX = 2; // m/s — at/under this counts as "barely moving" for this check
-const LIFT_EXTREME_DIST_MAX = 15; // m — cumulative horizontal distance ceiling for a candidate
-// window; real terrain can't change grade enough to explain a big elevation swing within this little
-// travel, so exceeding LIFT_EXTREME_ELE_RANGE_MIN inside a window this short/slow is noise
+const LIFT_EXTREME_HS_MAX = 1; // m/s — at/under this counts as "essentially stationary" for this
+// check. A real, moderate cable/walking pace (~1.5+ m/s, checked against a genuine lift ride found
+// while validating this mechanism against a real file) still climbs smoothly and must NOT qualify —
+// this threshold sits comfortably below that, not at LIFT_BOARD_HS_MAX/SPAN_HS_MAX's own 3 m/s
+// (those gate a DIFFERENT question — "was this stop real at all" — this one gates "is ANY elevation
+// change here physically possible", which is a much stricter bar).
+const LIFT_EXTREME_MAX_SPAN = 400; // points — safety cap on how far one candidate window may grow,
+// same convention as `lowSpeedBoundary`'s own MAX_SPAN (not a distance cap — see module doc for why a
+// distance ceiling was tried and dropped: GPS position jitter during a genuinely near-zero-speed
+// stretch can accumulate enough apparent distance to cut the window short well before the real
+// stretch ends, splitting one long implausible drift into several pieces too small to individually
+// clear LIFT_EXTREME_ELE_RANGE_MIN)
 const LIFT_EXTREME_ELE_RANGE_MIN = 10; // m — elevation range (max-min) within a candidate window that
 // counts as an implausible swing (first-look guess, like this module's sibling thresholds — see
 // module doc — not independently tuned per-value)
 
 /**
- * Scan one `segment.type === "lift"` run for stretches where `hs` stays at/under `hsMax` AND
- * cumulative horizontal distance stays under `distMax` throughout, yet the raw elevation range inside
- * that same stretch reaches `eleRangeMin` — no dip/bump/anchor shape required (see module doc for why
- * `findExcursion`'s shape search can miss this). Greedily grows a window from each qualifying start
- * point as far as both gates keep holding, then jumps past it (whether or not it triggered) rather
- * than rescanning overlapping windows. Drops (`{ ele: null }`) every point in a triggering window
- * EXCEPT any point `liftSnap` already reconstructed its own `ele` for (`point.liftSnap?.ele != null`)
- * — this sub-mechanism is a last resort, not a substitute for a reconstruction that already exists.
+ * Scan one `segment.type === "lift"` run for stretches where `hs` stays at/under `hsMax` throughout
+ * (capped at `maxSpan` points, a safety bound — not a physical distance ceiling, see module doc), yet
+ * the raw elevation range inside that same stretch reaches `eleRangeMin` — no dip/bump/anchor shape
+ * required (see module doc for why `findExcursion`'s shape search can miss this). Greedily grows a
+ * window from each qualifying start point as far as the speed gate keeps holding, then jumps past it
+ * (whether or not it triggered) rather than rescanning overlapping windows. Drops (`{ ele: null }`)
+ * every point in a triggering window EXCEPT any point `liftSnap` already reconstructed its own `ele`
+ * for (`point.liftSnap?.ele != null`) — this sub-mechanism is a last resort, not a substitute for a
+ * reconstruction that already exists.
  */
-function fixExtremeLowSpeed(kept, run, hsMax, distMax, eleRangeMin) {
+function fixExtremeLowSpeed(kept, run, hsMax, eleRangeMin, maxSpan) {
   let i = run.startIdx;
   while (i <= run.endIdx) {
     if ((kept[i].hs ?? 0) > hsMax) {
@@ -341,13 +350,7 @@ function fixExtremeLowSpeed(kept, run, hsMax, distMax, eleRangeMin) {
       continue;
     }
     let j = i;
-    let dist = 0;
-    while (j + 1 <= run.endIdx && (kept[j + 1].hs ?? 0) <= hsMax) {
-      const step = Math.hypot(kept[j + 1].x - kept[j].x, kept[j + 1].y - kept[j].y);
-      if (dist + step > distMax) break;
-      dist += step;
-      j++;
-    }
+    while (j + 1 <= run.endIdx && j - i < maxSpan && (kept[j + 1].hs ?? 0) <= hsMax) j++;
     const eles = kept.slice(i, j + 1).map((p) => p.ele);
     const range = Math.max(...eles) - Math.min(...eles);
     if (range >= eleRangeMin) {
@@ -484,14 +487,14 @@ export const finalize = (out, ctx) => {
   const dropHdopMax = g.LIFT_QUEUE_DROP_HDOP_MAX ?? QUEUE_DROP_HDOP_MAX;
   const dropGlueS = g.LIFT_QUEUE_DROP_GLUE_S ?? QUEUE_DROP_GLUE_S;
   const extremeHsMax = g.LIFT_EXTREME_HS_MAX ?? LIFT_EXTREME_HS_MAX;
-  const extremeDistMax = g.LIFT_EXTREME_DIST_MAX ?? LIFT_EXTREME_DIST_MAX;
   const extremeEleRangeMin = g.LIFT_EXTREME_ELE_RANGE_MIN ?? LIFT_EXTREME_ELE_RANGE_MIN;
+  const extremeMaxSpan = g.LIFT_EXTREME_MAX_SPAN ?? LIFT_EXTREME_MAX_SPAN;
   const kept = out.filter((p) => !p.dropReason && p.time != null && Number.isFinite(p.ele));
 
   let searchLo = 0;
   for (const run of groupSegLiftRuns(kept)) {
     fixQueueHead(kept, searchLo, run, g);
-    fixExtremeLowSpeed(kept, run, extremeHsMax, extremeDistMax, extremeEleRangeMin);
+    fixExtremeLowSpeed(kept, run, extremeHsMax, extremeEleRangeMin, extremeMaxSpan);
     searchLo = run.endIdx + 1;
   }
 

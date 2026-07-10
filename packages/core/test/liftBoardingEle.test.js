@@ -245,9 +245,9 @@ test("liftBoardingEle: a real, still-moving approach at the very front of the da
 // --- EXTREME LOW-SPEED SWING (2026-07-10) ---
 
 function extremeSwingTrack() {
-  // 10 points, segment.type="lift", barely moving (0.5m apart -> 4.5m total, well under the 15m cap)
-  // and slow (hs=0.3), yet elevation alternates by 12m each step -- no dip/bump shape, no anchors,
-  // just an implausible swing given how little the point actually traveled.
+  // 10 points, segment.type="lift", essentially stationary (hs=0.3, well under LIFT_EXTREME_HS_MAX(1))
+  // yet elevation alternates by 12m each step -- no dip/bump shape, no anchors, just an implausible
+  // swing given how little the point is actually moving.
   return Array.from({ length: 10 }, (_, i) =>
     pt({
       x: i * 0.5,
@@ -260,7 +260,7 @@ function extremeSwingTrack() {
   );
 }
 
-test("liftBoardingEle: EXTREME drops a low-speed/short-distance stretch with an implausible elevation swing", () => {
+test("liftBoardingEle: EXTREME drops an essentially-stationary stretch with an implausible elevation swing", () => {
   const out = extremeSwingTrack();
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle?.ele === null));
@@ -291,16 +291,38 @@ test("liftBoardingEle: EXTREME leaves a real, faster climb alone even with a big
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
 });
 
-test("liftBoardingEle: EXTREME's distance cap prevents flagging a genuinely long, steady climb", () => {
-  // 30 points, 1m apart, climbing 0.5m/point -- growing a window past the 15m distance cap stops it
-  // at ~15m of travel (~7.5m of elevation gain), under LIFT_EXTREME_ELE_RANGE_MIN(10), so it never
-  // accumulates enough elevation range in one window to trigger, despite the full run's own range
-  // (29 * 0.5 = 14.5m) being well over the threshold if the cap didn't limit the window at all.
-  const out = Array.from({ length: 30 }, (_, i) =>
-    pt({ x: i * 1, y: 0, ele: 900 + i * 0.5, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+test("liftBoardingEle: EXTREME leaves a genuine steady climb at a real cable pace alone (hs just above the threshold)", () => {
+  // hs=1.5 throughout -- comfortably above LIFT_EXTREME_HS_MAX(1), matching a real, moderate cable
+  // pace found while validating this mechanism against a real ski-lift file (a genuine, steady climb
+  // at hs~1.6-1.7 over hundreds of points, ele range >100m) -- must never qualify, however large the
+  // resulting elevation range is, however long the stretch runs.
+  const out = Array.from({ length: 300 }, (_, i) =>
+    pt({ x: i * 1.5, y: 0, ele: 900 + i * 0.5, time: i * 1000, hs: 1.5, segment: { id: 1, type: "lift" } }),
   );
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: EXTREME's point-count safety cap limits how far one window can grow", () => {
+  // 30 points, hs=0.3 throughout, climbing steadily by 0.4m/point -- the FULL run's own range
+  // (29 * 0.4 = 11.6m) exceeds LIFT_EXTREME_ELE_RANGE_MIN(10), but a small LIFT_EXTREME_MAX_SPAN caps
+  // each window's own span well under that, so no single capped window ever accumulates enough range
+  // to trigger.
+  const out = Array.from({ length: 30 }, (_, i) =>
+    pt({ x: 0, y: 0, ele: 900 + i * 0.4, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+  );
+  finalize(out, { g: { LIFT_EXTREME_MAX_SPAN: 10 } });
+  assert.ok(out.every((p) => p.liftBoardingEle === undefined));
+});
+
+test("liftBoardingEle: EXTREME triggers on the same stretch when the span isn't artificially capped", () => {
+  // same fixture as the safety-cap test above, but with the default MAX_SPAN(400) -- doesn't bind for
+  // only 30 points, so the full run's own 11.6m range is free to accumulate in one window and trigger.
+  const out = Array.from({ length: 30 }, (_, i) =>
+    pt({ x: 0, y: 0, ele: 900 + i * 0.4, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+  );
+  finalize(out, { g: {} });
+  assert.ok(out.every((p) => p.liftBoardingEle?.ele === null));
 });
 
 // --- position drop for confirmed-bad-GPS points (2026-07-09) ---
