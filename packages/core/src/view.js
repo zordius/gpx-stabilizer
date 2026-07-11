@@ -339,6 +339,31 @@ export function analyzedLayers(points, opts = {}) {
         return boundaries.map(flipY);
       })(),
     },
+    // the first/last point of every liftSnap-snapped run — the anchors where the snap-weight fade
+    // sits at 0 and ramps inward (mods/liftSnap.js LIFTSNAP_FADE_M). Keyed on `point.liftSnap`
+    // presence grouped by `segment.id`, matching that module's own groupRuns (all confirmed points
+    // of one segment run form ONE run there, contiguous or not — liftConfirm's verdict can revert
+    // mid-run, so contiguity is not required here either); self-gates to empty when liftSnap wasn't
+    // loaded. Unlike "lift start/end" above (segment.js's own coarse opinion), this marks where the
+    // RECONSTRUCTION actually starts/ends — liftConfirm's trimmed, confirmed range.
+    {
+      label: "liftSnap start/end",
+      color: "#000",
+      size: 5,
+      opacity: 0.8,
+      points: (() => {
+        const byId = new Map();
+        for (const p of out) {
+          if (p.liftSnap == null) continue;
+          const id = p.segment?.id;
+          if (!byId.has(id)) byId.set(id, []);
+          byId.get(id).push(p);
+        }
+        const boundaries = [];
+        for (const run of byId.values()) boundaries.push(run[0], run.at(-1));
+        return boundaries.map(flipY);
+      })(),
+    },
     { label: "raw", color: "#888", width: 1, opacity: 0.7, lines: [out.map(flipY)] },
     cleanLayer,
   ];
