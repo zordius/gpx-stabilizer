@@ -20,7 +20,8 @@ No install needed:
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-                                  [--organize DIR] [--yes] [--html] [--png [--width N] [--height N]]
+                                  [--organize DIR] [--yes] [--mode core|ski]
+                                  [--html] [--png [--width N] [--height N]]
 ```
 
 Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
@@ -31,7 +32,9 @@ family) + local date, and writes one merged `<YYYYMMDD>-<family>.gpx` per group 
 split into one `<trkseg>` per recording session (keyed on the filename file-number, with a time-gap
 split for restarts/dropouts). A per-file extraction cache (keyed by size+mtime+rate) lets a killed
 run resume without re-extracting. `--rate HZ` downsamples from the native ~18 Hz; `--tz HOURS`
-overrides the longitude-guessed local date.
+overrides the longitude-guessed local date. `--mode core|ski` runs each session through
+[`gpx-stabilizer`](https://www.npmjs.com/package/gpx-stabilizer)'s `stabilizeTrack` before writing
+(omit for the raw extraction).
 
 ### `--organize DIR` — reorganize the source videos to match the GPX
 

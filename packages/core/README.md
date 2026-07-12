@@ -33,8 +33,9 @@ const clean = stabilize(segments[0]); // array of { lat, lon, ele, time }, noise
 Noise removal is a pipeline of built-in modules (all on by default): `dequantizeTime` (spread
 duplicate-second timestamps), `noTime`, `oversample`, `outlier` (position / acceleration spikes),
 `stray` (points far outside the track's spatial bulk — cold-start / wild-fix teleport clusters that
-`outlier`'s single-point detour misses), `activity`, `drift` (stationary satellite drift), and
-`despike` (heading + segment-length spikes).
+`outlier`'s single-point detour misses), `activity`, `drift` (stationary satellite drift),
+`despike` (heading + segment-length spikes), and `fixQuality` (non-3D fixes the GPS chip itself
+distrusts).
 `activity` classifies each point into the human-movement activities whose kinematic envelope it fits
 (walking · running · cycling · driving · rail · skiing · flight) and drops anything no enabled activity
 can explain. Enable a special activity:
@@ -48,11 +49,12 @@ stabilizeGpx("in.gpx", "out.gpx", { activities: ["walking", "skiing", "flight", 
 A mode bundles per-use-case thresholds. **`core`** (the default) is tuned for **general** tracks: its
 `despike` keeps real sharp corners (walking/driving turn legitimately up to ~150°), so it only removes
 clear spikes. **`ski`** opts into ski-tuned `despike` thresholds (which also catch the gentler-carve
-spikes), the ski-only `carve` signal, and the `kink` overlay. The clean way to select it is the CLI
-`--mode ski` (which also loads `kink`); programmatically, pass the params directly:
+spikes), the ski-only `carve` signal, the `kink` overlay, and the lift machinery —
+`segment`/`liftConfirm`/`liftSnap`/`liftBoardingEle`/`segmentBoundaryEle`/`tangleSnap` — plus the
+`gradeBound` slope-stable `ele` rewrite. Select it via the CLI `--mode ski`, or programmatically:
 
 ```js
-stabilizeGpx("in.gpx", "out.gpx", { DESPIKE_PROFILE: "ski", CARVE: true });
+stabilizeGpx("in.gpx", "out.gpx", { mode: "ski" });
 ```
 
 ## CLI
@@ -68,7 +70,8 @@ npx gpx-stabilizer FILE.gpx [...] --png          # → one PNG per input (needs 
 Once installed (`npm install [-g] gpx-stabilizer`), drop the `npx` prefix and just run
 `gpx-stabilizer ...`.
 
-Options: `--out DIR` · `--mode core|ski` (default `core`; `ski` = ski-tuned despike + carve + kink) ·
+Options: `--out DIR` · `--mode core|ski` (default `core`; `ski` = ski-tuned despike + carve + kink +
+lift confirm/reconstruction + slope-stable `ele`) ·
 `--config FILE.json` (a full analyze config) · `--disable name,...` (skip built-in modules).
 
 ## Viewer

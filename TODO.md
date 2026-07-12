@@ -8,6 +8,29 @@ one place, not two).
 
 ## Shipped
 
+- **Ski-mode lift machinery — `liftConfirm` / `liftSnap` / `liftBoardingEle` / `segmentBoundaryEle` /
+  `tangleSnap` / `noise` (2026-07-08…10, v0.4.0/v0.5.0)** — `segment`'s coarse `lift` candidates are
+  now confirmed against cable-line physics (`liftConfirm`, the prototype rule-cascade port:
+  straightness + speed cap + min-duration, both fake-lift rejections, whole-run drift override,
+  ascent drive-sandwich, head/tail trim), geometrically reconstructed (`liftSnap`: TLS line snap +
+  hysteresis pause events + boundary fade), boarding/unloading elevation artifacts dropped-not-guessed
+  (`liftBoardingEle`, five mechanisms + an hdop-gated position drop), plus the general
+  `segmentBoundaryEle` boundary-ele drop, the `tangleSnap` low-speed tangle reposition, and a
+  diagnostic `noise` signal. All bundled by `MODES.ski` — `opts.mode` on `analyze`/`stabilize` and
+  `--mode` on both CLIs. **This closes the old "turn-confirm" follow-on.** Detail: module docs +
+  [`SPEC.md`](SPEC.md) ("Segment / lift segmentation", prior-art port note).
+- **`smooth.js` folded into `gradeBound` (2026-07-10)** — `opts.smooth` is gone; the distance-domain
+  smoothing pass is now `gradeBound`'s own optional post-despike stage (`GRADE_SMOOTH_WIN_M`, 0 = off;
+  ski mode sets 30), and `gradeBound` itself is default-on in ski mode.
+- **Elevation-vs-time chart in the HTML viewer (2026-07-08…10)** — `elevationChartSvg` per panel,
+  click shows time/elevation, chart line breaks at dropped-ele points. (The vertical-analysis
+  "elevation-profile viewer" acceptance tool now exists.) Debug marker layers for lift boundaries
+  (`lift start/end`, 2026-07-09) and snap boundaries (`liftSnap start/end`, 2026-07-11) ship alongside.
+- **Whole-track analyze (2026-07-09)** — `stabilizeTrack` analyzes the track as ONE stream and
+  re-splits at source `<trkseg>` boundaries; the gopro CLI writes one named `<trk>` per recording
+  session.
+- **`fixQuality` split out of `gpsQuality` as a core builtin (2026-07-08)** — a non-3D `fix` is
+  chip-agnostic bad; the hdop half stays the opt-in, per-chip `gpsQuality`.
 - **`gpsQuality` module — device-specific GPS-chip quality gate (2026-07-07)** — `measure.js` now
   carries the device's raw `<hdop>`/`<fix>` per point; a new opt-in module drops a point when
   `fix != "3d"` or `hdop >= 10`. Validated on a 3-day GX(Hero10)+Android ground-truth corpus:
@@ -80,9 +103,11 @@ one place, not two).
 - **Core roadmap, remaining** — apply the **additive-power activity model**
   ([`SPEC.md`](SPEC.md)): powered-vehicle box merge **DONE** (`powered` in
   `mods/activity.js`, 2026-07-01); coarse lift/descent/flat segmentation **DONE**
-  (`mods/segment.js`, see Shipped above); still open — its **turn-confirm** and
-  **catwalk-vs-carve** follow-ons, four power-classes as the stage-2 commit space,
-  distance-domain resample variant, and OSM validation.
+  (`mods/segment.js`); lift **turn-confirm DONE** (`mods/liftConfirm.js`, 2026-07-08 —
+  see Shipped above); still open — the **catwalk-vs-carve** sub-split, a symmetric
+  **`skiConfirm`** module (`liftConfirm`'s sandwich absorption is scoped to `ascent`
+  runs pending it — see that module's doc), four power-classes as the stage-2 commit
+  space, distance-domain resample variant, and OSM validation.
 - **Per-activity smoothing defaults — BLOCKED, don't treat as ready-to-build.** Two
   gaps: (a) no data to *derive* it — the only local tracks are one 3-day ski GoPro trip's
   clips, so walking/cycling/driving/rail/flight values would be pure estimates, and
@@ -110,6 +135,13 @@ one place, not two).
   centre) — not full INS reconstruction. Catalog + per-signal status:
   [`docs/gpmf-sensors.md`](docs/gpmf-sensors.md). Wiring a witness into the pipeline needs
   the proposed `finalize` phase (SPEC module-model section).
+
+## Known issues
+
+- **Failing test at HEAD (found 2026-07-11, not yet diagnosed)** — core's
+  `liftBoardingEle: a weak recovery (doesn't clear the threshold) is left alone` fails on a clean
+  tree at `afed088` (v0.5.0); every other core/gopro test passes. Found incidentally while adding a
+  viewer layer, unrelated to that change.
 
 ## Known limitation (not addressed — deliberately skipped, 2026-07-06)
 
@@ -141,7 +173,8 @@ one place, not two).
   now split 2 / 3 / 3 (was 17 / 17 / 16), GOPR unchanged. `buildGroups` + `fileNumber` in
   `src/group.js`; real-corpus A+B tests in `test/group.test.js`. *Still open: the crash →
   new-file-number half is inferred (this corpus has no confirmed crash), and the end-to-end
-  CLI write of the new counts is unconfirmed pending an external-volume remount.*
+  CLI write of the new counts is unconfirmed — the blocking external volume is mounted again
+  as of 2026-07-11 (`/Volumes/ZS14T2025`), so this is now verifiable, just not yet done.*
 - **GPS9 (Hero11+) fix/hdop unverified** — read from `value[7..8]` but no Hero11+
   hardware to confirm the `hdop` scale. Authoritative gap notes:
   [`docs/export-contract.md`](docs/export-contract.md) ("Flag for the implementer") and

@@ -95,7 +95,7 @@ Both are built on a layered pipeline:
 gpx.js ──▶ analyze.js ───────────────────────────────────▶ enriched points ──▶ stabilize.js ──▶ out.gpx
 parse      label → measure → profile → compute-modules        (+ dropReason)     keep un-dropped
                        │         │            │
-                  point-level  window-level   noTime · sameTime · oversample · outlier · stray · activity
+                  point-level  window-level   noTime · oversample · outlier · stray · activity · fixQuality
 
 view.js / html.js ── project points ──▶ layers ──▶ SVG ──▶ HTML viewer
 ```
@@ -167,14 +167,15 @@ built-ins, in order:
 
 | module | phase | drops |
 |---|---|---|
+| `dequantizeTime` | repair | nothing — re-times duplicate-second runs onto the 1 Hz grid (`point.edited.time`); see [`docs/time-grid-classes.md`](docs/time-grid-classes.md) |
 | `noTime` | label | points with no timestamp |
-| `sameTime` | label | duplicate timestamps |
-| `oversample` | label | sub-1 s points → survivors land at ~1 Hz |
+| `oversample` | label | points closer than 0.5 s to the last kept (genuine >2 Hz bursts) → survivors land at ~1 Hz |
 | `outlier` | compute | GPS spikes: 3-point geometric detour, or speed-change spike |
 | `stray` | compute | points far outside the track's spatial bulk (median centre + bulk-radius × factor) — teleport/cluster garbage `outlier`'s single-point detour misses |
 | `activity` | compute | physically-implausible motion (see below) |
 | `drift` | compute | low-movement scatter (jitter while near-stationary) — the dominant garbage source (~92 % of drops on the 42-workout corpus) |
 | `despike` | compute | **nothing — detection-only signal** (`point.despike.flagged`); see below |
+| `fixQuality` | compute | `fix != "3d"` — the chip's own distrust of the fix, chip-agnostic (2026-07-08; the per-chip `hdop` half stays the opt-in `gpsQuality`) |
 | `badspan` | post-assemble | every point inside a dense bad-region: a glue **decision** over quality-drop + `despike.flagged` density (analyze.js `glueBadSpans`), not a per-point detector |
 
 **`despike` is detection-only (option C, 2026-06-29).** It emits a `flagged` SIGNAL, never a `dropReason`. On its own despike is a weak/noisy proxy for `drift` (EDA: Jaccard 0.12 vs drift, same signal correlations, ~98 % of its old sole-drops were isolated curve false-positives), so an **isolated** flag must not drop a point. Instead the flag feeds the `badspan` density: a **dense** region of flags still glues into a dropped bad span (despike's real value — catching blobs of garbage `drift` misses), while a lone flag only contributes density and survives. Net on the 42-workout corpus: dropping 12.0 % → 10.6 % (5,039 isolated false-positives kept), `badspan` reach unchanged.
@@ -419,10 +420,16 @@ airborne group's lower `hspeed` when adding them. Note "離地" is **not directl
 ### `stabilize.js` (top-level base feature)
 
 `stabilize(points)` = `analyze` → keep points with no `dropReason` → reduce to plain track points.
-`stabilizeTrack` / `stabilizeGpx` apply it per segment and write the cleaned `.gpx`, preserving meta.
-**Base scope = noise/outlier removal.** The first *survivor-rewriting* step now exists as an opt-in:
-`stabilize(points, { smooth: true })` appends `mods/smooth.js` and exports a slope-stable `ele`
-(distance-domain elevation smoothing — see the contract below). The base default is unchanged (raw).
+`stabilizeTrack` / `stabilizeGpx` analyze the WHOLE track as one continuous stream and re-split the
+cleaned output at the original `<trkseg>` boundaries (2026-07-09 — a source boundary is often a
+recording-tool artifact; per-segment analysis would cut a real lift/run that straddles it — see
+stabilize.js's own doc), preserving meta.
+**Base scope = noise/outlier removal.** Survivor-rewriting exists as opt-in export switches:
+`opts.gradeBound` (slope-stable `ele` — grade-change despike + optional `GRADE_SMOOTH_WIN_M`
+smoothing; absorbed the former `smooth` module, 2026-07-10), `opts.liftSnap`/`opts.tangleSnap`
+(position), `opts.liftBoardingEle`/`opts.segmentBoundaryEle` (ele drop-not-guess) — all bundled by
+`opts.mode: "ski"`, with a defined precedence chain (see stabilize.js's doc). The base default is
+unchanged (raw).
 
 ### Viewer (`view.js` + `html.js`) — eval rendering module
 
@@ -485,7 +492,14 @@ Beyond the base + the eval viewer, still to come:
 
 **Status: distance-domain elevation smoothing IMPLEMENTED** (`mods/smooth.js` +
 `stabilize` `opts.smooth`, 2026-06-29); the resample and IMU-fusion tiers remain
-future. Promotes the roadmap's "track smoothing" bullet to a contract. The base
+future. **Update (2026-07-10): `mods/smooth.js` and `opts.smooth` are GONE** — the
+same distance-domain boxcar pass is now `gradeBound`'s own optional post-despike
+stage (`GRADE_SMOOTH_WIN_M`, 0 = off; `MODES.ski` sets 30), so one coherent
+despike-then-smooth rewrite owns the exported `ele` instead of two independent
+modules competing for the same field. Reach it via `stabilize` `opts.gradeBound`
+(param overrides) or `opts.mode: "ski"`; the `opts.smooth` references in the rest
+of this section are kept as written-at-the-time history. Promotes the roadmap's
+"track smoothing" bullet to a contract. The base
 still removes noise *points* and never rewrites a survivor's values by default —
 elevation rewriting is strictly opt-in.
 
@@ -617,8 +631,9 @@ Distance-domain mean smoothing (above) is a blunt start. The deeper finding (W-c
 `gpmf-sensors.md`): **with GPS alone you cannot tell noise from real signal** — the optimal smoothing
 is *noise-driven*, and noise can't be measured from one noisy channel (high grade-jitter can be real
 terrain — `GP045136` — or noise — `GX065132`). You need **another input**. We have four, three of
-them **portable (no IMU)** — and the **human eye** (the project's ultimate criterion; an
-elevation-profile render is the 2-D track viewer's missing vertical twin). The IMU-fused elevation is
+them **portable (no IMU)** — and the **human eye** (the project's ultimate criterion; the
+elevation-profile render — the 2-D track viewer's once-missing vertical twin — **now exists**:
+the HTML viewer's elevation-vs-time chart, `elevationChartSvg`, 2026-07-08). The IMU-fused elevation is
 thereby demoted from "needed" to a **validation oracle**.
 
 After the **B decomposition** (planar 2-D kinematics + a separate vertical 1-D axis — built, see
@@ -818,9 +833,13 @@ an opt-in `finalize`-phase module (like `kink`, not a built-in), labels each kep
 `gpx_eval/seg_explore.mjs` against the real ski corpus (reproduces its episode structure exactly).
 Thresholds (`SEG_VON`/`SEG_WIN_S`/`SEG_MIN_S`) are first-look guesses, not tuned.
 
-**Still open (follow-ons):** confirm a lift via low `turn` + steady speed (disambiguates a cable-line
-climb from a hiking climb or slow milling); a catwalk-vs-carve sub-split within `descent` (high
-`carve` = actively working the terrain vs low `carve` = a straight glide); and committing each segment
+**Still open (follow-ons):** ~~confirm a lift via low `turn` + steady speed~~ — **DONE (2026-07-08):
+`mods/liftConfirm.js`** confirms/rejects each coarse `lift` run against cable-line physics (see the
+prior-art port status at the end of the next section), and `mods/liftSnap.js` reconstructs the
+confirmed ones; still genuinely open — a catwalk-vs-carve sub-split within `descent` (high
+`carve` = actively working the terrain vs low `carve` = a straight glide); a symmetric **`skiConfirm`**
+module (`liftConfirm`'s drive-sandwich absorption is scoped to `ascent` runs pending it — see that
+module's doc); and committing each segment
 to the **four power-classes** (human / no-engine-gravity / powered-ground / airborne), not just
 lift/descent/flat. `segment` runs **before** any per-activity output-smoothing and feeds it the labels
 (see the two-smoothings note above) — though per-activity output-smoothing itself is a separate
@@ -833,8 +852,9 @@ bottom of this doc; not diffed line-for-line against the `old_ski_v1` branch, so
 lineage, not a confirmed-identical copy) already worked out a considerably richer lift model than
 today's coarse `vspeed`-sign split. Its header docstring claims an EM loop (points ↔ lift-line/station,
 mutually refined) but a later comment says that was **removed** in favor of the rule cascade below —
-the docstring is stale, the rules are what actually runs. None of this is ported; it's recorded here as
-a worked reference for the "still open" items above, not a spec for what core will do.
+the docstring is stale, the rules are what actually runs. *(Originally "none of this is ported" —
+**most of it now is**, 2026-07-08: see the port-status paragraph after this list.)* Recorded here as
+a worked reference for what the prototype did, not a spec for what core will do.
 
 - **Base classification** — a climbing segment (`vspeed` sign, same coarse signal `segment.js` already
   uses) is `lift` only if ALSO **straight** (net displacement / path length > 0.5, the same shape as
@@ -865,8 +885,8 @@ a worked reference for the "still open" items above, not a spec for what core wi
   using the physical premise **"a lift never travels backward, only pauses"**: walk the along-line
   projection and require it non-decreasing; a point that would go backward is not deleted but moved
   onto the current "high-water" anchor point (x, y, *and* elevation) — i.e. reinterpreted as a pause
-  at the lift's real position, not GPS noise to discard. Nothing in this repo's `mods/` reconstructs a
-  point's position today — every current module only drops or labels.
+  at the lift's real position, not GPS noise to discard. *(Was "nothing in this repo's `mods/`
+  reconstructs a point's position" — `liftSnap`/`tangleSnap` now do, 2026-07-07/08.)*
 - **Cluster-level validity signal** — after spatially clustering all surviving output runs, a non-main
   cluster is dropped wholesale if it contains **no** `lift` run at all, or if it contains one but that
   cluster's longest `lift` run is longer than every other cluster's (read as "probably a drive
@@ -875,11 +895,16 @@ a worked reference for the "still open" items above, not a spec for what core wi
   runs is the cluster-keep signal — no OSM needed for this decision (OSM cross-checks — `--liftaudit` —
   are debug/validation only, gated behind an off-by-default flag).
 
-Only piece (1) above (coarse straight+moderate-speed climb) has a JS equivalent today
-(`mods/segment.js`'s sign-only split, which doesn't even check straightness or speed yet). Everything
-else — the min-duration gate, both fake-lift rejections, the drift override applied to `lift`
-specifically, drive-sandwich, the PCA-snap-and-monotonic-pause reconstruction, and the cluster-keep
-signal — has no ported equivalent in `packages/core` yet.
+**Port status (updated 2026-07-11; originally only piece (1) had a JS equivalent).** Most of the
+cascade shipped 2026-07-08 as ski-mode modules: `mods/liftConfirm.js` carries the base classification
+(straightness + speed cap), the min-duration gate, both fake-lift rejections (RDP turn-count, speed),
+the whole-run drift override, and the drive-sandwich (scoped to `ascent` runs pending a symmetric
+`skiConfirm` — see that module's doc), plus a head/tail trim the prototype didn't have;
+`mods/liftSnap.js` carries the reconstruction — a TLS line fit + orthogonal projection with the same
+"never backward, only pauses" premise, expressed as hysteresis pause events anchored to the last
+pre-pause position, faded at the run boundaries (not the literal PCA/high-water per-point walk).
+**Still unported: the cluster-level validity signal** (drop a non-main spatial cluster with no —
+or an implausibly long — `lift` run).
 
 **Per-activity output-smoothing — explored, NOT built (negative result, 2026-07-04).** With the
 `segment` module in place, explored whether each segment type wants a different elevation-smoothing

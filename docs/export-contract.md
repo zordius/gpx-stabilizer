@@ -98,7 +98,8 @@ resolveStartUtc(points)        // → { startUtc, confidence, verified, slope } 
 readGoproTelemetry(path, {
   rate?,                       // Hz; omit = native ~18 Hz
   stabilize?,                  // boolean | StabilizeOptions — clean the points first
-                               //   StabilizeOptions.smooth: true → slope-stable elevation (see below)
+                               //   StabilizeOptions.gradeBound / mode:"ski" → slope-stable elevation
+                               //   (see below; `smooth: true` is gone as of 2026-07-10)
   resample?,                   // boolean | 'fps' | { RESAMPLE_HZ?: number|'fps', maxGap?: number }
                                //   uniform time grid; IMPLIES stabilize; 'fps' = one point per video frame
   cache?,                      // on by default — see section E
@@ -138,13 +139,16 @@ TelemetryResult = {
     so the gauge still renders. `stabilize` stays minimal (`{lat,lon,ele,time}`); a consumer
     needing per-sample speed derives it or reads the raw points. See [`SPEC.md`](../SPEC.md)
     ("Related finding — stabilize drops speed").
-- **Elevation smoothing (`stabilize: { smooth: true }`) — NEW 2026-06-29.** Smooths each
+- **Elevation smoothing — NEW 2026-06-29; option renamed 2026-07-10.** Smooths each
   survivor's `ele` over an along-track distance window (default ±30 m), so a gradient
   derived as `Δele / distance` has **bounded jitter** (the raw GPS `ele` is the noisiest
   axis; on a ski clip raw grade swings −33…+25 % at high jitter, smoothed ≈ ±11 % at ⅓
   the jitter). The `{lat,lon,ele,time}` shape is unchanged — only the *meaning* of `ele`
   flips to the smoothed value; deriving the gradient number from it is still the renderer's
-  job. See [`SPEC.md`](../SPEC.md) "Track smoothing".
+  job. **The `smooth: true` spelling is GONE (2026-07-10, now a silent no-op)** — the pass
+  was folded into core's `gradeBound` module: pass
+  `stabilize: { gradeBound: { GRADE_SMOOTH_WIN_M: 30 } }` (despike + smoothing), or
+  `stabilize: { mode: "ski" }` which bundles it. See [`SPEC.md`](../SPEC.md) "Track smoothing".
 - **Resampling (`resample`) — NEW 2026-06-29.** Regularises the cleaned points onto a
   **uniform time grid** (`RESAMPLE_HZ`, default 1 Hz; `'fps'` ⇒ `meta.fps`, one point per
   video frame). It **implies `stabilize`** (resampling raw, uncleaned points is meaningless;
@@ -152,8 +156,8 @@ TelemetryResult = {
   **not bridged** — the output splits into separate `segments` there, so a stop / GPS dropout
   / GoPro crash break becomes a real `<trkseg>` break instead of an invented straight line.
   Read **`segments`** for the split; `points` stays the flat concatenation for back-compat.
-  Position/ele/speed are linearly interpolated; with `smooth` also on, the grid carries the
-  smoothed elevation. See [`SPEC.md`](../SPEC.md) "Track resampling".
+  Position/ele/speed are linearly interpolated; with the `gradeBound` smoothing also on, the grid
+  carries the smoothed elevation. See [`SPEC.md`](../SPEC.md) "Track resampling".
 - **`segments` is always present** (NEW 2026-06-29): `[points]` when not resampling, the
   split list when resampling. A renderer that must not bridge holes should iterate `segments`
   rather than `points`.
@@ -213,7 +217,7 @@ readGoproSamples(path, {
   unit conversion (e.g. m/s → km/h), drawing.
 - **Boundary moved (2026-06-29):** elevation **smoothing** and uniform-grid
   **resampling / interpolation** — which the renderer used to own — are now **offered
-  opt-in** by the lib (`stabilize: { smooth: true }` / `resample`), because the elevation
+  opt-in** by the lib (`stabilize`'s `gradeBound` smoothing / `resample`), because the elevation
   truth and the kinematic context to smooth it live here (every consumer would otherwise
   re-implement the same fix). Deriving the gradient *number* from the (now-smoothable)
   `ele` is still the renderer's; the lib just makes the `ele` it derives from slope-stable.
@@ -273,7 +277,8 @@ hole-bridging problems, the adapter can opt in:
 
 ```js
 const { meta, points, segments, startUtc, clock } = await readGoproTelemetry(path, {
-  stabilize: { smooth: true },   // ele is now slope-stable → derived gradient stops jittering
+  stabilize: { gradeBound: { GRADE_SMOOTH_WIN_M: 30 } }, // slope-stable ele → derived gradient
+                                 // stops jittering (was `smooth: true` before 2026-07-10)
   resample: 'fps',               // one point per video frame (= meta.fps); maxGap splits dropouts
 })
 // iterate `segments` (not `points`) so a GPS dropout / crash break renders as a gap,
