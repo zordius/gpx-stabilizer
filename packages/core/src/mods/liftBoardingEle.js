@@ -133,7 +133,7 @@ function lowSpeedBoundary(kept, from, dir, hsMax) {
  * than falling through to raw `ele` matters: a dropped point's raw reading is exactly the noise this
  * module doesn't trust, and `NaN` can't win any `<`/`>` extremum comparison in `findExcursion` below,
  * so a dropped point simply can't be picked as a new extremum or anchor on a later pass. */
-const curEle = (p) => (p.liftBoardingEle ? p.liftBoardingEle.ele ?? Number.NaN : p.ele);
+const curEle = (p) => (p.liftBoardingEle ? (p.liftBoardingEle.ele ?? Number.NaN) : p.ele);
 
 /**
  * Find ONE dip- OR bump-shaped excursion in `window` — `sign: 1` looks for a dip (a local minimum
@@ -599,8 +599,10 @@ function dropUnreliableQueuePositions(kept, hdopMax, glueS) {
   let i = 0;
   while (i < seeds.length) {
     let j = i;
-    while (j + 1 < seeds.length && (kept[seeds[j + 1]].time - kept[seeds[j]].time) / 1000 <= glueS) j++;
-    for (let k = seeds[i]; k <= seeds[j]; k++) addDrop(kept[k], "liftBoardingEle", { reason: "queuePosition" });
+    while (j + 1 < seeds.length && (kept[seeds[j + 1]].time - kept[seeds[j]].time) / 1000 <= glueS)
+      j++;
+    for (let k = seeds[i]; k <= seeds[j]; k++)
+      addDrop(kept[k], "liftBoardingEle", { reason: "queuePosition" });
     i = j + 1;
   }
 }

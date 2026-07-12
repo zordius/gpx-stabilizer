@@ -170,7 +170,8 @@ function mergeLiftSandwiches(merged, kept, hdgMaxDeg, speedAbs, speedRel) {
         circDiff(curHdg, runHeadingDeg(prevPts)) < hdgMaxDeg &&
         circDiff(curHdg, runHeadingDeg(nextPts)) < hdgMaxDeg;
       const speedOk =
-        speedSimilar(curHs, prevHs, speedAbs, speedRel) && speedSimilar(curHs, nextHs, speedAbs, speedRel);
+        speedSimilar(curHs, prevHs, speedAbs, speedRel) &&
+        speedSimilar(curHs, nextHs, speedAbs, speedRel);
       if (hdgOk && speedOk) {
         prev.b = next.b; // absorb cur + next into prev, all as "lift"
         merged.splice(i, 2);

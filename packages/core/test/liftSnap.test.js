@@ -88,7 +88,10 @@ test("liftSnap: GPS jitter inside a pause event doesn't split it — every point
   assert.equal(eleValues.size, 1, "every point in the pause shares exactly one elevation value");
   const expectedMedian = (1057.97 + 1058.05) / 2; // median of the 4 sorted raw eles
   assert.equal([...eleValues][0], expectedMedian);
-  assert.ok(eventPts.every((p) => p.liftSnap.ele !== undefined), "no point in the event is left out");
+  assert.ok(
+    eventPts.every((p) => p.liftSnap.ele !== undefined),
+    "no point in the event is left out",
+  );
 });
 
 test("liftSnap: a low-speed dip shorter than LIFTSNAP_PAUSE_MIN_S is not treated as a pause", () => {

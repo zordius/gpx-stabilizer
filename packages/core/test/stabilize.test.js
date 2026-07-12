@@ -213,7 +213,12 @@ test("stabilizeTrack: analyzes across the ORIGINAL boundary as one continuous st
   // whole track was analyzed as one continuous stream before being re-split for output.
   const track = {
     segments: [
-      Array.from({ length: 10 }, (_, i) => ({ lat: 36, lon: 138 + i * STEP5, ele: 1000, time: i * 1000 })),
+      Array.from({ length: 10 }, (_, i) => ({
+        lat: 36,
+        lon: 138 + i * STEP5,
+        ele: 1000,
+        time: i * 1000,
+      })),
       Array.from({ length: 10 }, (_, i) => ({
         lat: 36,
         lon: 138 + (10 + i) * STEP5,
@@ -225,5 +230,8 @@ test("stabilizeTrack: analyzes across the ORIGINAL boundary as one continuous st
   const out = stabilizeTrack(track, { gradeBound: { GRADE_SMOOTH_WIN_M: 30 } });
   assert.equal(out.segments.length, 2); // the boundary is still preserved in the output
   const lastOfFirst = out.segments[0].at(-1);
-  assert.ok(lastOfFirst.ele > 1000, `expected smoothing to reach across the boundary, got ${lastOfFirst.ele}`);
+  assert.ok(
+    lastOfFirst.ele > 1000,
+    `expected smoothing to reach across the boundary, got ${lastOfFirst.ele}`,
+  );
 });

@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { fileURLToPath } from "node:url";
 import { test } from "node:test";
+import { fileURLToPath } from "node:url";
 
 // The CLI's arg-parsing is top-level script logic (not an exported function), so this is the one
 // place these tests can only be exercised by actually spawning it as a subprocess.

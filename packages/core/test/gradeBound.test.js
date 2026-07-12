@@ -62,5 +62,8 @@ test("gradeBound: a nonzero GRADE_SMOOTH_WIN_M smooths the POST-despike series, 
   // the alternating ±1 noise should be averaged away by the boxcar mean, which the despike-only
   // pass (a targeted curvature clamp, not a general smoother) leaves in place
   const noiseRange = (arr) => Math.max(...arr.slice(2, 8)) - Math.min(...arr.slice(2, 8));
-  assert.ok(noiseRange(smoothed) < noiseRange(despikeOnly), "smoothing pass flattens residual noise");
+  assert.ok(
+    noiseRange(smoothed) < noiseRange(despikeOnly),
+    "smoothing pass flattens residual noise",
+  );
 });

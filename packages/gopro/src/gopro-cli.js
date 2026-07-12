@@ -41,7 +41,14 @@
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 import { createInterface } from "node:readline/promises";
-import { analyzedSvg, MODES, saveGpx, savePng, stabilizeTrack, toHtmlAnalyzedFiles } from "gpx-stabilizer";
+import {
+  analyzedSvg,
+  MODES,
+  saveGpx,
+  savePng,
+  stabilizeTrack,
+  toHtmlAnalyzedFiles,
+} from "gpx-stabilizer";
 import { buildGroups, family, fileNumber } from "./group.js";
 import { cacheMovePlan, executeMove, findSidecars, planMove } from "./organize.js";
 import { readGoproSamples } from "./telemetry.js";
@@ -52,7 +59,16 @@ const LOCAL_TZ = -new Date().getTimezoneOffset() / 60; // hours, may be fraction
 
 // ---- args ----
 const argv = process.argv.slice(2);
-const WITH_VALUE = new Set(["out", "tz", "rate", "cache-dir", "organize", "width", "height", "mode"]);
+const WITH_VALUE = new Set([
+  "out",
+  "tz",
+  "rate",
+  "cache-dir",
+  "organize",
+  "width",
+  "height",
+  "mode",
+]);
 const KNOWN_BOOL = new Set(["no-cache", "html", "png", "yes"]);
 const USAGE =
   "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
@@ -79,7 +95,9 @@ if (inputs.length === 0) {
   process.exit(1);
 }
 if (opts.mode != null && !MODES[opts.mode]) {
-  console.error(`gpx-from-gopro: unknown --mode "${opts.mode}" (use: ${Object.keys(MODES).join(", ")})\n\n${USAGE}`);
+  console.error(
+    `gpx-from-gopro: unknown --mode "${opts.mode}" (use: ${Object.keys(MODES).join(", ")})\n\n${USAGE}`,
+  );
   process.exit(1);
 }
 const outExplicit = opts.out != null; // --organize only sweeps the .gpx along when this is false

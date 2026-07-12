@@ -163,8 +163,9 @@ test("liftBoardingEle: no confirmed-lift run anywhere -> no-op", () => {
 // either way, so the mechanism drops it rather than trying to infer what it "should" have been.
 function queueHeadTrack(boardEle) {
   const anchor = pt({ time: 0, x: 1000, y: 0, ele: 800, hs: 5 });
-  const queue = Array.from({ length: 5 }, (_, i) =>
-    pt({ time: (i + 1) * 10000, x: 50, y: 0, ele: 700 }), // ele is noise -- expected to be dropped
+  const queue = Array.from(
+    { length: 5 },
+    (_, i) => pt({ time: (i + 1) * 10000, x: 50, y: 0, ele: 700 }), // ele is noise -- expected to be dropped
   );
   const lift = Array.from({ length: 21 }, (_, i) =>
     pt({
@@ -293,7 +294,14 @@ test("liftBoardingEle: EXTREME skips any point liftSnap already reconstructed", 
 
 test("liftBoardingEle: EXTREME leaves a low-speed stretch alone when the elevation range stays plausible", () => {
   const out = Array.from({ length: 10 }, (_, i) =>
-    pt({ x: i * 0.5, y: 0, ele: 900 + i * 0.1, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+    pt({
+      x: i * 0.5,
+      y: 0,
+      ele: 900 + i * 0.1,
+      time: i * 1000,
+      hs: 0.3,
+      segment: { id: 1, type: "lift" },
+    }),
   );
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
@@ -301,7 +309,14 @@ test("liftBoardingEle: EXTREME leaves a low-speed stretch alone when the elevati
 
 test("liftBoardingEle: EXTREME leaves a real, faster climb alone even with a big elevation range", () => {
   const out = Array.from({ length: 10 }, (_, i) =>
-    pt({ x: i * 5, y: 0, ele: 900 + i * 2, time: i * 1000, hs: 5, segment: { id: 1, type: "lift" } }),
+    pt({
+      x: i * 5,
+      y: 0,
+      ele: 900 + i * 2,
+      time: i * 1000,
+      hs: 5,
+      segment: { id: 1, type: "lift" },
+    }),
   );
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
@@ -313,7 +328,14 @@ test("liftBoardingEle: EXTREME leaves a genuine steady climb at a real cable pac
   // at hs~1.6-1.7 over hundreds of points, ele range >100m) -- must never qualify, however large the
   // resulting elevation range is, however long the stretch runs.
   const out = Array.from({ length: 300 }, (_, i) =>
-    pt({ x: i * 1.5, y: 0, ele: 900 + i * 0.5, time: i * 1000, hs: 1.5, segment: { id: 1, type: "lift" } }),
+    pt({
+      x: i * 1.5,
+      y: 0,
+      ele: 900 + i * 0.5,
+      time: i * 1000,
+      hs: 1.5,
+      segment: { id: 1, type: "lift" },
+    }),
   );
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
@@ -325,7 +347,14 @@ test("liftBoardingEle: EXTREME's point-count safety cap limits how far one windo
   // each window's own span well under that, so no single capped window ever accumulates enough range
   // to trigger.
   const out = Array.from({ length: 30 }, (_, i) =>
-    pt({ x: 0, y: 0, ele: 900 + i * 0.4, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+    pt({
+      x: 0,
+      y: 0,
+      ele: 900 + i * 0.4,
+      time: i * 1000,
+      hs: 0.3,
+      segment: { id: 1, type: "lift" },
+    }),
   );
   finalize(out, { g: { LIFT_EXTREME_MAX_SPAN: 10 } });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
@@ -335,7 +364,14 @@ test("liftBoardingEle: EXTREME triggers on the same stretch when the span isn't 
   // same fixture as the safety-cap test above, but with the default MAX_SPAN(400) -- doesn't bind for
   // only 30 points, so the full run's own 11.6m range is free to accumulate in one window and trigger.
   const out = Array.from({ length: 30 }, (_, i) =>
-    pt({ x: 0, y: 0, ele: 900 + i * 0.4, time: i * 1000, hs: 0.3, segment: { id: 1, type: "lift" } }),
+    pt({
+      x: 0,
+      y: 0,
+      ele: 900 + i * 0.4,
+      time: i * 1000,
+      hs: 0.3,
+      segment: { id: 1, type: "lift" },
+    }),
   );
   finalize(out, { g: {} });
   assert.ok(out.every((p) => p.liftBoardingEle?.ele === null));
@@ -351,10 +387,22 @@ test("liftBoardingEle: EXTREME triggers on the same stretch when the span isn't 
 // REVERSAL alone.
 function ascentReversalTrack() {
   const climb = Array.from({ length: 5 }, (_, i) =>
-    pt({ ele: 900 + i, time: i * 1000, hs: 1.5, segment: { id: 1, type: "lift" }, liftConfirm: { type: "ascent" } }),
+    pt({
+      ele: 900 + i,
+      time: i * 1000,
+      hs: 1.5,
+      segment: { id: 1, type: "lift" },
+      liftConfirm: { type: "ascent" },
+    }),
   ); // idx 0-4: 900..904
   const peak = [
-    pt({ ele: 908, time: 5000, hs: 1.5, segment: { id: 1, type: "lift" }, liftConfirm: { type: "ascent" } }), // idx5
+    pt({
+      ele: 908,
+      time: 5000,
+      hs: 1.5,
+      segment: { id: 1, type: "lift" },
+      liftConfirm: { type: "ascent" },
+    }), // idx5
   ];
   const partialDrop = Array.from({ length: 5 }, (_, i) =>
     pt({
@@ -371,7 +419,8 @@ function ascentReversalTrack() {
 test("liftBoardingEle: ASCENT-REVERSAL drops a reversal that never returns to its own pre-peak level", () => {
   const out = ascentReversalTrack();
   finalize(out, { g: {} });
-  for (let i = 1; i <= 5; i++) assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `index ${i}`);
+  for (let i = 1; i <= 5; i++)
+    assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `index ${i}`);
   assert.equal(out[0].liftBoardingEle, undefined); // near anchor untouched
   assert.equal(out[6].liftBoardingEle, undefined); // far anchor (best recovery point) untouched
   for (let i = 7; i <= 10; i++) assert.equal(out[i].liftBoardingEle, undefined, `index ${i}`);
@@ -429,9 +478,11 @@ test("liftBoardingEle: ASCENT-REVERSAL scans every non-'lift' stretch independen
   const stretch2 = mk(920, 16); // idx 16-26
   const out = [...stretch1, ...bridge, ...stretch2];
   finalize(out, { g: {} });
-  for (let i = 1; i <= 5; i++) assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `stretch1 idx ${i}`);
+  for (let i = 1; i <= 5; i++)
+    assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `stretch1 idx ${i}`);
   for (let i = 11; i <= 15; i++) assert.equal(out[i].liftBoardingEle, undefined, `bridge idx ${i}`);
-  for (let i = 17; i <= 21; i++) assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `stretch2 idx ${i}`);
+  for (let i = 17; i <= 21; i++)
+    assert.deepEqual(out[i].liftBoardingEle, { ele: null }, `stretch2 idx ${i}`);
 });
 
 // --- position drop for confirmed-bad-GPS points (2026-07-09) ---

@@ -333,7 +333,8 @@ export function analyzedLayers(points, opts = {}) {
           }
           const startIdx = i;
           const id = kept[i].segment.id;
-          while (i < kept.length && kept[i].segment?.type === "lift" && kept[i].segment?.id === id) i++;
+          while (i < kept.length && kept[i].segment?.type === "lift" && kept[i].segment?.id === id)
+            i++;
           boundaries.push(kept[startIdx], kept[i - 1]);
         }
         return boundaries.map(flipY);

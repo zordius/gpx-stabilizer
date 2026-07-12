@@ -227,7 +227,11 @@ test("analyzedLayers: clean also breaks on a plain TIME gap between two kept poi
   }));
   const layers = analyzedLayers([...before, ...after], { stabilized: false });
   const clean = layers.find((l) => l.label === "clean");
-  assert.equal(clean.lines.length, 2, "a plain time gap between two kept points still breaks clean");
+  assert.equal(
+    clean.lines.length,
+    2,
+    "a plain time gap between two kept points still breaks clean",
+  );
 });
 
 test("analyzedLayers: clean track line + per-reason drop layers, unified red circles", () => {
@@ -309,7 +313,9 @@ function straightClimb(n = 10) {
 // several sibling `<path>` elements rather than one multi-"M" path, so collect ALL of them (joined)
 // — the "count the Ms" assertions below stay meaningful across either shape.
 function pathD(svg) {
-  return [...svg.matchAll(/<path d="([^"]+)" fill="none" stroke="#0a0"/g)].map((m) => m[1]).join(" ");
+  return [...svg.matchAll(/<path d="([^"]+)" fill="none" stroke="#0a0"/g)]
+    .map((m) => m[1])
+    .join(" ");
 }
 
 test("elevationChartSvg: draws one path over a normal, gapless track", () => {

@@ -105,7 +105,9 @@ export function stabilize(points, opts = {}) {
           ? p.liftBoardingEle.ele
           : segmentBoundaryEle && p.segmentBoundaryEle
             ? p.segmentBoundaryEle.ele
-            : (liftSnap ? p.liftSnap?.ele : null) ?? (gradeBound ? p.gradeBound?.ele : null) ?? p.ele,
+            : ((liftSnap ? p.liftSnap?.ele : null) ??
+              (gradeBound ? p.gradeBound?.ele : null) ??
+              p.ele),
       time: p.time,
     }));
 }
@@ -168,7 +170,9 @@ export function stabilizeTrack(track, opts = {}) {
   if (cur.length) bySourceBoundary.push(cur);
 
   const segments = resampleOpts
-    ? bySourceBoundary.flatMap((seg) => resample(seg, typeof resampleOpts === "object" ? resampleOpts : {}))
+    ? bySourceBoundary.flatMap((seg) =>
+        resample(seg, typeof resampleOpts === "object" ? resampleOpts : {}),
+      )
     : bySourceBoundary;
   return { segments, meta: track?.meta ?? {} };
 }
