@@ -116,9 +116,11 @@ test("liftBoardingEle: a dip below the minimum threshold is left alone", () => {
 
 test("liftBoardingEle: a weak recovery (doesn't clear the threshold) is left alone", () => {
   const out = headDipTrack();
-  // the POST_WINDOW search reaches into the following climb too, so the real recovery here is
-  // ~28m (900 -> 928) — a threshold safely above that must still skip the fix
-  finalize(out, { g: { LIFT_BOARD_RECOVER_M: 30 } });
+  // the search window spans this whole short fixture (lowSpeedBoundary: every point's hs is under
+  // HS_MAX, plus MARGIN), so the best reachable recovery is the track's own max: 934 - 900 = 34m
+  // (was ~28m under the pre-2f92a18 fixed POST_WINDOW) — a threshold safely above that must still
+  // skip the fix
+  finalize(out, { g: { LIFT_BOARD_RECOVER_M: 40 } });
   assert.ok(out.every((p) => p.liftBoardingEle === undefined));
 });
 

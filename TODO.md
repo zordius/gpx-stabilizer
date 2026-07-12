@@ -138,10 +138,13 @@ one place, not two).
 
 ## Known issues
 
-- **Failing test at HEAD (found 2026-07-11, not yet diagnosed)** — core's
-  `liftBoardingEle: a weak recovery (doesn't clear the threshold) is left alone` fails on a clean
-  tree at `afed088` (v0.5.0); every other core/gopro test passes. Found incidentally while adding a
-  viewer layer, unrelated to that change.
+- **~~Failing test at HEAD~~ — FIXED (2026-07-12, stale fixture, not a module bug).** core's
+  `liftBoardingEle: a weak recovery …` had been failing since `2f92a18` (2026-07-09, so v0.4.0 and
+  v0.5.0 both shipped with it red): that commit replaced the fixed `POST_WINDOW` recovery search
+  with `lowSpeedBoundary`+`MARGIN`, which spans the test's whole short fixture (every point's hs is
+  under `HS_MAX`), raising the best reachable recovery from ~28 m to 34 m — over the test's 30 m
+  "safely above" threshold. `LIFT_BOARD_RECOVER_M` itself was honored throughout; the test's
+  threshold is now 40 m (above the fixture's reachable 34 m), preserving its original intent.
 
 ## Known limitation (not addressed — deliberately skipped, 2026-07-06)
 
