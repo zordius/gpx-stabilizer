@@ -267,6 +267,25 @@ export function analyzedLayers(points, opts = {}) {
       ["drift", "stray", "outlier", "activity", "fixQuality"],
       "#960",
     ),
+    // liftStationDrop is a run-level decision like badspan (drops whole short noisy runs at lift
+    // boarding/unloading stations — ski mode only, empty otherwise), so its own colour, not the
+    // direct-drop red. Lower priority than everything above so a point with a direct reason still
+    // shows that.
+    dropLayer(
+      "lift-station drop (run)",
+      "liftStationDrop",
+      ["drift", "stray", "outlier", "activity", "fixQuality", "badspan"],
+      "#c06",
+    ),
+    // isolatedDrop is also a run-level decision (a whole short, confined, gap-bounded "segment" —
+    // chip/mode-agnostic; see that module's doc) — its own colour, lowest priority of the run-level
+    // drops so liftStationDrop's own reason still shows on a point both would have caught.
+    dropLayer(
+      "isolated drop (run)",
+      "isolatedDrop",
+      ["drift", "stray", "outlier", "activity", "fixQuality", "badspan", "liftStationDrop"],
+      "#909",
+    ),
     // despike is detection-only now (a SIGNAL, not a drop) — teal OVERLAY on every despike-flagged
     // point (kept unless its region was dense enough for badspan to glue it). It feeds the bad-span
     // density; on its own it never drops a point. (Toggle it against badspan to see what got glued.)

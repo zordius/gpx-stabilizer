@@ -10,9 +10,11 @@
 
 import { validateModule } from "./mods/index.js";
 import * as kink from "./mods/kink.js";
+import * as isolatedDrop from "./mods/isolatedDrop.js";
 import * as liftBoardingEle from "./mods/liftBoardingEle.js";
 import * as liftConfirm from "./mods/liftConfirm.js";
 import * as liftSnap from "./mods/liftSnap.js";
+import * as liftStationDrop from "./mods/liftStationDrop.js";
 import * as noise from "./mods/noise.js";
 import * as segment from "./mods/segment.js";
 import * as segmentBoundaryEle from "./mods/segmentBoundaryEle.js";
@@ -38,8 +40,10 @@ function getModuleRegistry() {
       liftConfirm: validateModule("liftConfirm", liftConfirm),
       liftSnap: validateModule("liftSnap", liftSnap),
       liftBoardingEle: validateModule("liftBoardingEle", liftBoardingEle),
+      liftStationDrop: validateModule("liftStationDrop", liftStationDrop),
       segmentBoundaryEle: validateModule("segmentBoundaryEle", segmentBoundaryEle),
       tangleSnap: validateModule("tangleSnap", tangleSnap),
+      isolatedDrop: validateModule("isolatedDrop", isolatedDrop),
       noise: validateModule("noise", noise),
     };
   }
@@ -91,6 +95,17 @@ export const MODES = {
     // `point.liftSnap` before liftSnap's finalize has run would always see it absent, silently
     // disabling that deference). Listed right after `liftSnap`, ahead of `liftBoardingEle` — the two
     // don't read each other's output, so their relative order doesn't matter.
+    // `liftStationDrop` (2026-07-12) drops whole short noisy runs at lift boarding/unloading
+    // stations (rule C of gpx_eval/liftadj_noise_scan.mjs — see that module's doc). Listed after
+    // `segmentBoundaryEle`/`liftBoardingEle` (it reads their namespaced ele-drop fields for its
+    // eleFrac arm) and before `tangleSnap` (a dropped run needs no repositioning; finalize is
+    // sequential, so tangleSnap already skips the points this drops).
+    // `isolatedDrop` (2026-07-13) is chip/mode-agnostic (reads only time/x/y — see that module's
+    // doc) but bundled here anyway, same rationale as `tangleSnap`: ski mode is currently the only
+    // mode doing this kind of general post-hoc cleanup, so it rides along; a non-ski caller can
+    // still `loadModule("isolatedDrop")` manually. Listed LAST among the drop-deciding modules (after
+    // `liftStationDrop`) so its own gap/duration/net read is against the fully-settled kept set —
+    // every earlier module's drops already count toward its gaps.
     enable: [
       "kink",
       "segment",
@@ -98,7 +113,9 @@ export const MODES = {
       "liftSnap",
       "segmentBoundaryEle",
       "liftBoardingEle",
+      "liftStationDrop",
       "tangleSnap",
+      "isolatedDrop",
       "noise",
     ],
   },

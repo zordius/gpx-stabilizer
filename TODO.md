@@ -8,6 +8,12 @@ one place, not two).
 
 ## Shipped
 
+- **`liftStationDrop` — drop short noisy runs at lift boarding/unloading stations (2026-07-12)** —
+  a non-`lift` run adjacent to a `lift` run, under 90 s, net displacement < 50 m, and either
+  wandering (path/net > 2.5) or ≥50 % ele-dropped, is dropped whole. Corpus-grounded (rule C of
+  `gpx_eval/liftadj_noise_scan.mjs`; matches recur at identical coordinates across days — fixed
+  stations); 32 runs / ~37 min across the 42-file test corpus. Ski mode only, `g.LIFT_STATION_*`
+  overridable. Detail: [`SPEC.md`](SPEC.md) ("Lift-station noise runs").
 - **Ski-mode lift machinery — `liftConfirm` / `liftSnap` / `liftBoardingEle` / `segmentBoundaryEle` /
   `tangleSnap` / `noise` (2026-07-08…10, v0.4.0/v0.5.0)** — `segment`'s coarse `lift` candidates are
   now confirmed against cable-line physics (`liftConfirm`, the prototype rule-cascade port:

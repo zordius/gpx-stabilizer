@@ -846,6 +846,17 @@ lift/descent/flat. `segment` runs **before** any per-activity output-smoothing a
 negative result (below). This is the core-side half of the stage-2 coarse split
 ([`docs/core-ski-split.md`](docs/core-ski-split.md)).
 
+**Lift-station noise runs — dropped (`mods/liftStationDrop.js`, 2026-07-12).** A short non-`lift`
+run directly adjacent to a `lift` run, going nowhere (net < 50 m), and either wandering in place
+(path/net > 2.5) or already mostly ele-dropped by `liftBoardingEle`/`segmentBoundaryEle`
+(eleFrac ≥ 0.5) is boarding/unloading-area position noise — dropped whole (a quality drop, ski mode
+only). Grounded in a 42-file corpus scan (`gpx_eval/segdur_scan.mjs` / `segdur_isolated.mjs` /
+`liftadj_noise_scan.mjs`): post-merge station junk lives in the 60–90 s band (sub-60 s survivors are
+heading-break-protected real descents — hence the 90 s cap, not 60), and the matches recur at the
+same coordinates across different days' files (fixed physical stations). 32 runs / ~37 min dropped
+across the corpus (~0.76/file); thresholds are that corpus's exploratory values, overridable via
+`g.LIFT_STATION_*`. Detail: the module's own doc.
+
 **Prior art for the follow-ons above — the old Python prototype's lift logic (reviewed 2026-07-07).**
 A pre-rewrite script (`gpx_stabilize.py`, a monolith kept outside this repo — see "Reference" at the
 bottom of this doc; not diffed line-for-line against the `old_ski_v1` branch, so treat as the same
