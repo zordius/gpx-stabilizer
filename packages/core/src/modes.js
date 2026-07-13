@@ -9,8 +9,8 @@
 // Future ski work (reconstruction, stage-2 activity) extends MODES.ski — still one place.
 
 import { validateModule } from "./mods/index.js";
-import * as kink from "./mods/kink.js";
 import * as isolatedDrop from "./mods/isolatedDrop.js";
+import * as kink from "./mods/kink.js";
 import * as liftBoardingEle from "./mods/liftBoardingEle.js";
 import * as liftConfirm from "./mods/liftConfirm.js";
 import * as liftSnap from "./mods/liftSnap.js";

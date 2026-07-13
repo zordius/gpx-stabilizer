@@ -857,6 +857,31 @@ same coordinates across different days' files (fixed physical stations). 32 runs
 across the corpus (~0.76/file); thresholds are that corpus's exploratory values, overridable via
 `g.LIFT_STATION_*`. Detail: the module's own doc.
 
+**Isolated output-gap segments — dropped (`mods/isolatedDrop.js`, 2026-07-13).** A second, unrelated
+run-drop, chip- and mode-agnostic by construction (reads only `time`/`x`/`y`/`dropReason` — no
+`hdop`/`fix`/`segment.type`/`activity`). Redefines "segment" purely from the OUTPUT's own time gaps
+(a break wherever two consecutive kept points are more than `g.ISOLATED_GAP_S` apart, default 3 s —
+matching movie-layers' own gps-channel `maxGap`, the threshold at which its lat/lon widget
+freezes/shows "no signal"), independent of `segment.js`'s vspeed-sign classification. A run under
+this new definition is dropped whole when BOTH its own duration is under `g.ISOLATED_MAX_S` (5 s)
+and its head-to-tail net displacement is under `g.ISOLATED_MAX_NET_M` (10 m) — a brief,
+near-stationary scrap sandwiched between two gaps (or sitting at the track's own start/end, just as
+much an edge as a real gap). Bundled into `MODES.ski` for the same reason as `tangleSnap` — general-
+purpose but untuned thresholds, so opt-in via ski mode or a manual `loadModule("isolatedDrop")`,
+not a core builtin. Listed LAST among ski mode's drop-deciding modules (after `liftStationDrop`) so
+its own gap/duration/net read is against the fully-settled kept set.
+
+**Corpus impact varies sharply by source — flagged, not yet reconciled (2026-07-13).** On the real
+z/139 GoPro ski session (7-chapter, 80 min): 22 runs / 95 points dropped — modest. On the
+`~/zrepos/gpx-test` 42-file FitoTrack (walking/hiking) corpus: **8,894 runs / 13,298 points — 4.04 %
+of that corpus's kept points**, averaging ~1.5 points/run (almost all single/double-point boundary
+scraps). Read as an artifact of source character, not a module bug: `drift` is that corpus's
+dominant garbage source (~92 % of drops per the corpus finding above), and walking/hiking tracks
+carry far more frequent brief-stop/GPS-jitter quality-drop clusters than a ski GoPro session, each
+leaving tiny surviving islands at its boundary. Still, 4 % of kept points is a meaningful bulk
+removal, not tail cleanup — **the default thresholds are not yet validated as right for a
+drift-heavy source**; revisit before treating this module as done for non-ski/non-GoPro use.
+
 **Prior art for the follow-ons above — the old Python prototype's lift logic (reviewed 2026-07-07).**
 A pre-rewrite script (`gpx_stabilize.py`, a monolith kept outside this repo — see "Reference" at the
 bottom of this doc; not diffed line-for-line against the `old_ski_v1` branch, so treat as the same

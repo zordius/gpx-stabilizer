@@ -8,6 +8,17 @@ one place, not two).
 
 ## Shipped
 
+- **`isolatedDrop` — drop isolated, gap-bounded output segments (2026-07-13)** — chip/mode-agnostic
+  (reads only `time`/`x`/`y`/`dropReason`): redefines "segment" purely by a >3 s gap between
+  consecutive kept output points (`g.ISOLATED_GAP_S`, matching movie-layers' own gps-channel
+  `maxGap`/widget-freeze default), then drops a run whole when its own duration is under 5 s
+  (`g.ISOLATED_MAX_S`) AND its head-to-tail net displacement is under 10 m (`g.ISOLATED_MAX_NET_M`).
+  Bundled into ski mode (same `tangleSnap` rationale — general-purpose but untuned, opt-in rather
+  than a core builtin). **Corpus impact is source-dependent, flagged not yet reconciled**: modest on
+  a real GoPro ski session (22 runs / 95 pts across an 80 min recording) but **4.04 % of kept points**
+  on the 42-file FitoTrack test corpus (8,894 runs, mostly single/double-point boundary scraps around
+  `drift` clusters — that corpus's dominant garbage source). Detail:
+  [`SPEC.md`](SPEC.md) ("Isolated output-gap segments" + the corpus-impact note right after it).
 - **`liftStationDrop` — drop short noisy runs at lift boarding/unloading stations (2026-07-12)** —
   a non-`lift` run adjacent to a `lift` run, under 90 s, net displacement < 50 m, and either
   wandering (path/net > 2.5) or ≥50 % ele-dropped, is dropped whole. Corpus-grounded (rule C of

@@ -19,7 +19,10 @@ function pts(specs) {
 }
 
 function droppedRanges(out) {
-  const idxs = out.reduce((acc, p, i) => (p.dropReason?.isolatedDrop ? [...acc, i] : acc), []);
+  const idxs = [];
+  out.forEach((p, i) => {
+    if (p.dropReason?.isolatedDrop) idxs.push(i);
+  });
   return idxs;
 }
 
