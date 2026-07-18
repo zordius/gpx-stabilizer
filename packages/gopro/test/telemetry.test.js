@@ -115,6 +115,24 @@ test("regressStartUtc: null for too few points, too short a span, or missing cts
   assert.equal(regressStartUtc(lineFixes().map((p) => ({ ...p, cts: null }))), null); // no cts
 });
 
+test("regressStartUtc: trusts a time~cts fit even with fix:'none' (chip synced UTC before a real fix)", () => {
+  const unlocked = lineFixes().map((p) => ({ ...p, fix: "none" }));
+  const reg = regressStartUtc(unlocked);
+  assert.equal(reg.startUtc, BASE);
+  assert.ok(Math.abs(reg.slope - 1) < 1e-6);
+  assert.equal(reg.n, 10);
+});
+
+test("regressStartUtc: still drops the null-island sentinel regardless of fix", () => {
+  const withSentinels = [
+    ...lineFixes().map((p) => ({ ...p, fix: "none", lat: 0, lon: 0, time: 0 })), // pre-sync junk
+    ...lineFixes().map((p) => ({ ...p, fix: "none" })),
+  ];
+  const reg = regressStartUtc(withSentinels);
+  assert.equal(reg.startUtc, BASE);
+  assert.equal(reg.n, 10); // the (0,0) sentinels never entered the fit
+});
+
 test("resolveStartUtc: verified true-start when slope ≈ 1, else first-fix fallback", () => {
   assert.deepEqual(resolveStartUtc(lineFixes()), {
     startUtc: BASE,

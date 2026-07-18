@@ -69,21 +69,37 @@ const MIN_REG_SPAN_MS = 5000; // <5 s of media offset → extrapolating to 0 is 
 const SLOPE_TOL = 0.05; // |slope−1| must be within this (UTC ms vs media ms ⇒ ≈1)
 
 /**
- * True recording-start instant (UTC) by **linear regression** of each good-fix
- * sample's UTC `time` against its media offset `cts`: `time ≈ intercept +
- * slope·cts`. The recording starts at `cts = 0`, so the intercept is the
- * wall-clock instant of the first video frame — *before* GPS lock, recovering the
- * pre-lock delay that the first-good-fix anchor ignores. `slope` should be ≈ 1
- * (both axes are milliseconds); a slope far from 1 means the GPS UTC and media
- * clocks disagree, so the extrapolation is not trustworthy.
+ * True recording-start instant (UTC) by **linear regression** of each sample's
+ * UTC `time` against its media offset `cts`: `time ≈ intercept + slope·cts`. The
+ * recording starts at `cts = 0`, so the intercept is the wall-clock instant of
+ * the first video frame — *before* GPS lock, recovering the pre-lock delay that
+ * the first-good-fix anchor ignores. `slope` should be ≈ 1 (both axes are
+ * milliseconds); a slope far from 1 means the GPS UTC and media clocks disagree,
+ * so the extrapolation is not trustworthy.
  *
- * @param {import("gpx-stabilizer").TrackPoint[]} points  raw points (need `cts` + `time` + `fix`)
+ * Deliberately **not** gated on `fix` (unlike {@link firstGoodFix}): some chips
+ * (observed on a HERO10) sync UTC `time` well before ever reporting a `2d`/`3d`
+ * fix, so a `time`+`cts` pair can already be trustworthy while `fix` stays
+ * `"none"` for the whole clip — the slope-≈1 check below is what actually
+ * verifies trust, not the fix label. Only a non-finite/null-island `lat`/`lon`
+ * is excluded, since that's this format's own sentinel for "no sample yet" (an
+ * unsynced point's `time` is a firmware boot-time constant, not real UTC, and
+ * would corrupt the fit) — position accuracy itself is irrelevant here, `lat`/
+ * `lon` are used only to detect that sentinel.
+ *
+ * @param {import("gpx-stabilizer").TrackPoint[]} points  raw points (need `cts` + `time` + `lat`/`lon`)
  * @returns {{ startUtc: number, slope: number, n: number } | null}  null when too
  *   few points, too short a media span, or `cts` is unavailable
  */
 export function regressStartUtc(points) {
   const pts = (points ?? []).filter(
-    (p) => p && (p.fix === "3d" || p.fix === "2d") && isFiniteNum(p.time) && isFiniteNum(p.cts),
+    (p) =>
+      p &&
+      isFiniteNum(p.time) &&
+      isFiniteNum(p.cts) &&
+      isFiniteNum(p.lat) &&
+      isFiniteNum(p.lon) &&
+      !(p.lat === 0 && p.lon === 0),
   );
   const n = pts.length;
   if (n < MIN_REG_POINTS) return null;
