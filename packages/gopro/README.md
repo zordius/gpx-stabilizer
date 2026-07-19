@@ -20,7 +20,7 @@ No install needed:
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-                                  [--organize DIR] [--yes] [--mode core|ski]
+                                  [--organize DIR] [--yes] [--mode core|ski] [--no-gpx]
                                   [--html] [--png [--width N] [--height N]]
 ```
 
@@ -34,7 +34,9 @@ split for restarts/dropouts). A per-file extraction cache (keyed by size+mtime+r
 run resume without re-extracting. `--rate HZ` downsamples from the native ~18 Hz; `--tz HOURS`
 overrides the longitude-guessed local date. `--mode core|ski` runs each session through
 [`gpx-stabilizer`](https://www.npmjs.com/package/gpx-stabilizer)'s `stabilizeTrack` before writing
-(omit for the raw extraction).
+(omit for the raw extraction). `--no-gpx` skips writing the merged `.gpx` entirely — extraction,
+caching, and (with `--organize`) reorganizing the source videos still happen normally; `--html`/
+`--png` are unaffected either way (both render from the raw extracted points, not the `.gpx` file).
 
 ### `--organize DIR` — reorganize the source videos to match the GPX
 

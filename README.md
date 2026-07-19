@@ -121,13 +121,14 @@ never load whole into RAM.
 
 ```sh
 npx gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-                                  [--organize DIR] [--yes] [--mode core|ski]
+                                  [--organize DIR] [--yes] [--mode core|ski] [--no-gpx]
                                   [--html] [--png [--width N] [--height N]]
 ```
 
 Once installed (`npm install [-g] gpx-from-gopro`), drop the `npx` prefix and just run
 `gpx-from-gopro ...`. `--mode core|ski` runs each session through core's `stabilizeTrack` before
-writing (omit for the raw extraction).
+writing (omit for the raw extraction). `--no-gpx` skips writing the merged `.gpx` entirely
+(extraction/caching/`--organize` still happen normally).
 
 Recurses directories for video files, groups by camera body (serial, falling back to filename
 family) + local date, and writes one merged `<YYYYMMDD>-<family>.gpx` per group — within it, points

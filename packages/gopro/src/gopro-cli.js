@@ -1,8 +1,14 @@
 #!/usr/bin/env node
 // gpx-from-gopro — extract GoPro GPS into merged GPX, one file per camera per local date.
 //   gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ] [--cache-dir DIR | --no-cache]
-//                                [--organize DIR] [--yes] [--mode core|ski]
+//                                [--organize DIR] [--yes] [--mode core|ski] [--no-gpx]
 //                                [--html] [--png [--width N] [--height N]]
+//
+// - --no-gpx: extract + cache (and, with --organize, reorganize) as normal, but skip writing the
+//   merged .gpx to disk. `--organize`'s own gpx-move step already no-ops cleanly when the source
+//   .gpx was never written (organize.js's executeMove checks existsSync(g.from) first), so the two
+//   flags combine with no special-casing needed. --html/--png are unaffected either way — both
+//   render straight from the RAW extracted points (see below), never from the written .gpx file.
 //
 // - --mode core|ski: runs the merged points through gpx-stabilizer's own `stabilizeTrack` (per
 //   recording session — see the `--out` loop below) before writing, instead of shipping today's
@@ -69,10 +75,10 @@ const WITH_VALUE = new Set([
   "height",
   "mode",
 ]);
-const KNOWN_BOOL = new Set(["no-cache", "html", "png", "yes"]);
+const KNOWN_BOOL = new Set(["no-cache", "html", "png", "yes", "no-gpx"]);
 const USAGE =
   "usage: gpx-from-gopro <dir|file.mp4> [...] [--out DIR] [--tz HOURS] [--rate HZ]" +
-  " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes] [--mode core|ski]" +
+  " [--cache-dir DIR | --no-cache] [--organize DIR] [--yes] [--mode core|ski] [--no-gpx]" +
   " [--html] [--png [--width N] [--height N]]";
 const inputs = [];
 const opts = {};
@@ -250,15 +256,20 @@ for (const g of groups) {
       type: null,
     },
   };
-  const path = join(outDir, `${g.name}.gpx`);
-  saveGpx(track, path, { creator: "gpx-from-gopro" });
   const npts = tracks.reduce((s, t) => s + t.segments.reduce((s2, seg) => s2 + seg.length, 0), 0);
   const nseg = tracks.reduce((s, t) => s + t.segments.length, 0);
-  written.push(`${g.name}.gpx (${npts} pts, ${tracks.length} trk, ${nseg} seg)`);
+  const stats = `${npts} pts, ${tracks.length} trk, ${nseg} seg`;
+  if (opts["no-gpx"]) {
+    written.push(`[skipped] ${g.name}: gpx not written (--no-gpx), ${stats}`);
+  } else {
+    const path = join(outDir, `${g.name}.gpx`);
+    saveGpx(track, path, { creator: "gpx-from-gopro" });
+    written.push(`${path} (${stats})`);
+  }
 }
 
 console.log(`\ndone. processed=${ok} skipped=${skipped} failed=${failed}`);
-for (const w of written) console.log(`  -> ${join(outDir, w)}`);
+for (const w of written) console.log(`  -> ${w}`);
 
 // ---- --html / --png: eval visualization of each group's merged track, additive to the .gpx above ----
 // (analyzedLayers/analyzedSvg run core's noise-removal pipeline over the flattened group, under the
@@ -307,7 +318,8 @@ async function promptLine(question) {
 }
 
 if (opts.organize) {
-  const includeGpx = !outExplicit; // --out was explicit -> leave the .gpx where the user put it
+  // --out explicit -> leave the .gpx where the user put it; --no-gpx -> there is no .gpx at all
+  const includeGpx = !outExplicit && !opts["no-gpx"];
   const plan = planMove(entries, { root: opts.organize, outDir, includeGpx });
   if (plan.files.length === 0) {
     console.log("\n--organize: nothing to move (no successfully-extracted videos).");

@@ -45,3 +45,11 @@ test("gopro-cli: an unknown --mode value exits with an error listing the real mo
   assert.match(res.stderr, /unknown --mode "nope"/);
   assert.match(res.stderr, /core, ski/);
 });
+
+test("gopro-cli: --no-gpx is a recognized boolean flag (skips writing the merged .gpx)", () => {
+  // same shape as the --mode recognition test above: a valid flag must not be rejected as unknown
+  // -- it fails later, same as any other run against a nonexistent file.
+  const res = run(["--no-gpx", "no-such-file.mp4"]);
+  assert.doesNotMatch(res.stderr, /unknown option --no-gpx/);
+  assert.match(res.stderr, /no video files found/);
+});
