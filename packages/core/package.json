@@ -1,6 +1,6 @@
 {
   "name": "gpx-stabilizer",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "Clean GPS noise/outliers out of a GPX recording — zero runtime dependencies, a pluggable module pipeline with core/ski modes.",
   "keywords": [
     "gpx",
