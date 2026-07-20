@@ -116,6 +116,12 @@ function parseHighlights(buf) {
  * @property {string | null} model     camera model from the firmware (e.g. "HERO5"), or null
  * @property {string | null} serial    camera serial (udta `CAME`, hex) — tells two same-model bodies apart
  * @property {string | null} mediaId   global media id (udta `GUMI`, hex) — links a recording's chapter files
+ * @property {number | null} createdUtc  container creation time (moov `mvhd.creation_time`),
+ *   epoch ms, or null if mp4box didn't report one. Camera-written at record time, so — unlike
+ *   file mtime — unaffected by a later copy/move; still the camera's own clock (may be off by
+ *   a fixed local-vs-UTC labelling error, but never off by YEARS the way an unsynced GPS
+ *   chip's firmware boot-time constant can be). Used as `regressStartUtc`'s disambiguating
+ *   reference (telemetry.js).
  * @property {number[]} highlights     user highlight-tag offsets in ms (udta `HMMT`); [] if none
  */
 
@@ -177,6 +183,7 @@ export async function probeGoproMeta(path) {
       model: goproModel(firmware),
       serial: came ? came.toString("hex") : null,
       mediaId: gumi ? gumi.toString("hex") : null,
+      createdUtc: info?.created instanceof Date ? info.created.getTime() : null,
       highlights: parseHighlights(readUdtaRaw(moov, "HMMT")),
     };
   } finally {

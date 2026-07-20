@@ -133,6 +133,67 @@ test("regressStartUtc: still drops the null-island sentinel regardless of fix", 
   assert.equal(reg.n, 10); // the (0,0) sentinels never entered the fit
 });
 
+test("regressStartUtc: robust fit drops a contaminated PRE-SYNC PREFIX, position never resolved at all", () => {
+  // mirrors a real HERO10 clip: every single sample stuck at (0,0)/fix:'none' the
+  // whole way through — position never resolves — but a contiguous prefix carries
+  // a firmware boot-time constant (unrelated to cts) ahead of a clean slope-1 run
+  // once the chip's UTC sync kicks in. A position-based filter (the previous
+  // approach) would discard ALL of these points, missing the valid clock entirely.
+  const junk = [];
+  for (let c = 0; c < 1500; c += 100) {
+    junk.push(pt({ fix: "none", lat: 0, lon: 0, time: 1_615_075_203_300 + c * 2.67, cts: c }));
+  }
+  const synced = [];
+  for (let c = 1500; c <= 10_000; c += 100) {
+    synced.push(pt({ fix: "none", lat: 0, lon: 0, time: BASE + c, cts: c }));
+  }
+  const reg = regressStartUtc([...junk, ...synced]);
+  assert.equal(reg.startUtc, BASE);
+  assert.ok(Math.abs(reg.slope - 1) < 1e-6);
+  assert.equal(reg.n, synced.length); // every junk sample excluded, every synced sample kept
+});
+
+test("regressStartUtc: WITHOUT a referenceUtc, a MAJORITY junk cluster can win — its own slope is also ≈1", () => {
+  // the junk isn't always scattered noise or a small prefix: mirrors a real clip
+  // where 80% of samples are an internally-consistent-but-WRONG cluster (a
+  // free-running clock ticking at ~1x, just never corrected to true UTC) and only
+  // 20% are the real, correct cluster. Theil-Sen's median has no way to prefer the
+  // correct cluster over the bigger one without an outside anchor — this documents
+  // that limitation rather than asserting a specific (wrong) answer.
+  const WRONG_BASE = 1_615_075_203_300; // the same firmware constant seen on real HERO10 clips
+  const majorityWrong = [];
+  for (let c = 0; c < 8000; c += 100) majorityWrong.push(pt({ fix: "none", time: WRONG_BASE + c, cts: c }));
+  const minorityRight = [];
+  for (let c = 8000; c <= 10_000; c += 100) minorityRight.push(pt({ fix: "none", time: BASE + c, cts: c }));
+  const reg = regressStartUtc([...majorityWrong, ...minorityRight]);
+  assert.ok(reg); // a fit is found — just not necessarily the right one, which is the point
+  assert.ok(Math.abs(reg.slope - 1) < 1e-3); // both clusters are independently slope-≈1
+  assert.notEqual(reg.startUtc, BASE); // the majority (wrong) cluster wins the tie unresolved
+});
+
+test("regressStartUtc: referenceUtc breaks the majority/minority tie in favor of the plausible cluster", () => {
+  const WRONG_BASE = 1_615_075_203_300;
+  const majorityWrong = [];
+  for (let c = 0; c < 7000; c += 50) majorityWrong.push(pt({ fix: "none", time: WRONG_BASE + c, cts: c }));
+  const minorityRight = [];
+  for (let c = 7000; c <= 14_000; c += 200) minorityRight.push(pt({ fix: "none", time: BASE + c, cts: c }));
+  assert.ok(majorityWrong.length > minorityRight.length); // still the smaller cluster by count
+  // WRONG_BASE is a multi-year outlier relative to this reference, well outside the
+  // ±30-day window, regardless of which cluster has more points.
+  const reg = regressStartUtc([...majorityWrong, ...minorityRight], { referenceUtc: BASE + 5000 });
+  assert.equal(reg.startUtc, BASE);
+  assert.equal(reg.n, minorityRight.length);
+});
+
+test("regressStartUtc: a genuinely random/inconsistent time~cts relationship still fails to verify", () => {
+  // sanity check that dropping the fix/position gates didn't also drop the actual
+  // safety net: unrelated time values (no real cts correlation at all) must not
+  // spuriously pass as a robust fit.
+  const noisy = lineFixes().map((p, i) => ({ ...p, fix: "none", time: BASE + (i % 2 === 0 ? 1 : -1) * 50_000 }));
+  const reg = regressStartUtc(noisy);
+  if (reg) assert.ok(Math.abs(reg.slope - 1) > 0.05);
+});
+
 test("resolveStartUtc: verified true-start when slope ≈ 1, else first-fix fallback", () => {
   assert.deepEqual(resolveStartUtc(lineFixes()), {
     startUtc: BASE,
